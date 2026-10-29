@@ -15,6 +15,7 @@ import { ensureGear, playerStats } from '../data/equipment';
 import { JOB_BY_ID } from '../data/jobs';
 import { GuardShift, LOBBY_PATH, type ShiftEnd } from './guardJob';
 import { unitPlace, villaFloor } from './villa';
+import { roadSolids, stopLines, vehicleLight, type Light, type Rect as RoadRect } from './traffic';
 
 export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor';
 
@@ -62,7 +63,7 @@ export const HOME = {
     { id: 'fridge', kind: 'home', label: '냉장고', x: -3.8, z: 0.0, radius: 1.0 },
     { id: 'sofa', kind: 'home', label: '소파', x: 3.4, z: 2.4, radius: 1.0 },
     { id: 'calendar', kind: 'home', label: '달력 (근무 기록 보기)', x: -3.3, z: -3.0, radius: 0.9 },
-    { id: 'window', kind: 'home', label: '창문 (열기 / 닫기)', x: 1.05, z: -3.0, radius: 0.75 },
+    { id: 'window', kind: 'home', label: '창문 (열고 밖 보기)', x: 1.05, z: -3.0, radius: 0.75 },
   ] as Poi[],
   /** 북쪽 벽 달력 (주방과 책상 사이) */
   calendar: { x: -3.3, y: 1.6, z: -3.91 },
@@ -166,6 +167,10 @@ export interface Car {
   /** 도로를 벗어나면 되돌아갈 구간 */
   from: number;
   to: number;
+  /** 지금 속도 (신호·앞차·사람 앞에서 줄어든다). speed = 평소 속도 */
+  v: number;
+  /** 이 차로의 정지선들 (진행 방향 좌표) */
+  stops: number[];
 }
 
 export interface Npc {
@@ -360,6 +365,11 @@ export class CityWorld {
   casinoRequest = false;
   /** 엘리베이터 안: 층 고르는 창이 열려 있다 (플레이어는 멈춘다) */
   elevatorOpen = false;
+  /** 열린 창문으로 밖을 내다보는 중 (방향키로 둘러본다, E·Esc 로 돌아온다) */
+  lookingOut = false;
+  /** 내다보는 방향: 좌우(라디안, +왼쪽) · 위아래(+위) */
+  lookYaw = 0;
+  lookPitch = -0.18;
   /** 자동 행동 (배고픔·피로가 한계인데 방치하면): 남은 단계와 들고 있는 음식 */
   care: { why: 'eat' | 'sleep'; steps: CareStep[]; carry: FridgeFood[]; started: boolean } | null = null;
   private hungerFullFrames = 0;
@@ -400,6 +410,8 @@ export class CityWorld {
     return this.lifeTracker.hungerRate;
   }
   private nav: CityNav | null = null;
+  /** 걸어서 못 들어가는 차도 (횡단보도만 뚫려 있다) */
+  private roadRects: RoadRect[] = [];
   /** 잠자는 중 (침대로 걸어감 → 눕기 → 밤이 흐름 → 일어나기). 그동안 조작 불가 */
   sleep: { phase: SleepPhase; at: number; wp: number; total: number; done: number; f0: number; h0: number; hp0: number } | null = null;
   /** 지도 클릭 자동 이동 */
@@ -421,6 +433,7 @@ export class CityWorld {
   ) {
     this.rng = mulberry32(seed);
     this.map = buildCityMap();
+    this.roadRects = roadSolids(this.map);
     // 체력은 레벨에 따라 오르고, 도시에서 남은 체력은 프로필에 이어진다
     // 길거리에선 철권식 자동 가드가 없다: 피하거나 먼저 때려야 한다
     ensureGear(profile);
@@ -500,7 +513,10 @@ export class CityWorld {
     }
     p.snapshot();
     const sleeping = this.sleep !== null;
-    const inp: CityInput = this.dialog || this.npcChat || this.elevatorOpen || sleeping ? { move: null, run: false, interact: false } : { ...this.input.read(this) };
+    // 내다보는 동안의 키 입력(돌아오기 E 포함)은 이 프레임에 다 쓴다
+    const looking = this.lookingOut;
+    if (looking) this.stepLookOut();
+    const inp: CityInput = this.dialog || this.npcChat || this.elevatorOpen || looking || sleeping ? { move: null, run: false, interact: false } : { ...this.input.read(this) };
     if (!sleeping && this.downedAt === null) this.stepCare(inp);
     if (sleeping) this.stepSleep(inp);
     else this.followAutopilot(inp);
@@ -541,7 +557,7 @@ export class CityWorld {
     if (!frozen) this.hitRemotes();
 
     this.regenHp(inp);
-    this.nearby = sleeping || this.doorway ? null : this.findNearby();
+    this.nearby = sleeping || this.doorway || this.lookingOut ? null : this.findNearby();
     if (inp.interact && !sleeping && this.job?.tryInteract()) {
       // 출입 확인 처리됨
     } else if (inp.interact && this.nearby) this.interact(this.nearby);
@@ -1362,7 +1378,7 @@ export class CityWorld {
     const p = this.player;
     if (this.location === 'lobby') {
       const st = LOBBY.stairs;
-      if (p.x > st.x0 && p.z < st.z1 - 1.4) this.goFloor(2, 'up');
+      if (p.x > st.x0 && p.z < st.z0 + 0.55) this.goFloor(2, 'up');
     } else if (this.location === 'corridor' && p.x < CORRIDOR.stairs.trigger) {
       if (p.z > 0) this.goFloor(this.floor - 1, 'down');
       else if (this.floor < this.villaFloors) this.goFloor(this.floor + 1, 'up');
@@ -1410,6 +1426,33 @@ export class CityWorld {
 
   closeElevator() {
     this.elevatorOpen = false;
+  }
+
+  /** 창밖 내다보기: 방향키로 둘러보고, E 를 누르면 방 안으로 돌아온다 */
+  private stepLookOut() {
+    if (this.location !== 'home' || !this.homeWindowOpen) {
+      this.lookingOut = false;
+      return;
+    }
+    const raw = this.input.read(this);
+    if (raw.interact) {
+      this.stopLookOut();
+      return;
+    }
+    const m = raw.move;
+    if (m) {
+      this.lookYaw = Math.max(-1.0, Math.min(1.0, this.lookYaw - m.x * 0.025));
+      this.lookPitch = Math.max(-0.75, Math.min(0.35, this.lookPitch - m.z * 0.018));
+    }
+  }
+
+  /** @param close 창문도 닫고 돌아온다 */
+  stopLookOut(close = false) {
+    this.lookingOut = false;
+    if (close) {
+      this.homeWindowOpen = false;
+      this.say('창문을 닫았다');
+    }
   }
 
   /** 복도의 막힌 곳: 두 계단 사이 벽, 꼭대기 층은 올라가는 계단(옥상)이 막혀 있다 */
@@ -1668,8 +1711,15 @@ export class CityWorld {
         this.doorway = { kind: 'exit', stage: 0, at: this.frame };
         return;
       case 'window':
-        this.homeWindowOpen = !this.homeWindowOpen;
-        this.say(this.homeWindowOpen ? '창문을 열었다 — 바깥바람이 시원하다' : '창문을 닫았다');
+        // 창문을 열면 바로 밖을 내다본다 (열려 있으면 그냥 내다보기)
+        if (!this.homeWindowOpen) {
+          this.homeWindowOpen = true;
+          this.say('창문을 열었다 — 바깥바람이 시원하다');
+        }
+        this.autopilot = null;
+        this.lookingOut = true;
+        this.lookYaw = 0;
+        this.lookPitch = -0.18;
         return;
       case 'elevator':
         this.autopilot = null;
@@ -1849,6 +1899,7 @@ export class CityWorld {
   /** @param owner 집에 들어갈 때 그 집 주인 (null = 내 집) */
   private moveTo(loc: CityLocation, x: number, z: number, fx: number, fz: number, owner: string | null = null) {
     this.doorway = null;
+    this.lookingOut = false;
     this.location = loc;
     this.homeOwner = loc === 'home' ? owner : null;
     this.locationChangedAt = this.frame;
@@ -1875,6 +1926,7 @@ export class CityWorld {
         bestD = d;
       }
     }
+    if (best?.id === 'window' && this.homeWindowOpen) return { ...best, label: '창문 (밖 내다보기)' };
     if (best?.id === 'lobby') return { ...best, label: `행복빌라 현관 (들어가기 · 내 집 ${this.homeUnit}호)` };
     return best;
   }
@@ -2076,6 +2128,8 @@ export class CityWorld {
           : where === 'corridor'
             ? this.corridorSolids()
         : this.map.buildings.map((b) => ({ x0: b.x - b.w / 2, x1: b.x + b.w / 2, z0: b.z - b.d / 2, z1: b.z + b.d / 2 }));
+    // 플레이어는 차도에 못 들어간다 (횡단보도로만 건넌다). 경찰·행인은 그대로
+    if (where === 'city' && p === this.player) solids.push(...this.roadRects);
     for (const s of solids) {
       // 원(사람) vs 상자: 가장 가까운 점에서 밀어낸다
       const cx = Math.max(s.x0, Math.min(p.x, s.x1));
@@ -2129,6 +2183,8 @@ export class CityWorld {
           color: kind === 'taxi' ? 0xf28c28 : kind === 'bus' ? (this.rng() < 0.5 ? 0x2f6fd8 : 0x2e9e4f) : colors[Math.floor(this.rng() * colors.length)],
           from,
           to,
+          v: 0,
+          stops: stopLines(axis, at, dir),
         });
       }
     };
@@ -2146,17 +2202,52 @@ export class CityWorld {
     lane('x', EXPRESSWAY_Z, -1, -300, 300, 9, 3.5);
   }
 
+  /** 신호등 시계 (초). 모든 교차로가 같은 주기 */
+  get signalSeconds() {
+    return this.frame / 60;
+  }
+
+  /** 차: 빨간불·노란불이면 정지선 앞에 서고, 앞차와 간격을 두고, 차도(횡단보도) 위의 플레이어 앞에서 멈춘다 */
   private stepCars() {
+    const sec = this.signalSeconds;
+    const light: Record<'x' | 'z', Light> = { x: vehicleLight('x', sec), z: vehicleLight('z', sec) };
+    const p = this.player;
+    const playerOut = this.location === 'city';
     for (const c of this.cars) {
-      c.x += c.dx * c.speed;
-      c.z += c.dz * c.speed;
-      const s = c.dx !== 0 ? c.x : c.z;
-      const dir = c.dx !== 0 ? c.dx : c.dz;
-      if (dir > 0 && s > c.to) {
-        if (c.dx) c.x = c.from;
+      const alongX = c.dx !== 0;
+      const dir = alongX ? c.dx : c.dz;
+      const s = alongX ? c.x : c.z;
+      const lat = alongX ? c.z : c.x;
+      let room = Infinity;
+      const l = light[alongX ? 'x' : 'z'];
+      if (l !== 'green') {
+        for (const line of c.stops) {
+          const d = (line - s) * dir;
+          // 노란불인데 정지선에 너무 가까우면 그냥 지나간다
+          if (d < 0 || (l === 'yellow' && d < 4)) continue;
+          room = Math.min(room, d);
+        }
+      }
+      for (const o of this.cars) {
+        if (o === c || o.dx !== c.dx || o.dz !== c.dz) continue;
+        if (Math.abs((alongX ? o.z : o.x) - lat) > 1) continue;
+        const d = ((alongX ? o.x : o.z) - s) * dir;
+        if (d > 0 && d < 30) room = Math.min(room, d - (o.kind === 'bus' || c.kind === 'bus' ? 9 : 6.5));
+      }
+      if (playerOut && Math.abs((alongX ? p.z : p.x) - lat) < 1.8) {
+        const d = ((alongX ? p.x : p.z) - s) * dir;
+        if (d > 0 && d < 14) room = Math.min(room, d - 3.5);
+      }
+      // 남은 거리에 비례해 부드럽게 서고, 천천히 다시 출발
+      c.v = Math.min(c.speed, c.v + 0.004, Math.max(0, room) * 0.05);
+      c.x += c.dx * c.v;
+      c.z += c.dz * c.v;
+      const s2 = alongX ? c.x : c.z;
+      if (dir > 0 && s2 > c.to) {
+        if (alongX) c.x = c.from;
         else c.z = c.from;
-      } else if (dir < 0 && s < c.from) {
-        if (c.dx) c.x = c.to;
+      } else if (dir < 0 && s2 < c.from) {
+        if (alongX) c.x = c.to;
         else c.z = c.to;
       }
     }

@@ -1,8 +1,9 @@
 import type { CityMap } from './cityMap';
+import { roadSolids } from './traffic';
 
 /**
  * 도시 길찾기 (지도 클릭 자동 이동용).
- * 도시를 CELL 크기 격자로 나누고 건물(여유 폭 포함)을 막힌 칸으로 표시한 뒤 A* 로 경로를 찾는다.
+ * 도시를 CELL 크기 격자로 나누고 건물(여유 폭 포함)과 차도(횡단보도만 열림)를 막힌 칸으로 표시한 뒤 A* 로 경로를 찾는다.
  * 찾은 경로는 직선으로 갈 수 있는 구간을 건너뛰어(문자열 당기기) 자연스럽게 걷도록 줄인다.
  */
 const CELL = 1.5;
@@ -22,6 +23,8 @@ export class CityNav {
     this.w = Math.ceil((b.x1 - b.x0) / CELL);
     this.h = Math.ceil((b.z1 - b.z0) / CELL);
     this.blocked = new Uint8Array(this.w * this.h);
+    const roads = roadSolids(map);
+    const ROAD_PAD = 0.3;
     for (let j = 0; j < this.h; j++) {
       for (let i = 0; i < this.w; i++) {
         const x = this.x0 + (i + 0.5) * CELL;
@@ -29,7 +32,8 @@ export class CityNav {
         const hit = map.buildings.some(
           (bd) => Math.abs(x - bd.x) < bd.w / 2 + CLEARANCE && Math.abs(z - bd.z) < bd.d / 2 + CLEARANCE,
         );
-        if (hit) this.blocked[j * this.w + i] = 1;
+        const road = roads.some((r) => x > r.x0 - ROAD_PAD && x < r.x1 + ROAD_PAD && z > r.z0 - ROAD_PAD && z < r.z1 + ROAD_PAD);
+        if (hit || road) this.blocked[j * this.w + i] = 1;
       }
     }
   }

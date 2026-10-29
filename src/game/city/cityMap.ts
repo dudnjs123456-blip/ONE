@@ -30,6 +30,8 @@ export interface Building {
   label?: string;
   /** 1층 가게 간판 (남쪽 면 = 도로 쪽) */
   sign?: Sign;
+  /** 아직 아무도 들어오지 않은 빈 상가 (임대 안내문만 붙어 있다) */
+  vacant?: boolean;
 }
 
 export type PoiKind = 'home' | 'shop' | 'subway' | 'bus' | 'park' | 'job' | 'casino';
@@ -136,6 +138,27 @@ const LAYOUT: Block['kind'][][] = [
   ['villa', 'shop', 'home', 'shop', 'apartment'],
 ];
 
+/**
+ * 행복빌라 옆 상가 줄: x0 ~ x1 을 폭이 다른 건물 셋으로 나눠 빈틈없이 붙인다 (전부 공실).
+ * 층수도 제각각 (4층 · 2층 · 3층), 앞면은 인도 끝(zFront)에 맞춘다.
+ */
+function shopRow(x0: number, x1: number, zFront: number): Omit<Building, 'id'>[] {
+  const D = 12;
+  const parts = [0.38, 0.3, 0.32];
+  const uppers = [3, 1, 2];
+  const colors = [0xffffff, 0xf0e2cf, 0xdfe3e6];
+  const total = x1 - x0;
+  const gap = 0.06;
+  const out: Omit<Building, 'id'>[] = [];
+  let x = x0;
+  parts.forEach((p, i) => {
+    const w = total * p;
+    out.push({ kind: 'shop', x: x + w / 2, z: zFront - D / 2, w: w - gap, d: D, h: 4.2 + uppers[i] * 3.4, color: colors[i], vacant: true });
+    x += w;
+  });
+  return out;
+}
+
 function intervals(lines: number[], range: [number, number]) {
   const edges = [range[0], ...lines.flatMap((c) => [c - ROAD_W / 2, c + ROAD_W / 2]), range[1]];
   const out: [number, number][] = [];
@@ -161,6 +184,7 @@ export function buildCityMap(seed = 2025): CityMap {
   let shopIdx = 0;
   let aptNo = 101;
   let home: CityMap['home'] | null = null;
+  const laterShops: Omit<Building, 'id'>[] = [];
 
   const add = (b: Omit<Building, 'id'>) => {
     const bb = { id: nextId++, ...b };
@@ -240,12 +264,22 @@ export function buildCityMap(seed = 2025): CityMap {
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
               const isHome = kind === 'home' && r === rows - 1 && c === 1;
-              const b = add({
-                kind: isHome ? 'home' : 'villa', x: ix0 + cw * (c + 0.5), z: iz0 + rd * (r + 0.5),
-                w: cw - 3, d: rd - 4, h: Math.round(range(4, 5)) * 3,
-                color: isHome ? 0xd99a6c : pick([0xb5654a, 0xc8b49a, 0xe6d3b8, 0x9e7b61, 0xd4c4ae]),
-                label: isHome ? '행복빌라' : undefined,
-              });
+              // 행복빌라 바로 왼쪽: 빌라 대신 상가 건물 세 채를 나란히 (전부 공실). 도로 쪽 인도에 붙여 짓는다
+              const isShop = kind === 'home' && r === rows - 1 && c === 0;
+              const row = isShop ? shopRow(ix0, ix0 + cw + 1.35, iz1) : [];
+              const vh = Math.round(range(4, 5)) * 3; // 난수 순서를 그대로 지킨다 (다른 건물 모양이 바뀌지 않게)
+              const color = isHome ? 0xd99a6c : pick([0xb5654a, 0xc8b49a, 0xe6d3b8, 0x9e7b61, 0xd4c4ae]);
+              const b = add(
+                isShop
+                  ? row[0]
+                  : {
+                      kind: isHome ? 'home' : 'villa', x: ix0 + cw * (c + 0.5), z: iz0 + rd * (r + 0.5),
+                      w: cw - 3, d: rd - 4, h: vh, color,
+                      label: isHome ? '행복빌라' : undefined,
+                    },
+              );
+              // 나머지 상가는 맨 뒤에 붙인다 (다른 건물 번호가 밀려 모양이 바뀌지 않게)
+              laterShops.push(...row.slice(1));
               if (isHome) {
                 home = { x: b.x, z: b.z + b.d / 2 + 1.0, building: b };
                 // 빌라 현관 (유리문 바로 앞): 여기로만 들어간다 → 1층 로비 → 계단·엘리베이터 → 내 층 복도 → 내 집
@@ -264,6 +298,8 @@ export function buildCityMap(seed = 2025): CityMap {
       }
     });
   });
+
+  for (const b of laterShops) add(b);
 
   // 지하철역 출입구 · 버스정류장
   pois.push({ id: 'subway', kind: 'subway', label: '지하철 2호선 한강공원역', x: XS[2] + ROAD_W / 2 + 2.5, z: ZS[1] + ROAD_W / 2 + 3, radius: 2.2 });

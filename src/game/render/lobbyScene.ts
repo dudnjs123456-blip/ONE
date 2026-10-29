@@ -61,7 +61,11 @@ export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
   const wainscot = std(0x8a6f58, 0.8);
   const elevX = 2.0;
   box(elevX - 0.8 - x0, H, 0.15, wall, (x0 + elevX - 0.8) / 2, H / 2, z0); // 북쪽 (엘리베이터 왼쪽)
-  box(x1 - (elevX + 0.8), H, 0.15, wall, (elevX + 0.8 + x1) / 2, H / 2, z0); // 북쪽 (오른쪽)
+  {
+    // 북쪽 오른편: 계단 위쪽은 뚫려 있다 (계단이 벽 너머 계단실로 이어진다)
+    const sx0 = LOBBY.stairs.x0;
+    box(sx0 - (elevX + 0.8), H, 0.15, wall, (elevX + 0.8 + sx0) / 2, H / 2, z0);
+  }
   box(1.6, H - 2.2, 0.15, wall, elevX, 2.2 + (H - 2.2) / 2, z0); // 엘리베이터 위
   box(0.15, H, D, wall, x0, H / 2, 0); // 서쪽
   box(0.15, H, D, wall, x1, H / 2, 0); // 동쪽
@@ -118,6 +122,55 @@ export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
   rail.rotation.x = Math.atan2(rise, run);
   box(0.05, 0.95, 0.05, railM, st.x0, 0.18 + 0.47, st.z1 - 0.1);
   box(0.05, 0.95, 0.05, railM, st.x0, rise + 0.47, st.z0 + 0.1);
+
+  // 계단실 (북쪽 벽 너머): 계단참 → 서쪽으로 꺾여 2층으로 올라가는 다음 계단
+  {
+    const lz0 = z0 - 1.4; // 계단참 북쪽 끝
+    const stone = std(0xc4bdb0, 0.8);
+    const wellWall = std(0xe2dccf, 0.95);
+    // 계단참 (1층 계단 맨 위 높이)
+    box(st.x1 - st.x0 + 0.05, rise, z0 - lz0, stone, (st.x0 + st.x1) / 2, rise / 2, (z0 + lz0) / 2);
+    // 다음 계단: 계단참 서쪽에서 서쪽으로 7칸 더 올라간다 (북쪽 반폭)
+    const n2 = 7;
+    const fx1 = st.x0;
+    const fx0 = st.x0 - 2.1;
+    const sw = (fx1 - fx0) / n2;
+    const fz0 = lz0;
+    const fz1 = lz0 + 0.75;
+    for (let k = 0; k < n2; k++) {
+      const h = rise + 0.18 * (k + 1);
+      box(sw, h, fz1 - fz0, std(k % 2 ? 0xb9b2a5 : 0xc4bdb0, 0.8), fx1 - sw * (k + 0.5), h / 2, (fz0 + fz1) / 2);
+    }
+    // 계단실 벽: 동쪽 · 북쪽(뒤) · 서쪽 끝 (로비 벽보다 높게, 2층까지)
+    const WH = H + 1.4;
+    box(0.15, WH, z0 - lz0 + 0.15, wellWall, x1, WH / 2, (z0 + lz0) / 2);
+    box(x1 - fx0 + 0.3, WH, 0.15, wellWall, (x1 + fx0 - 0.3) / 2, WH / 2, lz0 - 0.07);
+    box(0.15, WH, z0 - lz0, wellWall, fx0 - 0.3, WH / 2, (z0 + lz0) / 2);
+    // 계단참 난간 (다음 계단 쪽은 열려 있다)
+    const r2 = box(0.05, 0.05, 2.25, railM, (fx0 + fx1) / 2, rise + 0.18 * n2 / 2 + 0.95, fz1 + 0.03);
+    r2.rotation.y = Math.PI / 2;
+    r2.rotation.x = -Math.atan2(0.18 * n2, fx1 - fx0);
+    // 층 안내판: "2층 ↑"
+    const plate = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.9, 0.45),
+      new THREE.MeshBasicMaterial({
+        map: canvasTex(256, 128, (g) => {
+          g.fillStyle = '#23395d';
+          g.fillRect(0, 0, 256, 128);
+          g.fillStyle = '#ffffff';
+          g.textAlign = 'center';
+          g.font = 'bold 60px sans-serif';
+          g.fillText('2F ↑', 128, 84);
+        }),
+      }),
+    );
+    plate.position.set((st.x0 + st.x1) / 2, rise + 1.55, lz0 + 0.01);
+    s.add(plate);
+    // 계단실 등 (흰빛)
+    const wl = new THREE.PointLight(0xffffff, 4, 5, 1.6);
+    wl.position.set((st.x0 + st.x1) / 2, rise + 2.2, (z0 + lz0) / 2);
+    s.add(wl);
+  }
 
   // 우편함 (동쪽 벽)
   const mb = LOBBY.furniture.find((f) => f.id === 'mailbox')!.rect;

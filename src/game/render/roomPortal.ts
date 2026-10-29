@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { glassMaterial } from './glassKit';
 
 /**
  * 바깥에서 들여다보는 진짜 방: 빌라 창문에 실제 집 장면(가구 배치 그대로)을 비춘다.
@@ -91,16 +92,9 @@ export class RoomPortal {
     };
     const frame = std(0x2a2c30, 0.4, 0.6);
     const stone = std(0xcfcac0, 0.8, 0);
-    const glass = new THREE.MeshStandardMaterial({
-      color: 0xb4cad8,
-      roughness: 0.04,
-      metalness: 0.6,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      envMap,
-      envMapIntensity: 0.9,
-    });
+    // 진짜 유리 (반사 + 사선 줄무늬). 나머지 집 창과 같은 재질
+    const glass = glassMaterial();
+    void envMap;
     // 유리는 반투명 고정이라 건물 흐리기 목록에 넣지 않는다 (흐려질 땐 창 전체를 감춘다)
     const geos: THREE.BufferGeometry[] = [];
     const box = (w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = this.group) => {

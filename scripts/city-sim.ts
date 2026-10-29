@@ -8,6 +8,8 @@ import type { PlayerProfile } from '../src/game/core/profile';
 import { ROBBER_TIERS } from '../src/game/data/jobs';
 import { GUARD_SHIFT_FRAMES } from '../src/game/city/guardJob';
 import { dateOfDay, dayOfDate, shortDay } from '../src/game/city/calendar';
+import { CITY_CONST } from '../src/game/city/cityMap';
+import { crosswalks, vehicleLight, walkLight } from '../src/game/city/traffic';
 
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`);
@@ -138,11 +140,54 @@ check('no walking through buildings', !inside(w.player.x, w.player.z), `(dist to
 
 // 4) 행인·차가 움직이고, 시간이 흐른다
 const npc0 = { x: w.npcs[0].fighter.x, z: w.npcs[0].fighter.z };
-const car0 = { x: w.cars[0].x, z: w.cars[0].z };
+const cars0 = w.cars.map((c) => ({ x: c.x, z: c.z }));
 const t0 = w.minutes;
 for (let i = 0; i < 300; i++) w.step();
 check('npcs walk', Math.hypot(w.npcs[0].fighter.x - npc0.x, w.npcs[0].fighter.z - npc0.z) > 0.5);
-check('cars drive', Math.hypot(w.cars[0].x - car0.x, w.cars[0].z - car0.z) > 5);
+const moved = w.cars.filter((c, i) => Math.hypot(c.x - cars0[i].x, c.z - cars0[i].z) > 5).length;
+check('cars drive (most of them, some wait at red lights)', moved > w.cars.length * 0.5, `(${moved}/${w.cars.length})`);
+
+// 4-1) 도로: 차도엔 못 들어가고 횡단보도로만 건넌다. 신호에 맞춰 차가 선다
+{
+  const { XS, ZS, ROAD_W } = CITY_CONST;
+  const t = new CityWorld({ read: () => tcmd });
+  let tcmd: CityInput = { move: null, run: false, interact: false };
+  // 블록 가운데쯤 인도에서 남쪽(중앙로)으로 걸어 내려가도 차도 앞에서 막힌다
+  const midX = (XS[0] + XS[1]) / 2;
+  t.player.reset(midX, ZS[1] - ROAD_W / 2 - 1.5, 0, 1);
+  tcmd = { move: { x: 0, z: 1 }, run: true, interact: false };
+  for (let i = 0; i < 240; i++) t.step();
+  check('cannot jaywalk across a road mid-block', t.player.z < ZS[1] - ROAD_W / 2 + 0.05, `(z ${t.player.z.toFixed(2)})`);
+  // 횡단보도 위에서는 건너편까지 간다
+  const cw = crosswalks().find((c) => c.road === 'x' && Math.abs((c.z0 + c.z1) / 2 - ZS[1]) < 0.5)!;
+  const cx = (cw.x0 + cw.x1) / 2;
+  t.player.reset(cx, cw.z0 - 1.2, 0, 1);
+  for (let i = 0; i < 400; i++) t.step();
+  check('crosswalk lets you cross', t.player.z > cw.z1 + 0.5, `(z ${t.player.z.toFixed(2)} → needs > ${cw.z1.toFixed(1)})`);
+  // 신호: 동서 초록이면 남북 빨강, 보행 신호는 나란한 차와 같이
+  check('signals alternate', vehicleLight('x', 1) === 'green' && vehicleLight('z', 1) === 'red' && vehicleLight('z', 20) === 'green' && vehicleLight('x', 20) === 'red');
+  check('walk light follows parallel traffic', walkLight('z', 1) !== 'stop' && walkLight('x', 1) === 'stop' && walkLight('x', 20) !== 'stop');
+  // 빨간불 동안 정지선 앞에 선 차가 있다
+  const red = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  red.player.reset(red.map.home.x, red.map.home.z, 0, 1);
+  // 남북 빨간불이 한참 이어진 때 (주기 14초쯤)
+  while (red.signalSeconds < 36 + 14) red.step();
+  check('north-south is red then', vehicleLight('z', red.signalSeconds) === 'red');
+  const waiting = red.cars.filter((c) => c.dz !== 0 && c.v < 0.01 && c.stops.some((l) => { const d = (l - c.z) * c.dz; return d >= 0 && d < 1.5; })).length;
+  check('cars stop at the stop line on red', waiting > 0, `(${waiting} waiting)`);
+  // 지도 자동 이동은 길 건너 목적지까지 횡단보도로 돌아간다
+  const nav = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  nav.player.reset(midX, ZS[1] - ROAD_W / 2 - 1.5, 0, 1);
+  nav.navigateTo(midX, ZS[1] + ROAD_W / 2 + 1.5, '건너편');
+  const path = nav.autopilot?.path ?? [];
+  const onRoad = (x: number, z: number) => Math.abs(z - ZS[1]) < ROAD_W / 2 && !crosswalks().some((c) => x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1);
+  let bad = 0;
+  for (let i = 0; i < 2000 && nav.autopilot; i++) {
+    nav.step();
+    if (onRoad(nav.player.x, nav.player.z)) bad++;
+  }
+  check('auto-walk crosses at a crosswalk', path.length > 1 && bad === 0 && nav.player.z > ZS[1] + ROAD_W / 2, `(${path.length} waypoints, off-crosswalk frames ${bad}, z ${nav.player.z.toFixed(1)})`);
+}
 check('clock advances', w.minutes > t0, `(${w.clock})`);
 
 // 5) 같은 방향 두 번 톡 → 대시 (그 방향으로)
@@ -1283,4 +1328,34 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   }
   check('attack turns toward nearby pedestrian and hits', turned && hit, `(fx ${w.player.fx.toFixed(2)}, hit ${hit})`);
   check('kicks keep full (slower) timing for the player', startup === MOVES.midKick.startup, `(startup ${startup})`);
+}
+
+// 집 창문: E 열기 → E 밖 내다보기 (움직이지 않고 방향키로 둘러보기) → E 돌아오기 / C 닫기
+{
+  let c: CityInput = { move: null, run: false, interact: false };
+  const w = new CityWorld({ read: () => c });
+  enterHome(w, (x) => (c = x));
+  const win = HOME.pois.find((q) => q.id === 'window')!;
+  const press = () => {
+    c = { move: null, run: false, interact: true };
+    w.step();
+    c = { move: null, run: false, interact: false };
+    w.step();
+  };
+  w.player.reset(win.x, win.z, 0, -1);
+  w.step();
+  press();
+  check('E opens the window and looks outside', w.location === 'home' && w.homeWindowOpen && w.lookingOut);
+  const x0 = w.player.x;
+  c = { move: { x: 1, z: 0 }, run: false, interact: false };
+  for (let i = 0; i < 20; i++) w.step();
+  c = { move: null, run: false, interact: false };
+  check('arrow keys pan the view, body stays put', w.lookYaw < -0.2 && Math.abs(w.player.x - x0) < 0.01, `(yaw ${w.lookYaw.toFixed(2)})`);
+  press();
+  check('E: back inside, window stays open', !w.lookingOut && w.homeWindowOpen);
+  check('open window offers look-out', w.nearby?.label.includes('내다보기') === true, `(${w.nearby?.label})`);
+  press();
+  check('E again: look out again', w.lookingOut);
+  w.stopLookOut(true);
+  check('close window from look-out', !w.lookingOut && !w.homeWindowOpen);
 }

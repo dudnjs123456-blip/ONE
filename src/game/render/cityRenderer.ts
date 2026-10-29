@@ -4,6 +4,7 @@ import { CITY_CONST } from '../city/cityMap';
 import { HOME, LOBBY, type CityLocation, type CityWorld } from '../city/cityWorld';
 import { buildLobbyScene } from './lobbyScene';
 import { glassMaterial, initGlassEnv } from './glassKit';
+import { UnitWindow, coverPlate } from './unitWindows';
 import { LookFx, SkyDome, toonify } from './lookFx';
 import { PersonView, ROBBER_SKIN } from './personView';
 import { makeKitBuilding } from './cityKit';
@@ -14,7 +15,7 @@ import { instanceProp } from './propsKit';
 import { CarKit, type CarView } from './carKit';
 import { TreeKit } from './treeKit';
 import { RoomPortal } from './roomPortal';
-import { unitPlace } from '../city/villa';
+import { unitPlace, villaFloor } from '../city/villa';
 import { buildCorridorScene, type CorridorView } from './corridorScene';
 import { WEEKDAYS, dateOfDay, dayOfDate, daysInMonth } from '../city/calendar';
 import { smooth, type FrameClock } from './clock';
@@ -25,6 +26,8 @@ import { createCharacter } from './vrmCharacter';
 import { GroundKit, type GroundKind } from './groundKit';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { FacadeKit, villaSet, type FacadeSet } from './facadeKit';
+import { buildVacantShop } from './vacantShop';
+import { TrafficProps } from './trafficProps';
 
 // ───────────────────────── 텍스처 (캔버스로 그림) ─────────────────────────
 
@@ -208,7 +211,14 @@ export class CityRenderer {
   private lobbyDoor!: DoorControl;
   /** 행복빌라 내 집 창: 바깥에서 실제 방이 보인다 (포털) */
   private portal: RoomPortal | null = null;
-  private portalAt: { view: BuildingView; floorBase: (f: number) => number; floors: number; unit: string } | null = null;
+  /** 행복빌라 다른 집들의 베란다 창 (호수 → 창). 내 집 자리 창은 포털이 대신한다 */
+  private unitWins = new Map<string, UnitWindow>();
+  /** 창 너머 방의 밤 정도 (모든 집 창이 같이 쓴다) */
+  private unitNight = { value: 0 };
+  /** 창밖 내다보기 카메라 (내 집 창문 바로 앞, 바깥을 본다) */
+  private lookCam = new THREE.PerspectiveCamera(62, 1, 0.1, 600);
+  private _lookDir = new THREE.Vector3();
+  private portalAt: { view: BuildingView; floorBase: (f: number) => number; floors: number; unit: string; ops: { x: number; y: number }[] } | null = null;
   /** 집 안 창문 미닫이 */
   private homeSash!: { setOpen(t: number): void };
   /** 창문 열린 정도 (부드럽게 따라간다) */
@@ -216,6 +226,8 @@ export class CityRenderer {
   private drawSize = new THREE.Vector2();
   /** 실사풍 가로수 (바람에 흔들린다) */
   private treeKit = new TreeKit();
+  /** 횡단보도·펜스·신호등 */
+  private traffic: TrafficProps | null = null;
   private buildings: BuildingView[] = [];
   private windowMats: (THREE.MeshStandardMaterial | THREE.MeshToonMaterial)[] = [];
   /** 도시 키트 건물 재질 (밤에 은은하게) */
@@ -465,6 +477,15 @@ export class CityRenderer {
   sync(world: CityWorld, clock: FrameClock) {
     this.autoQuality(clock.dt);
     const loc = world.location;
+    // 창밖을 내다보는 동안엔 집 대신 바깥 도시를 그린다
+    const look = loc === 'home' && world.lookingOut && !!this.portal;
+    const view: CityLocation = look ? 'city' : loc;
+    let eye = { x: world.player.x, z: world.player.z };
+    if (look) {
+      this.placePortal(world);
+      const w = this.portal!.group.localToWorld(new THREE.Vector3(0, 0, 0.35));
+      eye = { x: w.x, z: w.z };
+    }
     if (loc !== this.shownLocation) {
       this.sceneOf(loc).add(this.playerLift);
       this.sceneOf(loc).add(this.myPlate.sprite);
@@ -501,11 +522,11 @@ export class CityRenderer {
     }
     this.syncSleep(sv, clock.dt);
 
-    if (loc === 'city') {
+    if (view === 'city') {
       world.npcs.forEach((n, i) => {
         // 멀리 있는 행인은 자세 계산을 줄이고, 아주 멀면 아예 감춘다 (어차피 화면 밖)
         const view = this.npcViews[i];
-        const d = Math.hypot(n.fighter.x - world.player.x, n.fighter.z - world.player.z);
+        const d = Math.hypot(n.fighter.x - eye.x, n.fighter.z - eye.z);
         view.root.visible = d < 70;
         view.setDistance(d);
         if (view.root.visible) view.update(n.fighter, clock, d > 25);
@@ -525,7 +546,7 @@ export class CityRenderer {
         g.rotation.y = Math.atan2(c.dx, c.dz);
         // 바퀴: 지나온 거리 / 반지름 만큼 돈다 (가까운 차만)
         const v = this.carViews[i];
-        if (v && Math.abs(c.x - world.player.x) + Math.abs(c.z - world.player.z) < 60) {
+        if (v && Math.abs(c.x - eye.x) + Math.abs(c.z - eye.z) < 60) {
           const a = (c.dx * c.x + c.dz * c.z) / v.wheelRadius;
           for (const w of v.wheels) w.rotation.x = a;
         }
@@ -577,11 +598,14 @@ export class CityRenderer {
     this.corridorSparks.update(clock.dt);
     this.corridorTexts.update(clock.dt);
     this.updateCamera(world, clock);
-    if (loc === 'city') {
-      this.fadeOccluders(world, clock.dt);
+    if (look) this.updateLookCam(world);
+    const cam = look ? this.lookCam : this.camera;
+    if (loc === 'city') this.fadeOccluders(world, clock.dt);
+    if (view === 'city') {
       this.treeKit.update(clock.t);
+      this.traffic?.update(world.signalSeconds);
     }
-    this.sky.follow(this.camera);
+    this.sky.follow(cam);
     this.renderer.shadowMap.needsUpdate = this.shadowTick++ % 2 === 0;
     this.syncPortal(world, clock.dt);
     // 현관 문 · 장소가 바뀔 때 화면 암전
@@ -589,7 +613,7 @@ export class CityRenderer {
     this.lobbyDoor.setOpen(world.lobbyDoorOpen);
     this.fx.fade = world.screenFade;
     this.renderer.info.reset();
-    this.fx.render(this.sceneOf(loc), this.camera, loc === 'city' ? this.fxNight : 0, loc === 'city' ? this.fxDusk : 0, loc !== 'city');
+    this.fx.render(this.sceneOf(view), cam, view === 'city' ? this.fxNight : 0, view === 'city' ? this.fxDusk : 0, view !== 'city');
     this.lastCalls = this.renderer.info.render.calls;
     this.lastTris = this.renderer.info.render.triangles;
   }
@@ -699,6 +723,7 @@ export class CityRenderer {
     this.facadeKit.dispose();
     this.carKit.dispose();
     this.treeKit.dispose();
+    this.traffic?.dispose();
     this.portal?.dispose();
     this.player.dispose?.();
     this.sparks.dispose();
@@ -820,6 +845,7 @@ export class CityRenderer {
     const night = 1 - daylight;
     // 툰 재질은 발광이 그대로 더해져서 예전보다 낮게
     for (const m of this.windowMats) m.emissiveIntensity = night * 0.55;
+    this.unitNight.value = night;
     for (const m of this.kitMats) m.emissiveIntensity = night * 0.16;
     for (const m of this.propNightMats) m.emissiveIntensity = night * 0.12;
     this.carKit.setNight(night);
@@ -1110,7 +1136,7 @@ export class CityRenderer {
   private buildCity(world: CityWorld) {
     const s = this.city;
     const m = world.map;
-    const { ROAD_W, XS, ZS, EXPRESSWAY_Z } = CITY_CONST;
+    const { EXPRESSWAY_Z } = CITY_CONST;
 
     // 실사 바닥 (Firefly 그림): 아스팔트·보도블록·잔디·흙길
     const gk = this.groundKit;
@@ -1155,18 +1181,9 @@ export class CityRenderer {
         }
       }
     }
-    // 횡단보도 (교차로 네 방향)
-    const stripes: THREE.Matrix4[] = [];
-    for (const x of XS) {
-      for (const z of ZS) {
-        for (let k = -4; k <= 4; k += 1.2) {
-          stripes.push(new THREE.Matrix4().makeTranslation(x + k, 0.06, z - ROAD_W / 2 - 1.6));
-          stripes.push(new THREE.Matrix4().makeTranslation(x + k, 0.06, z + ROAD_W / 2 + 1.6));
-          stripes.push(new THREE.Matrix4().makeRotationY(Math.PI / 2).setPosition(x - ROAD_W / 2 - 1.6, 0.06, z + k));
-          stripes.push(new THREE.Matrix4().makeRotationY(Math.PI / 2).setPosition(x + ROAD_W / 2 + 1.6, 0.06, z + k));
-        }
-      }
-    }
+    // 횡단보도 · 정지선 · 길가 펜스 · 신호등 (사람은 횡단보도로만 건넌다)
+    this.traffic = new TrafficProps(m);
+    s.add(this.traffic.group);
     const inst = (geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[], shadow = false) => {
       const im = new THREE.InstancedMesh(geo, mat, list.length);
       list.forEach((mt, i) => im.setMatrixAt(i, mt));
@@ -1176,7 +1193,6 @@ export class CityRenderer {
       return im;
     };
     inst(dashGeo, dashMat, dashes);
-    inst(new THREE.BoxGeometry(0.6, 0.02, 2.4), dashMat, stripes);
 
     // 한강공원 · 한강 · 건너편 · 다리
     ground('grass', 1600, m.parkZ[1] - m.parkZ[0], 0, (m.parkZ[0] + m.parkZ[1]) / 2, 0.01);
@@ -1455,7 +1471,9 @@ export class CityRenderer {
   private buildFacadeBuilding(b: Building, set: FacadeSet): BuildingView {
     const g = new THREE.Group();
     g.position.set(b.x, 0, b.z);
-    const fb = this.facadeKit.build(b, set, b.id);
+    // 행복빌라는 한 층 세 집 (01·02·03호) → 정면 그림도 베란다 문 셋
+    // 1층: 행복빌라는 석재 현관 층, 다른 빌라는 필로티 주차장 (위층 방 그림이 현관과 겹치지 않게)
+    const fb = this.facadeKit.build(b, set, b.id, b.kind === 'home' ? 3 : undefined, b.kind === 'home' ? 'lobby' : 'piloti');
     g.add(fb.group);
     this.windowMats.push(...fb.glow);
     const mats = [...fb.mats];
@@ -1467,13 +1485,69 @@ export class CityRenderer {
     const view: BuildingView = { b, group: g, mats, fade: 1 };
     if (b.kind === 'home') {
       // 내 집 창: 방 창문(북쪽 벽, 폭 4.2 · 높이 1.4)과 같은 크기. 자리는 내 호수가 정해지면 (syncPortal)
-      const portal = new RoomPortal({ width: HOME_WIN.x1 - HOME_WIN.x0, height: HOME_WIN.y1 - HOME_WIN.y0, roomCenter: new THREE.Vector3((HOME_WIN.x0 + HOME_WIN.x1) / 2, (HOME_WIN.y0 + HOME_WIN.y1) / 2, HOME.room.z0), clipZ: HOME.room.z0 + 0.09 }, this.carKit.envMap);
+      // 그림 속 베란다 문 크기 그대로 (방 베란다 문보다 크면 방 문 크기까지만)
+      const ops = fb.openings.length >= 3 ? fb.openings.slice(0, 3) : [0, 1, 2].map((i) => ({ x: (i - 1) * (b.w / 3), w: b.w / 3 - 0.4, y0: 0.26, y1: 2.74 }));
+      const unitW = Math.min(HOME_WIN.x1 - HOME_WIN.x0, ...ops.map((o) => o.w));
+      // 창 높이·위치는 방 창문 그대로 (바닥에서 0.95m ~ 2.35m)
+      const unitH = HOME_WIN.y1 - HOME_WIN.y0;
+      const sill = HOME_WIN.y0;
+      const winY = (HOME_WIN.y0 + HOME_WIN.y1) / 2;
+      const portal = new RoomPortal({ width: unitW, height: unitH, roomCenter: new THREE.Vector3((HOME_WIN.x0 + HOME_WIN.x1) / 2, (HOME_WIN.y0 + HOME_WIN.y1) / 2, HOME.room.z0), clipZ: HOME.room.z0 + 0.09 }, this.carKit.envMap);
       g.add(portal.group);
       mats.push(...(portal.mats as THREE.MeshStandardMaterial[]));
+      // 내 집 자리 사진 속 문도 벽으로 덮는다 (포털과 같이 움직인다)
+      coverPlate(portal.group, ops[0].w + 0.14, ops[0].y1 - ops[0].y0 + 0.14, (ops[0].y0 + ops[0].y1) / 2 - winY);
       this.portal = portal;
-      this.portalAt = { view, floorBase: fb.floorBase, floors: fb.floors, unit: '' };
+      this.portalAt = { view, floorBase: fb.floorBase, floors: fb.floors, unit: '', ops: ops.map((o) => ({ x: o.x, y: winY })) };
+      // 다른 집들 창: 내 집 창과 같은 크기·같은 자리 규칙 (층마다 왼쪽부터 01·02·03호)
+      const head = 3 - sill - unitH;
+      for (let f = 2; f <= fb.floors; f++) {
+        const info = villaFloor(f);
+        for (let door = 0; door < 3; door++) {
+          const unit = `${f}0${door + 1}`;
+          const win = new UnitWindow(unitW, unitH, sill, head, { empty: info.units[door]?.resident === '빈집', seed: f * 31 + door * 7 }, this.unitNight);
+          win.group.position.set(ops[door].x, fb.floorBase(f) + winY, b.d / 2 + 0.01);
+          coverPlate(win.group, ops[door].w + 0.14, ops[door].y1 - ops[door].y0 + 0.14, (ops[door].y0 + ops[door].y1) / 2 - winY);
+          g.add(win.group);
+          this.unitWins.set(unit, win);
+        }
+      }
     }
     return view;
+  }
+
+  /** 창밖 내다보기 카메라: 창문 바로 앞에서 바깥(창의 정면)을 본다. 방향키로 좌우·위아래 */
+  private updateLookCam(world: CityWorld) {
+    const g = this.portal!.group;
+    g.updateWorldMatrix(true, false);
+    this.lookCam.position.copy(g.localToWorld(new THREE.Vector3(0, -0.05, 0.35)));
+    const cp = Math.cos(world.lookPitch);
+    const d = this._lookDir.set(Math.sin(world.lookYaw) * cp, Math.sin(world.lookPitch), Math.cos(world.lookYaw) * cp);
+    d.transformDirection(g.matrixWorld);
+    this.lookCam.lookAt(this.lookCam.position.clone().add(d));
+    this.lookCam.aspect = this.camera.aspect;
+    this.lookCam.far = this.camera.far;
+    this.lookCam.updateProjectionMatrix();
+    this.lookCam.updateMatrixWorld();
+    this.placeSun(this.lookCam.position.x + d.x * 20, this.lookCam.position.z + d.z * 20);
+  }
+
+  /** 내 집 창(포털)을 내 호수 자리에 놓는다 */
+  private placePortal(world: CityWorld) {
+    const p = this.portal;
+    const at = this.portalAt;
+    if (!p || !at) return;
+    if (at.unit !== world.homeUnit) {
+      for (const [u, w] of this.unitWins) w.group.userData.mine = u === world.homeUnit;
+      // 내 호수 → 층과 몇 번째 집 (왼쪽부터). 창이 건물 밖으로 나가지 않게
+      at.unit = world.homeUnit;
+      const { floor, door } = unitPlace(world.homeUnit);
+      const b = at.view.b;
+      const f = Math.max(2, Math.min(at.floors, floor));
+      const o = at.ops[Math.max(0, Math.min(2, door))];
+      p.group.position.set(o.x, at.floorBase(f) + o.y, b.d / 2 + 0.01);
+      p.place();
+    }
   }
 
   /** 내 집 창: 창문 여닫기를 따라가고, 창이 보이면 방을 비춘다 */
@@ -1484,21 +1558,15 @@ export class CityRenderer {
     const at = this.portalAt;
     if (!p || !at) return;
     p.setOpen(this.windowAmt);
-    if (world.location !== 'city') return;
-    if (at.unit !== world.homeUnit) {
-      // 내 호수 → 층과 몇 번째 집 (왼쪽부터). 창이 건물 밖으로 나가지 않게
-      at.unit = world.homeUnit;
-      const { floor, door } = unitPlace(world.homeUnit);
-      const b = at.view.b;
-      const W = HOME_WIN.x1 - HOME_WIN.x0;
-      const lim = Math.max(0, b.w / 2 - W / 2 - 0.4);
-      const x = THREE.MathUtils.clamp((door - 1) * (b.w / 3), -lim, lim);
-      const f = Math.max(2, Math.min(at.floors, floor));
-      p.group.position.set(x, at.floorBase(f) + (HOME_WIN.y0 + HOME_WIN.y1) / 2, b.d / 2);
-      p.place();
+    if (world.location !== 'city') {
+      // 내다보는 동안엔 내 창은 등 뒤라 그리지 않는다
+      p.group.visible = false;
+      return;
     }
+    this.placePortal(world);
     // 건물이 캐릭터를 가려 반투명해지면 창도 감춘다
     p.group.visible = at.view.fade > 0.6;
+    for (const w of this.unitWins.values()) w.group.visible = p.group.visible && !w.group.userData.mine;
     this.updateHomeLight(world.daylight, world.minutes);
     this.camera.updateMatrixWorld();
     this.renderer.getDrawingBufferSize(this.drawSize);
@@ -1515,6 +1583,7 @@ export class CityRenderer {
   private buildBuilding(b: Building): BuildingView {
     const set = b.kind === 'villa' || b.kind === 'home' ? villaSet(b.id, b.kind === 'home') : null;
     if (set) return this.buildFacadeBuilding(b, set);
+    if (b.vacant) return this.buildVacantShop(b);
     const g = new THREE.Group();
     g.position.set(b.x, 0, b.z);
     const style: 'apartment' | 'office' | 'small' = b.kind === 'apartment' ? 'apartment' : b.kind === 'office' ? 'office' : 'small';
@@ -1586,6 +1655,17 @@ export class CityRenderer {
     return view;
   }
 
+  /** 행복빌라 옆 새 상가 (전층 공실): 코드로 지은 통유리 건물. 밤엔 계단 입구 등만 켜진다 */
+  private buildVacantShop(b: Building): BuildingView {
+    const g = new THREE.Group();
+    g.position.set(b.x, 0, b.z);
+    const s = buildVacantShop(b, this.carKit.envMap);
+    g.add(s.group);
+    this.windowMats.push(...s.glow);
+    this.city.add(g);
+    return { b, group: g, mats: s.mats, fade: 1 };
+  }
+
   /** 건물이 어느 쪽 도로를 보나: 블록 북쪽 절반에 있는 상가는 북쪽(-z) 도로 */
   private facing(b: Building): 1 | -1 {
     if (b.kind !== 'shop') return 1;
@@ -1643,8 +1723,11 @@ export class CityRenderer {
     const winX1 = HOME_WIN.x1;
     box(winX0 - x0, H, 0.15, wall, (x0 + winX0) / 2, H / 2, z0); // 북쪽 왼편
     box(x1 - winX1, H, 0.15, wall, (winX1 + x1) / 2, H / 2, z0); // 북쪽 오른편
-    box(winX1 - winX0, 0.95, 0.15, wall, (winX0 + winX1) / 2, 0.475, z0); // 창 아래
-    box(winX1 - winX0, 0.35, 0.15, wall, (winX0 + winX1) / 2, H - 0.175, z0); // 창 위
+    const winY0 = HOME_WIN.y0;
+    const winY1 = HOME_WIN.y1;
+    const winH = winY1 - winY0;
+    box(winX1 - winX0, winY0, 0.15, wall, (winX0 + winX1) / 2, winY0 / 2, z0); // 창 아래
+    box(winX1 - winX0, H - winY1, 0.15, wall, (winX0 + winX1) / 2, (H + winY1) / 2, z0); // 창 위
     box(0.15, H, 2 - z0, wall, x0, H / 2, (z0 + 2) / 2); // 서쪽 (현관 위쪽)
     box(0.15, H, z1 - 3, wall, x0, H / 2, (3 + z1) / 2); // 서쪽 (현관 아래쪽)
     box(0.15, 0.6, 1, wall, x0, H - 0.3, 2.5); // 현관 위
@@ -1657,21 +1740,21 @@ export class CityRenderer {
     const { c: winC, g: winG } = canvas(512, 256);
     drawSkyline(winG, 0.3);
     const winTex = tex(winC);
-    const view = new THREE.Mesh(new THREE.PlaneGeometry(winX1 - winX0 + 2, 2.4), new THREE.MeshBasicMaterial({ map: winTex }));
-    view.position.set((winX0 + winX1) / 2, 1.6, z0 - 0.8);
+    // 풍경판은 벽 높이를 넘지 않게 (위에서 내려다보는 카메라에 벽 너머로 삐져나오지 않게)
+    const view = new THREE.Mesh(new THREE.PlaneGeometry(winX1 - winX0 + 1.2, winY1 + 0.5), new THREE.MeshBasicMaterial({ map: winTex }));
+    view.position.set((winX0 + winX1) / 2, (winY1 + 0.05 - 0.45) / 2, z0 - 0.1);
     s.add(view);
     const frame = std(0x2b2b2b, 0.4, 0.5);
-    box(winX1 - winX0, 0.06, 0.08, frame, (winX0 + winX1) / 2, 0.98, z0);
-    box(winX1 - winX0, 0.06, 0.08, frame, (winX0 + winX1) / 2, H - 0.36, z0);
-    box(0.06, H - 1.33, 0.08, frame, (winX0 + winX1) / 2, 1.66, z0);
+    box(winX1 - winX0, 0.06, 0.08, frame, (winX0 + winX1) / 2, winY0 + 0.03, z0);
+    box(winX1 - winX0, 0.06, 0.08, frame, (winX0 + winX1) / 2, winY1 - 0.03, z0);
     // 미닫이 유리 두 짝: 열면 오른쪽 짝이 왼쪽 짝 앞으로 미끄러진다 (바깥 창과 같이 움직인다)
     {
-      const glassIn = new THREE.MeshStandardMaterial({ color: 0xcfe2ee, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.18, depthWrite: false });
+      const glassIn = glassMaterial();
       const sw = (winX1 - winX0) / 2 + 0.04;
-      const sh = H - 0.35 - 0.95;
+      const sh = winH - 0.06;
       const sashIn = (x: number, z: number) => {
         const g = new THREE.Group();
-        g.position.set(x, 0.95 + sh / 2, z);
+        g.position.set(x, winY0 + 0.03 + sh / 2, z);
         box(sw, 0.05, 0.035, frame, 0, sh / 2 - 0.025, 0, g);
         box(sw, 0.05, 0.035, frame, 0, -sh / 2 + 0.025, 0, g);
         box(0.05, sh, 0.035, frame, -sw / 2 + 0.025, 0, 0, g);
@@ -1688,14 +1771,7 @@ export class CityRenderer {
       const openX = winX0 + sw / 2 + 0.12;
       this.homeSash = { setOpen: (t) => (moving.position.x = closedX + (openX - closedX) * t) };
     }
-    {
-      // 유리 두 짝 (가운데 살 기준 좌우)
-      const glass = glassMaterial();
-      const gw = (winX1 - winX0) / 2 - 0.04;
-      const gh = H - 1.36;
-      for (const side of [-1, 1]) box(gw, gh, 0.012, glass, (winX0 + winX1) / 2 + side * (gw / 2 + 0.03), 0.98 + gh / 2 + 0.01, z0 + 0.02 * side);
-      for (const x of [winX0, winX1]) box(0.06, gh + 0.06, 0.08, frame, x, 0.98 + gh / 2, z0);
-    }
+    for (const x of [winX0, winX1]) box(0.06, winH, 0.08, frame, x, winY0 + winH / 2, z0);
     const winLight = new THREE.DirectionalLight(0xdbe9ff, 1);
     winLight.position.set((winX0 + winX1) / 2, 2.2, z0 - 2);
     winLight.target.position.set(0, 0, 1);
@@ -1703,7 +1779,7 @@ export class CityRenderer {
     s.add(winLight, winLight.target);
     this.homeWindow = { g: winG, tex: winTex, light: winLight };
     // 커튼
-    for (const cx of [winX0 - 0.25, winX1 + 0.25]) box(0.45, H - 0.3, 0.08, std(0x9bb3c9, 1), cx, (H - 0.3) / 2 + 0.1, z0 + 0.15);
+    for (const cx of [winX0 - 0.25, winX1 + 0.25]) box(0.45, H - 0.15, 0.08, std(0x9bb3c9, 1), cx, (H - 0.15) / 2 + 0.02, z0 + 0.15);
 
     // 현관문
     box(0.08, 2.1, 0.95, std(0x5a3b28, 0.6), x0 + 0.06, 1.05, 2.5);

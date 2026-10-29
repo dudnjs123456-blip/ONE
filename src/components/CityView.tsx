@@ -52,6 +52,8 @@ interface CityHud {
   npcChat: string | null;
   /** 엘리베이터 층 고르기 (열려 있으면 꼭대기 층 수, 지금 층, 내 집 층) */
   elevator: { top: number; here: number; mine: number } | null;
+  /** 창밖 내다보는 중 */
+  lookOut: boolean;
   /** 지금 장소 이름 (내 집 호수·친구 집 포함) */
   place: string;
   /** 마을 접속 상태 (로그인 안 했으면 null) */
@@ -201,6 +203,12 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         else if (e.code === 'Escape') world.closeElevator();
         return;
       }
+      // 창밖 내다보기: Esc 돌아오기, C 창문 닫고 돌아오기 (E 는 게임 입력으로 처리)
+      if (world.lookingOut) {
+        if (e.code === 'Escape') world.stopLookOut();
+        else if (e.code === 'KeyC' && !e.repeat) world.stopLookOut(true);
+        return;
+      }
       if (e.code === 'KeyM' && !e.repeat && !world.dialog) setBigMap((v) => !v);
       if (e.code === 'Escape') {
         // 대화·지도부터 닫는다
@@ -329,6 +337,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         elevator: world.elevatorOpen
           ? { top: world.villaFloors, here: world.location === 'lobby' ? 1 : world.floor, mine: Number(world.homeUnit.slice(0, -2)) || 0 }
           : null,
+        lookOut: world.lookingOut,
         place: world.placeLabel,
         online: link ? { status: link.status, friends: link.friends, ping: link.ping === null ? null : Math.round(link.ping) } : null,
         sleep: world.sleepView?.phase ?? null,
@@ -502,6 +511,17 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       {inventory && <InventoryPanel profile={profile} onClose={() => setInventory(false)} />}
       {hud?.npcChat && worldRef.current && (
         <NpcChatPanel key={hud.npcChat} world={worldRef.current} npcId={hud.npcChat} onClose={() => worldRef.current?.closeNpcChat()} />
+      )}
+      {hud?.lookOut && (
+        <div className="pointer-events-auto absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-full border border-zinc-500/50 bg-zinc-900/80 px-5 py-2 text-sm text-zinc-100 shadow-xl">
+          <span>🪟 창밖을 보는 중 · 방향키로 둘러보기</span>
+          <button onClick={() => worldRef.current?.stopLookOut()} className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600">
+            돌아오기 (E / Esc)
+          </button>
+          <button onClick={() => worldRef.current?.stopLookOut(true)} className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600">
+            창문 닫기 (C)
+          </button>
+        </div>
       )}
       {hud?.elevator && worldRef.current && <ElevatorPanel {...hud.elevator} onPick={(f) => worldRef.current?.rideElevator(f)} onClose={() => worldRef.current?.closeElevator()} />}
       {hud?.dialog && worldRef.current && (
