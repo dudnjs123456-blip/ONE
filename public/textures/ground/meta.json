@@ -1,0 +1,14 @@
+{
+  "ground-asphalt": {
+    "aspect": 1.851
+  },
+  "ground-sidewalk": {
+    "aspect": 1.661
+  },
+  "ground-grass": {
+    "aspect": 1.856
+  },
+  "ground-park-path": {
+    "aspect": 1.856
+  }
+}

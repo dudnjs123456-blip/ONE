@@ -1,0 +1,5 @@
+ual.json — Quaternius Universal Animation Library 1 & 2 (Standard), CC0 1.0 Universal
+https://quaternius.com/packs/universalanimationlibrary.html
+https://opengameart.org/node/174563
+https://opengameart.org/content/universal-animation-library-2
+Retargeted to VRM humanoid bones by scripts/bake-anims.mjs.
