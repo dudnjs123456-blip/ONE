@@ -13,6 +13,10 @@ import type { Controller } from './controllers';
 import { Fighter } from './fighter';
 import { NEUTRAL_INPUT } from './input';
 
+/** 레이지가 켜지는 체력 비율과 공격력 배율 */
+const RAGE_HP = 0.2;
+const RAGE_POWER = 1.1;
+
 export type MatchMode = 'cpu' | 'versus' | 'training';
 export type Phase = 'intro' | 'fight' | 'roundEnd' | 'matchEnd';
 
@@ -24,10 +28,14 @@ export interface HudState {
   phase: Phase;
   round: number;
   timer: number;
-  fighters: { name: string; hp: number; maxHp: number; wins: number }[];
+  fighters: { name: string; hp: number; maxHp: number; wins: number; rage: boolean }[];
   banner: string | null;
   combo: { side: 0 | 1; hits: number; damage: number } | null;
   lastHit: HitInfo | null;
+  /** 이 경기(3판 2선승 전체)에서 양쪽이 넣은 최대 콤보 */
+  bestCombo: [{ hits: number; damage: number }, { hits: number; damage: number }];
+  /** 양쪽이 당한 벽꽝 횟수 (이 경기) */
+  wallSplats: [number, number];
 }
 
 /**
@@ -53,6 +61,8 @@ export class Match {
   private events: MatchEvent[] = [];
   private comboShow: { side: 0 | 1; hits: number; damage: number; frames: number } | null = null;
   private calm: [number, number] = [0, 0];
+  private bestCombo: HudState['bestCombo'] = [{ hits: 0, damage: 0 }, { hits: 0, damage: 0 }];
+  private wallSplats: [number, number] = [0, 0];
 
   constructor(
     readonly mode: MatchMode,
@@ -66,6 +76,8 @@ export class Match {
 
   restart() {
     this.wins = [0, 0];
+    this.bestCombo = [{ hits: 0, damage: 0 }, { hits: 0, damage: 0 }];
+    this.wallSplats = [0, 0];
     this.round = 1;
     this.startRound();
   }
@@ -105,9 +117,18 @@ export class Match {
     a.tick({ opponent: b, ...ctx });
     b.tick({ opponent: a, ...ctx });
 
-    separateInRing(a, b);
+    // 벽꽝: 세게 맞고 경기장 끝에 부딪히면 벽에 붙어 경직
+    for (const f of separateInRing(a, b)) {
+      if (f.tryWallSplat()) {
+        this.events.push({ kind: 'hit', x: f.x, y: 1.2, z: f.z, damage: 0, victim: f.index, heavy: true, wall: true });
+        this.wallSplats = this.wallSplats.map((n, i) => (i === f.index ? n + 1 : n)) as [number, number];
+        this.hitstop = Math.max(this.hitstop, 6);
+      }
+    }
     a.faceToward(b);
     b.faceToward(a);
+    // 레이지: 체력이 적으면 공격력이 오른다 (역전 기회)
+    for (const f of this.fighters) f.power = this.inRage(f) ? RAGE_POWER : 1;
     this.resolveHits();
 
     if (this.comboShow && --this.comboShow.frames <= 0) this.comboShow = null;
@@ -122,14 +143,21 @@ export class Match {
       phase: this.phase,
       round: this.round,
       timer: Math.ceil(this.timerFrames / FPS),
-      fighters: this.fighters.map((f, i) => ({ name: f.name, hp: f.hp, maxHp: f.maxHp, wins: this.wins[i] })),
+      fighters: this.fighters.map((f, i) => ({ name: f.name, hp: f.hp, maxHp: f.maxHp, wins: this.wins[i], rage: this.inRage(f) })),
       banner: this.banner(a, b),
       combo: this.comboShow && { side: this.comboShow.side, hits: this.comboShow.hits, damage: this.comboShow.damage },
       lastHit: this.lastHit,
+      bestCombo: this.bestCombo,
+      wallSplats: this.wallSplats,
     };
   }
 
   // ───────────────────────── 내부 ─────────────────────────
+
+  /** 레이지: 체력 20% 이하 (연습 모드는 체력이 차오르므로 없음) */
+  private inRage(f: Fighter): boolean {
+    return this.mode !== 'training' && f.hp > 0 && f.hp <= f.maxHp * RAGE_HP;
+  }
 
   private startRound() {
     const [a, b] = this.fighters;
@@ -162,6 +190,10 @@ export class Match {
       this.lastHit = out.info;
       if (h.def.combo >= 2) {
         this.comboShow = { side: h.att.index as 0 | 1, hits: h.def.combo, damage: h.def.comboDamage, frames: 90 };
+        const best = this.bestCombo[h.att.index as 0 | 1];
+        if (h.def.combo > best.hits || (h.def.combo === best.hits && h.def.comboDamage > best.damage)) {
+          this.bestCombo[h.att.index as 0 | 1] = { hits: h.def.combo, damage: h.def.comboDamage };
+        }
       }
       if (this.mode === 'training' && h.def.hp <= 0) {
         h.def.hp = 1;

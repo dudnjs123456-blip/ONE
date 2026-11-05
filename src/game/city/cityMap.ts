@@ -1,4 +1,7 @@
 import { mulberry32 } from '../core/controllers';
+import { PET_SHOP_NAME } from '../data/pets';
+import { CLOTHES_SHOP_NAME } from '../data/fashion';
+import { FISHING_SHOP_NAME } from '../data/fishing';
 
 /**
  * 서울 도심 한 구역 (가상). 좌표: x = 동쪽, z = 남쪽, 1 = 1m.
@@ -32,9 +35,19 @@ export interface Building {
   sign?: Sign;
   /** 아직 아무도 들어오지 않은 빈 상가 (임대 안내문만 붙어 있다) */
   vacant?: boolean;
+  /** 1층에 들어온 가게 (위층은 그대로 공실) */
+  tenant?: 'pet' | 'clothes' | 'fishing';
 }
 
-export type PoiKind = 'home' | 'shop' | 'subway' | 'bus' | 'park' | 'job' | 'casino';
+export type PoiKind = 'home' | 'shop' | 'subway' | 'bus' | 'park' | 'job' | 'casino' | 'fish';
+
+/** 한강 낚시 데크: 강둑(z0)에서 물 위로 z1 까지 나온 나무 데크 (x 가운데, w 폭) */
+export interface FishDeck {
+  x: number;
+  w: number;
+  z0: number;
+  z1: number;
+}
 
 export interface Poi {
   id: string;
@@ -82,7 +95,12 @@ export interface Tree {
   x: number;
   z: number;
   s: number;
+  /** 가장 가까운 건물 벽까지 남는 거리 (m): 잎이 이 안으로만 퍼지게 한다 */
+  room?: number;
 }
+
+/** 건물 벽에 이만큼보다 가까운 나무는 심지 않는다 (줄기가 벽에 붙는다) */
+const TREE_MIN_ROOM = 1.6;
 
 export interface CityMap {
   /** 걸어다닐 수 있는 범위 */
@@ -100,6 +118,8 @@ export interface CityMap {
   riverZ: number;
   /** 다리 (남북 도로를 따라 한강을 건넌다) */
   bridgeX: number;
+  /** 한강 낚시 데크 */
+  fishDecks: FishDeck[];
   /** 플레이어 집 현관 (시작 위치) */
   home: { x: number; z: number; building: Building };
 }
@@ -153,7 +173,9 @@ function shopRow(x0: number, x1: number, zFront: number): Omit<Building, 'id'>[]
   let x = x0;
   parts.forEach((p, i) => {
     const w = total * p;
-    out.push({ kind: 'shop', x: x + w / 2, z: zFront - D / 2, w: w - gap, d: D, h: 4.2 + uppers[i] * 3.4, color: colors[i], vacant: true });
+    // 빌라 바로 옆 건물 1층엔 펫샵, 그 옆 건물엔 옷가게, 맨 끝 4층 건물엔 낚시점이 들어왔다
+    const tenant = i === parts.length - 1 ? ('pet' as const) : i === parts.length - 2 ? ('clothes' as const) : ('fishing' as const);
+    out.push({ kind: 'shop', x: x + w / 2, z: zFront - D / 2, w: w - gap, d: D, h: 4.2 + uppers[i] * 3.4, color: colors[i], vacant: true, tenant });
     x += w;
   });
   return out;
@@ -278,6 +300,7 @@ export function buildCityMap(seed = 2025): CityMap {
                       label: isHome ? '행복빌라' : undefined,
                     },
               );
+              if (b.tenant === 'fishing') pois.push({ id: 'fishingshop', kind: 'shop', label: FISHING_SHOP_NAME, x: b.x, z: b.z + b.d / 2 + 1.2, radius: 1.8 });
               // 나머지 상가는 맨 뒤에 붙인다 (다른 건물 번호가 밀려 모양이 바뀌지 않게)
               laterShops.push(...row.slice(1));
               if (isHome) {
@@ -299,7 +322,11 @@ export function buildCityMap(seed = 2025): CityMap {
     });
   });
 
-  for (const b of laterShops) add(b);
+  for (const s of laterShops) {
+    const b = add(s);
+    if (b.tenant === 'pet') pois.push({ id: 'petshop', kind: 'shop', label: PET_SHOP_NAME, x: b.x, z: b.z + b.d / 2 + 1.2, radius: 1.8 });
+    if (b.tenant === 'clothes') pois.push({ id: 'clothesshop', kind: 'shop', label: CLOTHES_SHOP_NAME, x: b.x, z: b.z + b.d / 2 + 1.2, radius: 1.8 });
+  }
 
   // 지하철역 출입구 · 버스정류장
   pois.push({ id: 'subway', kind: 'subway', label: '지하철 2호선 한강공원역', x: XS[2] + ROAD_W / 2 + 2.5, z: ZS[1] + ROAD_W / 2 + 3, radius: 2.2 });
@@ -411,6 +438,22 @@ export function buildCityMap(seed = 2025): CityMap {
     if (Math.round(x / 7) % 4 === 0) benches.push({ x, z: parkZ[1] - 3, rot: 0 });
   }
 
+  // 나무가 건물을 뚫지 않게: 가장 가까운 건물 벽까지 거리를 재서, 너무 붙은 나무는 빼고 나머지는 잎 폭을 그 안으로 줄인다
+  const roomOf = (t: Tree) => {
+    let best = Infinity;
+    for (const b of buildings) {
+      const dx = Math.max(0, Math.abs(t.x - b.x) - b.w / 2);
+      const dz = Math.max(0, Math.abs(t.z - b.z) - b.d / 2);
+      best = Math.min(best, Math.hypot(dx, dz));
+    }
+    return best - 0.3;
+  };
+  const keptTrees = trees.filter((t) => (t.room = roomOf(t)) >= TREE_MIN_ROOM);
+
+  // 한강 낚시 데크: 강둑에서 물 위로 4.5m 나온 나무 데크 여섯 곳 (다리 근처는 피한다). 끝에 서서 E = 낚시
+  const fishDecks: FishDeck[] = [-92, -58, -26, 4, 64, 94].map((x) => ({ x, w: 4.4, z0: parkZ[1] - 1.5, z1: parkZ[1] + 4.5 }));
+  fishDecks.forEach((d, i) => pois.push({ id: `fish-${i}`, kind: 'fish', label: '🎣 낚시 데크', x: d.x, z: d.z1 - 0.9, radius: 1.9 }));
+
   if (!home) throw new Error('home building missing');
   return {
     bounds: { x0: X_RANGE[0] + 1, x1: X_RANGE[1] - 1, z0: Z_RANGE[0] + 1, z1: parkZ[1] - 1.5 },
@@ -418,12 +461,13 @@ export function buildCityMap(seed = 2025): CityMap {
     blocks,
     buildings,
     pois,
-    trees,
+    trees: keptTrees,
     lights,
     benches,
     parkZ,
     riverZ: parkZ[1],
     bridgeX: XS[2],
+    fishDecks,
     trails,
     home,
   };

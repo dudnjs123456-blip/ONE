@@ -6,10 +6,16 @@ export default function BossHud({
   hud,
   onRetry,
   onExit,
+  touch = false,
+  portrait = false,
 }: {
   hud: BossHudState;
   onRetry: () => void;
   onExit: () => void;
+  /** 터치 조작 화면: 아래쪽은 버튼 자리라 패널을 위로, 키 설명은 숨김 */
+  touch?: boolean;
+  /** 폰 세로 화면: 위쪽 버튼 줄과 겹치지 않게 한 칸 더 내린다 */
+  portrait?: boolean;
 }) {
   const bossPct = (hud.bossHp / hud.bossMaxHp) * 100;
   const r = hud.result;
@@ -47,7 +53,7 @@ export default function BossHud({
       </div>
 
       {/* 플레이어 */}
-      <div className="absolute bottom-6 left-6 w-80 rounded-lg border border-white/15 bg-black/50 p-3">
+      <div className={`absolute rounded-lg border border-white/15 bg-black/50 p-3 ${touch ? `left-4 w-60 ${portrait ? 'top-36' : 'top-28'}` : 'bottom-6 left-6 w-80'}`}>
         <div className="mb-1 flex justify-between text-sm font-bold">
           <span>
             <span className="text-amber-300">Lv.{hud.playerLevel}</span> PLAYER
@@ -72,18 +78,20 @@ export default function BossHud({
       </div>
 
       {hud.combo && (
-        <div className="absolute left-8 top-36">
+        <div className={`absolute left-8 ${touch ? (portrait ? 'top-72' : 'top-60') : 'top-36'}`}>
           <div className="text-4xl font-black italic text-amber-300 drop-shadow">{hud.combo.hits} HITS</div>
           <div className="text-lg font-bold text-white/80">{hud.combo.damage} DAMAGE</div>
         </div>
       )}
 
+      {!touch && (
       <div className="absolute bottom-6 right-6 rounded bg-black/50 px-3 py-2 text-xs leading-5 text-white/75">
         <div>방향키 이동 · {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리</div>
         <div>뒤 = 가드 · 아래뒤 = 하단 가드 · 위/아래 톡 = 횡이동</div>
         <div>{bindLabel('jump')} 점프 · Ctrl+휠 줌</div>
         <div className="text-red-300">붉게 빛나는 공격 = 아머 (끊기지 않음)</div>
       </div>
+      )}
 
       {hud.banner && !r && (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -109,6 +117,7 @@ export default function BossHud({
             {r.win ? (
               <div className="mt-5 space-y-1 text-left text-sm">
                 {r.firstClear && <div className="mb-2 text-center font-bold text-amber-300">★ 최초 클리어 보너스 ★</div>}
+                {r.newRecord && <div className="mb-2 text-center font-bold text-sky-300">🏆 최단 기록 갱신!</div>}
                 <div className="flex justify-between"><span className="text-white/60">경험치</span><span className="text-lime-300">+{r.exp} EXP</span></div>
                 <div className="flex justify-between"><span className="text-white/60">골드</span><span className="text-amber-300">+{r.gold} G</span></div>
                 {r.levelUps > 0 && (

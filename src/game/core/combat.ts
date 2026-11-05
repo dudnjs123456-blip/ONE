@@ -21,6 +21,8 @@ export interface CombatEvent {
   victim: number;
   /** 묵직한 기술 (강공격·띄우기) — 이펙트·화면 흔들림을 크게 */
   heavy: boolean;
+  /** 벽꽝 (경기장 끝에 부딪힘) */
+  wall?: boolean;
 }
 
 export interface HitInfo {
@@ -66,9 +68,12 @@ export function detectHit(att: Fighter, def: Fighter): PendingHit | null {
   if (mv.level === 'low' && jumping && def.y > 0.25) return null; // 하단은 점프로 넘는다
 
   const stance = airborne || !def.canBlock ? null : def.blockStance();
-  const blocked = (stance === 'stand' && mv.level !== 'low') || (stance === 'crouch' && mv.level === 'low');
+  const blocked = !mv.unblockable && ((stance === 'stand' && mv.level !== 'low') || (stance === 'crouch' && mv.level === 'low'));
   return { att, def, mv, blocked, counter: !blocked && def.isCounterable() };
 }
+
+/** 잡기를 풀었을 때 양쪽이 멈칫하는 프레임 */
+const THROW_BREAK_STUN = 16;
 
 export function applyHit({ att, def, mv, blocked, counter }: PendingHit): HitOutcome {
   att.moveHits.push(def);
@@ -81,6 +86,19 @@ export function applyHit({ att, def, mv, blocked, counter }: PendingHit): HitOut
   };
   const base = { attacker: att.index, name: mv.name, notation: mv.notation, startup: mv.startup };
   const heavy = mv.damage >= 14 || !!mv.launch;
+
+  // 잡기 풀기: 잡히기 직전에 1·2 를 눌렀으면 서로 밀려나며 풀린다 (양쪽 같은 경직)
+  if (mv.unblockable && !def.isAirborne() && def.throwBreak > 0) {
+    const brk = { ...mv, onBlock: 0, pushback: 0.7 };
+    att.receiveBlock(brk, THROW_BREAK_STUN);
+    def.receiveBlock(brk, THROW_BREAK_STUN);
+    def.throwBreak = 0;
+    return {
+      hitstop: HITSTOP_BLOCK,
+      event: { kind: 'block', ...pos, damage: 0, victim: def.index, heavy: true },
+      info: { ...base, name: '잡기 풀기!', result: 'block', advantage: 0, damage: 0 },
+    };
+  }
 
   if (blocked) {
     def.receiveBlock(mv, remaining);

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0b0d17"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#ff7a3d" stroke-width="14"/>
+  <text x="256" y="300" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-style="italic" font-size="150" fill="#fcd34d">IF</text>
+</svg>

@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Building } from "../city/cityMap";
+import { PET_BY_ID, PET_SHOP_NAME } from "../data/pets";
+import { CLOTHES_SHOP_NAME } from "../data/fashion";
+import { FISHING_SHOP_NAME } from "../data/fishing";
+import { animatePet, buildPet, disposePet } from "./petKit";
 
 /**
  * 공실 상가 건물 (근린생활시설, 4층): 행복빌라 옆에 새로 지은 통유리 상가. 아직 들어온 가게가 없다.
@@ -126,7 +130,7 @@ function rentPoster(big: boolean) {
 }
 
 /** 2층 띠에 묶은 가로 현수막 */
-function bannerTexture(aspect: number) {
+function bannerTexture(aspect: number, floorsText = "1층~4층") {
   const W = 2048;
   const H = Math.round(W / aspect);
   return canvasTex(W, H, (g) => {
@@ -144,7 +148,7 @@ function bannerTexture(aspect: number) {
     const aw = g.measureText(a).width;
     g.fillStyle = "#1f4fb8";
     g.font = `800 ${Math.round(H * 0.3)}px ${FONT}`;
-    g.fillText("1층~4층 · 신축 · 즉시입주", W * 0.06 + aw, H * 0.34);
+    g.fillText(`${floorsText} · 신축 · 즉시입주`, W * 0.06 + aw, H * 0.34);
     g.fillStyle = "#111";
     g.font = `900 ${Math.round(H * 0.36)}px ${FONT}`;
     g.fillText(`☎ ${PHONE}`, W * 0.06 + aw, H * 0.7);
@@ -256,6 +260,488 @@ function shutterTexture() {
     },
     true,
   );
+}
+
+/** 펫샵 간판: 민트 바탕 + 발자국 + 가게 이름 */
+function petSignTexture(aspect: number) {
+  const W = 1024;
+  const H = Math.max(160, Math.round(W / aspect));
+  return canvasTex(W, H, (g) => {
+    const grd = g.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0, "#5fd3b8");
+    grd.addColorStop(1, "#2fae93");
+    g.fillStyle = grd;
+    g.fillRect(0, 0, W, H);
+    g.fillStyle = "#ffffff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 ${Math.round(H * 0.5)}px ${FONT}`;
+    g.fillText(PET_SHOP_NAME, W * 0.56, H * 0.46);
+    g.font = `700 ${Math.round(H * 0.17)}px ${FONT}`;
+    g.fillStyle = "#fff7c2";
+    g.fillText("분양 · 용품 · 미용", W * 0.56, H * 0.84);
+    paw(g, W * 0.1, H * 0.5, H * 0.32, "#ffffff");
+  });
+}
+
+/** 옷가게 간판: 검은 바탕 + 금색 글씨 + 옷걸이 */
+function clothesSignTexture(aspect: number) {
+  const W = 1024;
+  const H = Math.max(160, Math.round(W / aspect));
+  return canvasTex(W, H, (g) => {
+    g.fillStyle = "#1d1e22";
+    g.fillRect(0, 0, W, H);
+    g.strokeStyle = "#e0b44a";
+    g.lineWidth = H * 0.04;
+    g.strokeRect(H * 0.06, H * 0.06, W - H * 0.12, H - H * 0.12);
+    g.fillStyle = "#f2d38a";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 ${Math.round(H * 0.42)}px ${FONT}`;
+    g.fillText(CLOTHES_SHOP_NAME, W * 0.56, H * 0.44);
+    g.font = `700 ${Math.round(H * 0.15)}px ${FONT}`;
+    g.fillStyle = "#ffffff";
+    g.fillText("FASHION · BATTLE GEAR", W * 0.56, H * 0.8);
+    // 옷걸이
+    const x = W * 0.11;
+    const y = H * 0.5;
+    const s = H * 0.3;
+    g.strokeStyle = "#f2d38a";
+    g.lineWidth = H * 0.035;
+    g.beginPath();
+    g.arc(x, y - s * 0.75, s * 0.18, Math.PI, Math.PI * 2.4);
+    g.moveTo(x, y - s * 0.55);
+    g.lineTo(x - s, y + s * 0.3);
+    g.lineTo(x + s, y + s * 0.3);
+    g.closePath();
+    g.stroke();
+  });
+}
+
+/** 낚시점 간판: 짙은 파랑 바탕 + 흰 글씨 + 물고기 */
+function fishingSignTexture(aspect: number) {
+  const W = 1024;
+  const H = Math.max(160, Math.round(W / aspect));
+  return canvasTex(W, H, (g) => {
+    const grd = g.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0, "#2a7ab8");
+    grd.addColorStop(1, "#174d78");
+    g.fillStyle = grd;
+    g.fillRect(0, 0, W, H);
+    // 물결 무늬
+    g.strokeStyle = "rgba(255,255,255,0.18)";
+    g.lineWidth = H * 0.03;
+    for (let k = 0; k < 3; k++) {
+      g.beginPath();
+      for (let x = 0; x <= W; x += 16) g.lineTo(x, H * (0.78 + k * 0.08) + Math.sin(x / 40 + k) * H * 0.025);
+      g.stroke();
+    }
+    g.fillStyle = "#ffffff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 ${Math.round(H * 0.4)}px ${FONT}`;
+    g.fillText(FISHING_SHOP_NAME, W * 0.57, H * 0.42);
+    g.font = `700 ${Math.round(H * 0.15)}px ${FONT}`;
+    g.fillStyle = "#ffe08a";
+    g.fillText("낚싯대 · 미끼 · 활어 수매", W * 0.57, H * 0.76);
+    // 물고기 (몸 + 꼬리 + 눈)
+    const x = W * 0.1;
+    const y = H * 0.45;
+    const s = H * 0.28;
+    g.fillStyle = "#ffe08a";
+    g.beginPath();
+    g.ellipse(x, y, s, s * 0.5, 0, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.moveTo(x - s * 0.8, y);
+    g.lineTo(x - s * 1.5, y - s * 0.5);
+    g.lineTo(x - s * 1.5, y + s * 0.5);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#174d78";
+    g.beginPath();
+    g.arc(x + s * 0.5, y - s * 0.1, s * 0.1, 0, Math.PI * 2);
+    g.fill();
+  });
+}
+
+/** 낚시점 유리 광고 */
+function fishingPoster(big: string, small: string) {
+  return canvasTex(360, 512, (g) => {
+    g.fillStyle = big === "수매" ? "#c0392b" : "#174d78";
+    g.fillRect(0, 0, 360, 512);
+    g.fillStyle = "#ffffff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 104px ${FONT}`;
+    g.fillText(big, 180, 200);
+    g.font = `800 36px ${FONT}`;
+    g.fillStyle = "#ffe08a";
+    g.fillText(small, 180, 320);
+    g.font = `700 26px ${FONT}`;
+    g.fillStyle = "#ffffff";
+    g.fillText(FISHING_SHOP_NAME, 180, 452);
+  });
+}
+
+/** 낚시점 진열창 너머: 벽에 세운 낚싯대들 · 미끼 냉장고 불빛 · 계산대 */
+function buildFishingFront(w: number, depth: number, ceilY: number, keep: (t: THREE.Texture) => THREE.Texture) {
+  const group = new THREE.Group();
+  const mats: THREE.MeshStandardMaterial[] = [];
+  const parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => {
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.75, emissive: new THREE.Color(color).multiplyScalar(0.18), ...extra });
+    mats.push(m);
+    return m;
+  };
+  const put = (m: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number) => {
+    geo.translate(x, y, z);
+    const list = parts.get(m) ?? [];
+    list.push(geo);
+    parts.set(m, list);
+  };
+  const box = (m: THREE.Material, bw: number, bh: number, bd: number, x: number, y: number, z: number) => put(m, new THREE.BoxGeometry(bw, bh, bd), x, y, z);
+  const floorTex = keep(woodFloorTexture());
+  floorTex.repeat.set(w / 2, depth / 2);
+  put(std(0xffffff, { map: floorTex, emissive: 0x2a2a28, roughness: 0.6 }), new THREE.PlaneGeometry(w, depth).rotateX(-Math.PI / 2), 0, 0.2, depth / 2);
+  box(std(0xe9eef0), w, ceilY - 0.25, 0.04, 0, 0.2 + (ceilY - 0.25) / 2, 0.07);
+  const light = new THREE.MeshBasicMaterial({ color: 0xf0f8ff });
+  for (const z of [depth * 0.3, depth * 0.72]) box(light, w * 0.7, 0.04, 0.35, 0, ceilY - 0.04, z);
+  // 뒷벽 나무 판 + 낚싯대 여덟 자루 (색이 다르다)
+  box(std(0x4a3322), w - 0.3, 2.0, 0.05, 0, 0.2 + 1.1, 0.12);
+  const rodCols = [0xc8a25a, 0x2b2d33, 0x1f5fbf, 0xb3261e, 0xd4a017, 0x2b2d33, 0x1f5fbf, 0xc8a25a];
+  const n = Math.max(4, Math.floor((w - 0.6) / 0.3));
+  for (let k = 0; k < n; k++) {
+    const x = -w / 2 + 0.45 + (k * (w - 0.9)) / (n - 1);
+    put(std(rodCols[k % rodCols.length], { roughness: 0.35 }), new THREE.CylinderGeometry(0.008, 0.016, 1.9, 6).rotateZ(0.04), x, 0.2 + 0.25 + 0.95, 0.2);
+    put(std(0xc49a6c), new THREE.CylinderGeometry(0.02, 0.02, 0.35, 8), x - 0.03, 0.2 + 0.42, 0.2);
+  }
+  // 오른쪽: 미끼 냉장고 (불빛)
+  const glow = new THREE.MeshBasicMaterial({ color: 0xbfe6ff });
+  box(std(0xdfe3e7), 0.7, 1.9, 0.6, w / 2 - 0.5, 0.2 + 0.95, depth * 0.45);
+  box(glow, 0.6, 1.6, 0.02, w / 2 - 0.5, 0.2 + 1.0, depth * 0.45 + 0.31);
+  // 계산대 + 수조 (앞쪽 가운데)
+  box(std(0x1f5f8b), 1.3, 0.95, 0.5, -w / 2 + 1.0, 0.2 + 0.475, depth * 0.62);
+  box(std(0x5fb4d9, { emissive: 0x1d6f96, transparent: true, opacity: 0.75 }), 1.1, 0.55, 0.45, 0.2, 0.2 + 1.0, depth * 0.55);
+  box(std(0x2a2e33), 1.14, 0.75, 0.49, 0.2, 0.2 + 0.375, depth * 0.55);
+  for (const [m, list] of parts) {
+    if (!list.length) continue;
+    const flat = list.map((g) => {
+      if (!g.index) return g;
+      const nn = g.toNonIndexed();
+      g.dispose();
+      return nn;
+    });
+    for (const g of flat) for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "uv") g.deleteAttribute(k);
+    const geo = mergeGeometries(flat, false);
+    for (const g of flat) g.dispose();
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.receiveShadow = true;
+    mesh.userData.keepMaterial = true;
+    group.add(mesh);
+  }
+  void light;
+  return { group, mats: mats.filter((m) => parts.get(m)?.length) };
+}
+
+/** 옷가게 유리 광고 */
+function clothesPoster(big: string, small: string) {
+  return canvasTex(360, 512, (g) => {
+    g.fillStyle = big === "SALE" ? "#c0392b" : "#1d1e22";
+    g.fillRect(0, 0, 360, 512);
+    g.fillStyle = "#ffffff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 96px ${FONT}`;
+    g.fillText(big, 180, 210);
+    g.font = `800 44px ${FONT}`;
+    g.fillStyle = "#f2d38a";
+    g.fillText(small, 180, 330);
+    g.font = `700 28px ${FONT}`;
+    g.fillStyle = "#ffffff";
+    g.fillText(CLOTHES_SHOP_NAME, 180, 452);
+  });
+}
+
+/** 발바닥 모양 (가운데 큰 볼록 + 발가락 넷) */
+function paw(g: CanvasRenderingContext2D, x: number, y: number, s: number, color: string) {
+  g.fillStyle = color;
+  g.beginPath();
+  g.ellipse(x, y + s * 0.18, s * 0.34, s * 0.28, 0, 0, Math.PI * 2);
+  g.fill();
+  for (const [dx, dy] of [
+    [-0.42, -0.15],
+    [-0.15, -0.42],
+    [0.15, -0.42],
+    [0.42, -0.15],
+  ]) {
+    g.beginPath();
+    g.ellipse(x + dx * s, y + dy * s, s * 0.13, s * 0.16, dx * 0.6, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+
+/** 펫샵 유리 광고 (발자국 + 한 줄) */
+function petPoster(text: string) {
+  return canvasTex(360, 512, (g) => {
+    g.fillStyle = "#fffaf0";
+    g.fillRect(0, 0, 360, 512);
+    g.fillStyle = "#2fae93";
+    g.fillRect(0, 0, 360, 26);
+    g.fillRect(0, 486, 360, 26);
+    paw(g, 180, 190, 190, "#f29a6b");
+    g.fillStyle = "#2b2b2b";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 ${text.length > 3 ? 62 : 84}px ${FONT}`;
+    g.fillText(text, 180, 390);
+    g.font = `700 30px ${FONT}`;
+    g.fillStyle = "#2fae93";
+    g.fillText(PET_SHOP_NAME, 180, 452);
+  });
+}
+
+/** 나뭇결 바닥 타일 */
+function woodFloorTexture() {
+  return canvasTex(
+    256,
+    256,
+    (g) => {
+      for (let r = 0; r < 8; r++) {
+        const off = (r % 2) * 64;
+        for (let c = -1; c < 3; c++) {
+          const k = (((r * 7 + c * 13) % 9) + 9) % 9 - 4;
+          g.fillStyle = `rgb(${214 + k * 3},${184 + k * 3},${140 + k * 2})`;
+          g.fillRect(off + c * 128, r * 32, 128, 32);
+          g.fillStyle = "rgba(90,60,30,0.25)";
+          g.fillRect(off + c * 128, r * 32, 2, 32);
+        }
+        g.fillStyle = "rgba(90,60,30,0.25)";
+        g.fillRect(0, r * 32, 256, 1);
+      }
+    },
+    true,
+  );
+}
+
+/**
+ * 펫샵 매장 안 (원점 = 안쪽 벽 가운데 바닥, +z = 유리 쪽).
+ * 뒷벽 진열장(두 줄 × 세 칸)에 강아지·고양이·햄스터·토끼 · 오른쪽 계산대 · 왼쪽 어항 · 사료 더미 · 밝은 천장 등.
+ * 정적인 물체는 재질(색)별로 합쳐서 그리기 횟수를 줄인다.
+ */
+function buildPetInterior(w: number, depth: number, ceilY: number, keep: (t: THREE.Texture) => THREE.Texture) {
+  const group = new THREE.Group();
+  const mats: THREE.MeshStandardMaterial[] = [];
+  const parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => {
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.75, ...extra });
+    mats.push(m);
+    return m;
+  };
+  const put = (m: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number) => {
+    geo.translate(x, y, z);
+    const list = parts.get(m) ?? [];
+    list.push(geo);
+    parts.set(m, list);
+  };
+  const box = (m: THREE.Material, bw: number, bh: number, bd: number, x: number, y: number, z: number) =>
+    put(m, new THREE.BoxGeometry(bw, bh, bd), x, y, z);
+
+  // 실내는 늘 불이 켜져 있다: 살짝 스스로 빛나게
+  const floorTex = keep(woodFloorTexture());
+  floorTex.repeat.set(w / 2, depth / 2);
+  const floor = std(0xffffff, { map: floorTex, emissive: 0x3a2a18, roughness: 0.6 });
+  put(floor, new THREE.PlaneGeometry(w, depth).rotateX(-Math.PI / 2), 0, 0.2, depth / 2);
+  const mint = std(0xbfe8da, { emissive: 0x1f3a33 });
+  box(mint, w, ceilY - 0.25, 0.04, 0, 0.2 + (ceilY - 0.25) / 2, 0.07);
+  const white = std(0xf6f4ef, { emissive: 0x2a2a28 });
+  const light = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
+  for (const z of [depth * 0.3, depth * 0.72]) box(light, w * 0.7, 0.04, 0.35, 0, ceilY - 0.04, z);
+
+  // 뒷벽 진열장: 아래 수납장 + 칸막이 두 줄
+  const cols = 3;
+  const cellW = Math.min(0.8, (w - 0.2) / cols);
+  const shelfW = cellW * cols;
+  const shelfD = 0.55;
+  const shelfZ = 0.09 + shelfD / 2;
+  box(white, shelfW + 0.06, 0.75, shelfD, 0, 0.2 + 0.375, shelfZ);
+  const rowY = [0.95, 1.6];
+  const rowH = 0.6;
+  for (const y of [...rowY, rowY[1] + rowH]) box(white, shelfW + 0.06, 0.04, shelfD, 0, y, shelfZ);
+  for (let c = 0; c <= cols; c++) box(white, 0.04, rowH * 2 + 0.04, shelfD, -shelfW / 2 + c * cellW, rowY[0] + rowH, shelfZ);
+  // 칸마다 푹신한 방석 + 아이
+  const cushion = [std(0xf2b8c6), std(0xa8d8f0), std(0xf7e3a1)];
+  const residents = ["maltese", "koshort", "hamster", "pomeranian", "rabbit", "cheese"];
+  const pets: ReturnType<typeof buildPet>[] = [];
+  residents.forEach((id, i) => {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    const x = -shelfW / 2 + cellW * (c + 0.5);
+    box(cushion[(i + r) % 3], cellW * 0.7, 0.05, shelfD * 0.6, x, rowY[r] + 0.045, shelfZ);
+    const sp = PET_BY_ID[id];
+    const pm = buildPet(sp);
+    // 칸 높이에 맞게 (작은 아이는 그대로, 큰 아이는 줄여서)
+    pm.root.scale.setScalar(Math.min(0.9, sp.size * 0.9));
+    pm.root.position.set(x, rowY[r] + 0.07, shelfZ);
+    pm.root.rotation.y = (c - 1) * -0.35;
+    animatePet(pm, i * 1.7, 0, i);
+    pets.push(pm);
+    group.add(pm.root);
+  });
+  // 진열장 유리 (앞면)
+  const glassFront = new THREE.MeshStandardMaterial({ color: 0xcfe6ee, transparent: true, opacity: 0.18, roughness: 0.05, depthWrite: false });
+  put(glassFront, new THREE.PlaneGeometry(shelfW, rowH * 2), 0, rowY[0] + rowH, shelfZ + shelfD / 2 + 0.02);
+
+  // 오른쪽 앞: 계산대 + 포스기
+  const counter = std(0x2fae93, { emissive: 0x0a2a22 });
+  const cw = Math.min(0.9, w * 0.3);
+  const cx = w / 2 - cw / 2 - 0.08;
+  box(counter, cw, 0.95, 0.5, cx, 0.2 + 0.475, depth - 1.1);
+  box(white, cw + 0.04, 0.04, 0.54, cx, 0.2 + 0.97, depth - 1.1);
+  box(std(0x222428), 0.28, 0.22, 0.2, cx + 0.08, 0.2 + 1.1, depth - 1.15);
+  // 왼쪽: 어항 (받침 + 파란 물 + 금붕어)
+  const tx = -w / 2 + 0.42;
+  const tz = depth - 1.4;
+  box(std(0x3a3d42), 0.7, 0.75, 0.4, tx, 0.2 + 0.375, tz);
+  const water = new THREE.MeshStandardMaterial({ color: 0x4fb8e8, emissive: 0x1d6fa0, emissiveIntensity: 0.9, transparent: true, opacity: 0.55, roughness: 0.1, depthWrite: false });
+  put(water, new THREE.BoxGeometry(0.66, 0.42, 0.36), tx, 0.2 + 0.75 + 0.21, tz);
+  const fish = std(0xff7a1a, { emissive: 0x662200 });
+  for (const [fx, fy, fz] of [
+    [-0.15, 1.12, 0.05],
+    [0.12, 1.02, -0.06],
+    [0.02, 1.2, 0.08],
+  ])
+    put(fish, new THREE.SphereGeometry(0.03, 8, 6).scale(1.6, 1, 0.8), tx + fx, fy, tz + fz);
+  // 사료 · 모래 포대 더미 (유리 바로 안쪽, 가운데 문은 비운다)
+  const bags = [std(0xe24b3b), std(0x3a7bd5), std(0xf2c230), std(0x8b5a2b)];
+  for (let k = 0; k < 4; k++) {
+    box(bags[k], 0.34, 0.48, 0.16, -w / 2 + 0.25 + (k % 2) * 0.38, 0.2 + 0.24 + Math.floor(k / 2) * 0.48, depth - 0.35);
+  }
+
+  // 정적인 것들을 합친다 (진열장 아이들도 색별로 묶는다)
+  for (const pm of pets) {
+    pm.root.updateMatrixWorld(true);
+    pm.root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const src = m.material as THREE.MeshStandardMaterial;
+      const hex = src.color.getHex();
+      let tgt = [...parts.keys()].find((k) => k.userData.petColor === hex && (k as THREE.MeshStandardMaterial).flatShading === src.flatShading);
+      if (!tgt) {
+        tgt = std(hex, { emissive: new THREE.Color(hex).multiplyScalar(0.15), flatShading: src.flatShading });
+        tgt.userData.petColor = hex;
+        parts.set(tgt, []);
+      }
+      parts.get(tgt)!.push(m.geometry.clone().applyMatrix4(m.matrixWorld));
+    });
+    disposePet(pm);
+  }
+  for (const [m, list] of parts) {
+    if (!list.length) continue;
+    const flat = list.map((g) => {
+      if (!g.index) return g;
+      const n = g.toNonIndexed();
+      g.dispose();
+      return n;
+    });
+    // 합치려면 속성 구성이 같아야 한다 (uv 가 없는 것도 있다)
+    for (const g of flat) for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "uv") g.deleteAttribute(k);
+    const geo = mergeGeometries(flat, false);
+    for (const g of flat) g.dispose();
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.receiveShadow = true;
+    mesh.userData.keepMaterial = true;
+    if ((m as THREE.MeshStandardMaterial).transparent) mesh.renderOrder = 1;
+    group.add(mesh);
+  }
+  return { group, mats: mats.filter((m) => parts.get(m)?.length) };
+}
+
+/** 옷가게 매장 (밖에서 유리 너머로 보이는 모습): 행거 두 줄 + 마네킹 + 뒷벽 선반. 재질별로 합쳐서 가볍게 */
+function buildClothesFront(w: number, depth: number, ceilY: number, keep: (t: THREE.Texture) => THREE.Texture) {
+  const group = new THREE.Group();
+  const mats: THREE.MeshStandardMaterial[] = [];
+  const parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const std = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => {
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.75, emissive: new THREE.Color(color).multiplyScalar(0.18), ...extra });
+    mats.push(m);
+    return m;
+  };
+  const put = (m: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number) => {
+    geo.translate(x, y, z);
+    const list = parts.get(m) ?? [];
+    list.push(geo);
+    parts.set(m, list);
+  };
+  const box = (m: THREE.Material, bw: number, bh: number, bd: number, x: number, y: number, z: number) => put(m, new THREE.BoxGeometry(bw, bh, bd), x, y, z);
+  const floorTex = keep(woodFloorTexture());
+  floorTex.repeat.set(w / 2, depth / 2);
+  put(std(0xffffff, { map: floorTex, emissive: 0x3a2a18, roughness: 0.6 }), new THREE.PlaneGeometry(w, depth).rotateX(-Math.PI / 2), 0, 0.2, depth / 2);
+  box(std(0xf1ece4), w, ceilY - 0.25, 0.04, 0, 0.2 + (ceilY - 0.25) / 2, 0.07);
+  const light = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
+  for (const z of [depth * 0.3, depth * 0.72]) box(light, w * 0.7, 0.04, 0.35, 0, ceilY - 0.04, z);
+  // 뒷벽: 짙은 판 + 선반 위 접은 옷
+  const dark = std(0x26272c);
+  box(dark, w - 0.2, 1.9, 0.05, 0, 0.2 + 1.15, 0.12);
+  const white = std(0xf7f6f2);
+  const cols = [0xd8344a, 0x8ec5f2, 0xf6d35b, 0x2a2b31, 0xf5a3c0, 0x7c7f4e, 0x6f95c8, 0xffffff];
+  const fold = cols.map((c) => std(c, { roughness: 0.95 }));
+  for (const [r, y] of [0.95, 1.5].entries()) {
+    box(white, w - 0.3, 0.03, 0.35, 0, 0.2 + y, 0.3);
+    const n = Math.max(2, Math.floor((w - 0.5) / 0.38));
+    for (let k = 0; k < n; k++) for (let h = 0; h < 3; h++) box(fold[(k * 3 + r + h) % fold.length], 0.3, 0.05, 0.28, -((n - 1) * 0.38) / 2 + k * 0.38, 0.2 + y + 0.04 + h * 0.052, 0.3);
+  }
+  // 행거 두 줄 (티셔츠를 앞으로 보이게)
+  const chrome = std(0xd9dce1, { metalness: 0.9, roughness: 0.2 });
+  for (const [side, z] of [[-1, depth * 0.45], [1, depth * 0.62]] as const) {
+    const rx = side * Math.min(0.75, w * 0.22);
+    const rw = Math.min(1.1, w * 0.32);
+    for (const s of [-1, 1]) put(chrome, new THREE.CylinderGeometry(0.015, 0.015, 1.45, 8), rx + (s * rw) / 2, 0.2 + 0.725, z);
+    put(chrome, new THREE.CylinderGeometry(0.012, 0.012, rw, 8).rotateZ(Math.PI / 2), rx, 0.2 + 1.45, z);
+    for (let k = 0; k < 4; k++) {
+      const x = rx - rw / 2 + 0.17 + k * ((rw - 0.34) / 3);
+      const m = fold[(k * 2 + (side > 0 ? 1 : 0)) % fold.length];
+      box(m, 0.26, 0.38, 0.02, x, 0.2 + 1.2, z + k * 0.025);
+      for (const s of [-1, 1]) put(m, new THREE.BoxGeometry(0.09, 0.12, 0.018).rotateZ(s * -0.6), x + s * 0.16, 0.2 + 1.34, z + k * 0.025);
+    }
+  }
+  // 유리 바로 안쪽 마네킹 (줄무늬 티 + 청바지 + 빨간 모자)
+  const mx = w / 2 - 0.45;
+  const mz = depth - 0.55;
+  const skin = std(0xeeeae4);
+  const stripeTex = keep(
+    canvasTex(64, 64, (g) => {
+      g.fillStyle = "#ffffff";
+      g.fillRect(0, 0, 64, 64);
+      g.fillStyle = "#24365e";
+      for (let y = 0; y < 64; y += 16) g.fillRect(0, y, 64, 7);
+    }),
+  );
+  const tee = std(0xffffff, { map: stripeTex });
+  const denim = std(0x6f95c8);
+  put(std(0x1c1d21), new THREE.CylinderGeometry(0.2, 0.22, 0.03, 18), mx, 0.215, mz);
+  for (const s of [-1, 1]) put(denim, new THREE.CylinderGeometry(0.065, 0.05, 0.8, 10), mx + s * 0.08, 0.2 + 0.68, mz);
+  put(tee, new THREE.CylinderGeometry(0.17, 0.15, 0.55, 14).scale(1, 1, 0.7), mx, 0.2 + 1.35, mz);
+  for (const s of [-1, 1]) put(skin, new THREE.CylinderGeometry(0.05, 0.04, 0.5, 8).rotateZ(s * 0.12), mx + s * 0.22, 0.2 + 1.32, mz);
+  put(skin, new THREE.SphereGeometry(0.11, 14, 10).scale(0.9, 1.1, 0.95), mx, 0.2 + 1.8, mz);
+  put(std(0xd8344a), new THREE.SphereGeometry(0.115, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.8, 1), mx, 0.2 + 1.84, mz);
+  for (const [m, list] of parts) {
+    if (!list.length) continue;
+    const flat = list.map((g) => {
+      if (!g.index) return g;
+      const n = g.toNonIndexed();
+      g.dispose();
+      return n;
+    });
+    for (const g of flat) for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "uv") g.deleteAttribute(k);
+    const geo = mergeGeometries(flat, false);
+    for (const g of flat) g.dispose();
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.receiveShadow = true;
+    mesh.userData.keepMaterial = true;
+    group.add(mesh);
+  }
+  return { group, mats: mats.filter((m) => parts.get(m)?.length) };
 }
 
 export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
@@ -391,7 +877,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   );
   // 앞면(+z) 은 실내 흰 벽: 따로 판으로 덮는다
   put(stone, core, 0, h / 2, coreZ);
-  const backWallZ = coreZ + coreD / 2 + 0.005;
+  const backWallZ = coreZ + coreD / 2 + 0.03;
   for (let f = 1; f <= floors; f++) {
     const y0 = base(f);
     const fh = f === 1 ? SHOP_GROUND_H : SHOP_FLOOR_H;
@@ -404,8 +890,10 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
     );
   }
   // 옆벽 (실내 양옆)
-  const sideD = roomD + 0.42;
-  const sideZ = front - sideD / 2;
+  // 앞쪽 기둥(pilD) 자리는 비운다 — 기둥과 같은 면이 겹쳐 깜박이지 않게
+  const pilD = 0.5;
+  const sideD = roomD + 0.42 - pilD;
+  const sideZ = front - pilD - sideD / 2;
   for (const s of [-1, 1])
     slab(stone, 0.3, h, sideD, s * (w / 2 - 0.15), h / 2, sideZ);
   // 실내 양옆 안쪽 면 (흰 벽)
@@ -414,7 +902,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
     put(
       plaster,
       p,
-      s * (w / 2 - 0.305),
+      s * (w / 2 - 0.33),
       h / 2,
       front - 0.42 - roomD / 2,
       -s * (Math.PI / 2),
@@ -439,13 +927,12 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
     roof,
     new THREE.PlaneGeometry(w - 0.4, d - 0.4).rotateX(-Math.PI / 2),
     0,
-    h + 0.012,
+    h + 0.04,
     0,
   );
 
   // ── 정면 석재: 양쪽 기둥 (1층은 짙은 화강석) + 층 띠 + 옥상 난간 ──
   const pilW = w < 6 ? 0.4 : 0.62;
-  const pilD = 0.5;
   for (const s of [-1, 1]) {
     const x = s * (w / 2 - pilW / 2);
     slab(
@@ -477,7 +964,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   boxAt(alu, w + 0.06, 0.06, 0.6, 0, h + 0.93, front - 0.3);
   // 옥상 난간 (옆·뒤, 낮게)
   for (const s of [-1, 1])
-    slab(stone, 0.2, 0.9, d - 0.6, s * (w / 2 - 0.1), h + 0.45, -0.3);
+    slab(stone, 0.2, 0.9, d - 0.8, s * (w / 2 - 0.1), h + 0.45, -0.2);
   slab(stone, w, 0.9, 0.2, 0, h + 0.45, -d / 2 + 0.1);
 
   // ── 위층 통유리: 알루미늄 멀리언 + 가로 창살 ──
@@ -511,24 +998,9 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
     : [[gx0, gx1]];
   // 점포 사이 기둥 · 계단 입구 옆 기둥 (화강석)
   if (wide) {
-    slab(
-      granite,
-      colW,
-      SHOP_GROUND_H - 0.3,
-      0.3,
-      midCol,
-      (SHOP_GROUND_H - 0.3) / 2,
-      front - 0.27,
-    );
-    slab(
-      granite,
-      colW,
-      SHOP_GROUND_H - 0.3,
-      0.3,
-      lx0 - colW / 2,
-      (SHOP_GROUND_H - 0.3) / 2,
-      front - 0.27,
-    );
+    // 간판 띠 아래까지만 (간판 띠 앞면과 겹치지 않게)
+    for (const cx of [midCol, lx0 - colW / 2])
+      slab(granite, colW, 3.05, 0.3, cx, 3.05 / 2, front - 0.27);
   }
   // 간판 띠 (짙은 금속 틀) — 1층 위쪽 3.05 ~ 3.9
   const signY0 = 3.05;
@@ -545,6 +1017,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   const shopGlassY1 = signY0;
 
   const flat: { mesh: THREE.Mesh; tex?: THREE.Texture }[] = [];
+  const mats: THREE.MeshStandardMaterial[] = [];
   const paper = (
     tex: THREE.Texture,
     pw: number,
@@ -568,18 +1041,35 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   const GHOSTS = ["CAFE", "부동산", "PC방", "편의점", "치킨", "HAIR", "분식"];
   const ghosts = units.map((_, i) => GHOSTS[(b.id * 3 + i) % GHOSTS.length]);
   /** 셔터를 반쯤 내린 점포 (건물마다 다르게, 없을 수도) */
-  const shutterAt = b.id % (units.length + 1);
+  const pet = b.tenant === "pet";
+  const clothes = b.tenant === "clothes";
+  const fishing = b.tenant === "fishing";
+  const shutterAt = pet || clothes || fishing ? -1 : b.id % (units.length + 1);
   units.forEach(([x0, x1], i) => {
     const uw = x1 - x0;
     const cx = (x0 + x1) / 2;
-    // 빈 간판 틀
-    paper(
+    // 빈 간판 틀 (펫샵은 불 켜진 간판)
+    if (pet || clothes || fishing) {
+      const sh = signY1 - signY0 - 0.12;
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(uw - 0.1, sh),
+        new THREE.MeshStandardMaterial({
+          map: keep(fishing ? fishingSignTexture((uw - 0.1) / sh) : clothes ? clothesSignTexture((uw - 0.1) / sh) : petSignTexture((uw - 0.1) / sh)),
+          emissive: 0xffffff,
+          emissiveMap: textures[textures.length - 1],
+          emissiveIntensity: 0.55,
+          roughness: 0.5,
+        }),
+      );
+      sign.position.set(cx, (signY0 + signY1) / 2, front - 0.09);
+      flat.push({ mesh: sign });
+    } else paper(
       blankSign(uw / (signY1 - signY0 - 0.16), ghosts[i]),
       uw - 0.12,
       signY1 - signY0 - 0.16,
       cx,
       (signY0 + signY1) / 2,
-      front - 0.115,
+      front - 0.09,
     );
     // 진열창 유리 + 아래 걸레받이 + 틀
     put(
@@ -615,7 +1105,22 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
           glassZ,
         );
     }
-    // 임대 안내문 (문 양쪽 유리, 안쪽에서 붙인 종이)
+    // 펫샵: 유리에 발자국 광고 / 빈 점포: 임대 안내문 (문 양쪽 유리, 안쪽에서 붙인 종이)
+    if (fishing) {
+      paper(fishingPoster("미끼", "지렁이 · 새우"), 0.42, 0.6, cx - dw / 2 - 0.42, 1.45, glassZ - 0.01);
+      paper(fishingPoster("수매", "잡은 고기 삽니다"), 0.42, 0.6, cx + dw / 2 + 0.42, 1.45, glassZ - 0.01);
+      return;
+    }
+    if (clothes) {
+      paper(clothesPoster("NEW", "신상 입고"), 0.42, 0.6, cx - dw / 2 - 0.42, 1.45, glassZ - 0.01);
+      paper(clothesPoster("SALE", "배틀 기어"), 0.42, 0.6, cx + dw / 2 + 0.42, 1.45, glassZ - 0.01);
+      return;
+    }
+    if (pet) {
+      paper(petPoster("분양"), 0.42, 0.6, cx - dw / 2 - 0.42, 1.45, glassZ - 0.01);
+      paper(petPoster("미용·호텔"), 0.42, 0.6, cx + dw / 2 + 0.42, 1.45, glassZ - 0.01);
+      return;
+    }
     paper(
       rentPoster(false),
       0.42,
@@ -638,8 +1143,26 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
       boxAt(alu, uw + 0.1, 0.3, 0.3, cx, shopGlassY1 + 0.05, glassZ + 0.12);
     }
   });
-  // 빈 점포 안: 접은 박스 더미 (마지막 점포 안쪽)
-  {
+  // 펫샵 매장 / 빈 점포 안: 접은 박스 더미 (마지막 점포 안쪽)
+  if (fishing) {
+    const [x0, x1] = units[0];
+    const fi = buildFishingFront(x1 - x0 - 0.1, roomD, SHOP_GROUND_H - 0.3, keep);
+    fi.group.position.set((x0 + x1) / 2, 0, glassZ - roomD);
+    group.add(fi.group);
+    for (const m of fi.mats) mats.push(m);
+  } else if (clothes) {
+    const [x0, x1] = units[0];
+    const ci = buildClothesFront(x1 - x0 - 0.1, roomD, SHOP_GROUND_H - 0.3, keep);
+    ci.group.position.set((x0 + x1) / 2, 0, glassZ - roomD);
+    group.add(ci.group);
+    for (const m of ci.mats) mats.push(m);
+  } else if (pet) {
+    const [x0, x1] = units[0];
+    const pi = buildPetInterior(x1 - x0 - 0.1, roomD, SHOP_GROUND_H - 0.3, keep);
+    pi.group.position.set((x0 + x1) / 2, 0, glassZ - roomD);
+    group.add(pi.group);
+    for (const m of pi.mats) mats.push(m);
+  } else {
     const [x0] = units[units.length - 1];
     for (let k = 0; k < 4; k++) {
       const bw = 0.5 + (k % 2) * 0.15;
@@ -671,7 +1194,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
       new THREE.PlaneGeometry(0.22, 1.2),
       lcx - 0.15,
       1.35,
-      lobbyZ + 0.035,
+      lobbyZ + 0.055,
     );
     boxAt(alu, 0.03, 0.3, 0.04, lcx + 0.25, 1.05, lobbyZ + 0.06);
     boxAt(lamp, 0.36, 0.08, 0.18, lcx - 0.15, 2.55, lobbyZ + 0.05);
@@ -701,7 +1224,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   // ── 현수막: 2층 띠에 가로로, 위층 오른쪽에 세로로 ──
   const bw = w - pilW * 2 - 0.5;
   const bh = 0.82;
-  paper(bannerTexture(bw / bh), bw, bh, 0, base(2) + 0.25, front + 0.01);
+  paper(bannerTexture(bw / bh, pet || clothes || fishing ? `2층~${floors}층` : `1층~${floors}층`), bw, bh, 0, base(2) + 0.25, front + 0.03);
   if (floors >= 3 && w >= 4) {
     const vh = Math.min(5.2, h - base(3) - 0.6);
     // 기둥 바로 옆, 층 띠 앞에 늘어뜨린다
@@ -711,7 +1234,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
       vh,
       gx1 - 0.45,
       base(3) + 0.45 + vh / 2,
-      front + 0.03,
+      front + 0.05,
     );
   }
   // 위층 유리마다 '임대' 종이 한두 장
@@ -730,13 +1253,14 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   }
 
   // ── 옥상: 계단실 + 실외기 ──
-  slab(stone, 3.2, 2.6, 3.0, -w / 2 + 2.0, h + 1.3, -d / 2 + 2.0);
+  // 좁은 건물에선 폭을 줄여 옆 건물과 맞닿지 않게
+  const stairW = Math.min(3.2, w - 1.2);
+  slab(stone, stairW, 2.6, 3.0, -w / 2 + 0.6 + stairW / 2, h + 1.3, -d / 2 + 2.0);
   const acs = Math.min(3, Math.floor((w - 0.8) / 1.1));
   for (let k = 0; k < acs; k++)
     boxAt(alu, 0.9, 0.7, 0.4, w / 2 - 0.85 - k * 1.1, h + 0.35, -d / 2 + 1.0);
 
   // ── 합치기 ──
-  const mats: THREE.MeshStandardMaterial[] = [];
   for (const [mat, list] of parts) {
     const geo = mergeGeometries(list, false);
     for (const g of list) g.dispose();

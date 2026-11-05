@@ -1,4 +1,5 @@
 import { FIGHTER_RADIUS, FPS, PLAYER_TEMPO } from './constants';
+import { BOSSES } from '../data/bosses';
 import { applyHit, detectHit, type CombatEvent, type PendingHit } from './combat';
 import { mulberry32 } from './controllers';
 import { Fighter } from './fighter';
@@ -282,7 +283,11 @@ export class FieldWorld {
     return Math.hypot(f.x - this.player.x, f.z - this.player.z);
   }
 
-  /** 자동: 가장 가까운 몬스터 (나를 공격 중인 몬스터 우선). 수동: 8m 이내만 */
+  /**
+   * 자동: 가까운 몬스터 (나를 공격 중인 몬스터 우선). 레벨에 맞는 사냥감을 고른다 —
+   * 나보다 너무 약하면 경험치가 적으니 덜 노리고, 2 레벨 넘게 강하면 위험하니 피한다.
+   * 수동: 8m 이내만
+   */
   private updateTarget() {
     if (this.target && (this.target.fighter.hp <= 0 || !this.monsters.includes(this.target))) this.target = null;
 
@@ -292,7 +297,12 @@ export class FieldWorld {
       if (m.fighter.hp <= 0) continue;
       const d = this.distTo(m.fighter);
       if (!this.auto && d > 8) continue;
-      const score = d - (m.aggro ? 3 : 0);
+      let score = d - (m.aggro ? 3 : 0);
+      if (this.auto && !m.aggro) {
+        const gap = this.level - m.type.level;
+        if (gap > 3) score += (gap - 3) * 3;
+        if (gap < -2) score += 100;
+      }
       if (score < bestScore) {
         bestScore = score;
         best = m;
@@ -403,6 +413,7 @@ export class FieldWorld {
   }
 
   private onExp(n: number) {
+    const before = this.profile.level;
     if (gainExp(this.profile, n) === 0) return;
     const st = playerStats(this.profile);
     const p = this.player;
@@ -411,6 +422,12 @@ export class FieldWorld {
     p.hp = p.maxHp;
     this.texts.push({ x: p.x, y: 2.6, z: p.z, text: 'LEVEL UP!', kind: 'level' });
     this.addLog(`레벨 업! Lv.${this.profile.level} (HP ${st.maxHp}, 공격력 x${st.power.toFixed(2)})`);
+    // 보스 권장 레벨에 닿으면 알려준다 (아직 못 깬 보스만)
+    for (const b of BOSSES) {
+      if (b.recommendedLevel > before && b.recommendedLevel <= this.profile.level && !this.profile.bossClears[b.id]) {
+        this.addLog(`⚔ 보스 '${b.name}' 권장 레벨 달성! 메인 메뉴 → 보스 레이드에서 도전해 보세요`);
+      }
+    }
   }
 
   private updateSpawns() {

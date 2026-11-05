@@ -30,13 +30,26 @@ export default function BossSelect({
           수동 조작 1:1 · 필드에서 올린 레벨이 그대로 적용됩니다
         </p>
 
-        <div className="mt-10 grid gap-5 md:grid-cols-3">
+        <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           {BOSSES.map((b) => {
+            // 추천: 레벨이 되고 아직 못 깬 보스 중 첫 번째
+            const recommendedId = BOSSES.find((x) => profile.level >= x.recommendedLevel && !profile.bossClears[x.id])?.id;
             const under = profile.level < b.recommendedLevel;
             const clears = profile.bossClears[b.id] ?? 0;
             const patterns = [...new Set([...b.moves, ...b.enrageMoves].map((m) => m.id))].map((id) => MOVES[id]);
             return (
-              <div key={b.id} className="flex flex-col rounded-xl border border-red-300/15 bg-white/[0.04] p-5">
+              <div
+                key={b.id}
+                className={`relative flex flex-col rounded-xl border bg-white/[0.04] p-5 ${
+                  recommendedId === b.id ? 'border-amber-300/70 shadow-[0_0_24px_rgba(251,191,36,0.25)]' : 'border-red-300/15'
+                }`}
+              >
+                {recommendedId === b.id && (
+                  <span className="absolute -top-2.5 right-4 rounded-full bg-amber-400 px-2 py-0.5 text-[11px] font-black text-black">추천</span>
+                )}
+                {clears > 0 && (
+                  <span className="absolute -top-2.5 left-4 rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-black text-black">✓ 클리어</span>
+                )}
                 <div className="text-xs text-white/50">{b.title}</div>
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-full" style={{ background: `#${b.color.toString(16).padStart(6, '0')}` }} />
@@ -65,7 +78,10 @@ export default function BossSelect({
                       최초 클리어 +{b.firstClearBonus.exp} EXP · +{b.firstClearBonus.gold} G
                     </div>
                   ) : (
-                    <div className="text-right text-xs text-white/50">클리어 {clears}회</div>
+                    <div className="text-right text-xs text-white/50">
+                      클리어 {clears}회
+                      {profile.bossBest[b.id] !== undefined && ` · 최단 ${profile.bossBest[b.id].toFixed(1)}초`}
+                    </div>
                   )}
                 </div>
 

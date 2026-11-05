@@ -47,6 +47,13 @@ export type FighterState =
   | 'getup'
   | 'ko';
 
+/** 벽꽝: 이만큼 이상 밀려나는 중에 벽에 닿으면 / 벽에 붙어 있는 프레임 */
+const WALL_SPLAT_MIN_SLIDE = 0.03;
+const WALL_SPLAT_STUN = 32;
+
+/** 잡기 풀기 입력 유효 시간 (1·2 를 누른 뒤 이 프레임 안에 잡히면 풀림) */
+const THROW_BREAK_FRAMES = 14;
+
 const NEUTRAL_STATES = new Set<FighterState>(['idle', 'walkF', 'walkB', 'run', 'crouch']);
 
 /** 이 상태에서는 매 프레임 상대를 바라본다 (철권식 자동 정면 유지). 공격 중엔 방향이 고정된다. */
@@ -119,7 +126,13 @@ export class Fighter {
   /** 직전 로직 프레임의 위치·방향 (화면 보간용, 로직에는 영향 없음) */
   private prev = { x: 0, y: 0, z: 0, fx: 1, fz: 0 };
   private slide = 0;
+  /** 이번 콤보에서 이미 벽꽝을 당했나 (콤보 한 번에 한 번만) */
+  private wallSplatUsed = false;
+  /** 1·2 를 막 누른 뒤 남은 프레임. 이 안에 잡히면 잡기를 푼다 */
+  throwBreak = 0;
   private sidestepSign = 1;
+  /** 1 = 화면 안쪽(위), -1 = 바깥쪽(아래)으로 횡이동 중 */
+  private sidestepToward: 1 | -1 = 1;
   private input: RelInput = NEUTRAL_INPUT;
   private prevInput: RelInput = NEUTRAL_INPUT;
   private dirHistory: Dir[] = [];
@@ -327,6 +340,7 @@ export class Fighter {
     }
     if (isUp(input.dir) && !isUp(prev.dir)) this.upPressed = true;
     if (input.jump && !prev.jump) this.jumpPressed = true;
+    if ((input.buttons[0] && !prev.buttons[0]) || (input.buttons[1] && !prev.buttons[1])) this.throwBreak = THROW_BREAK_FRAMES;
     this.detectFreeDash();
 
     this.dirHistory.push(input.dir);
@@ -339,6 +353,7 @@ export class Fighter {
   /** 한 프레임 진행: 상태 전이 → 이동 */
   tick(ctx: TickContext) {
     this.frame++;
+    if (this.throwBreak > 0) this.throwBreak--;
 
     switch (this.state) {
       case 'idle':
@@ -382,10 +397,18 @@ export class Fighter {
       case 'backdash':
         if (this.frame >= BACKDASH_FRAMES) this.returnToNeutral(ctx);
         break;
-      case 'sidestep':
+      case 'sidestep': {
         if (this.frame > 5 && this.tryAttack()) break;
+        // 횡보: 같은 방향(위/아래)을 계속 누르고 있으면 멈추지 않고 옆으로 계속 걷는다
+        const d = this.input.dir;
+        const holding = this.sidestepToward === 1 ? isUp(d) : isDown(d);
+        if (holding && this.frame >= SIDESTEP_FRAMES - 5) {
+          this.frame = 6;
+          break;
+        }
         if (this.frame >= SIDESTEP_FRAMES) this.returnToNeutral(ctx);
         break;
+      }
       case 'attack':
         if (this.comboUpgrade) {
           // 짝 버튼이 바로 들어왔다: 동시 입력 기술로 갈아탄다
@@ -501,6 +524,23 @@ export class Fighter {
     return dmg;
   }
 
+  /**
+   * 벽꽝: 세게 맞고 밀려나다 경기장 끝에 부딪히면 벽에 붙어 잠깐 못 움직인다 (추가 콤보 기회).
+   * 콤보 한 번에 한 번만. @returns 벽꽝이 났으면 true
+   */
+  tryWallSplat(): boolean {
+    if (this.wallSplatUsed || this.hp <= 0) return false;
+    if (this.state !== 'hitstun' && this.state !== 'launched') return false;
+    if (this.slide < WALL_SPLAT_MIN_SLIDE) return false;
+    this.wallSplatUsed = true;
+    this.slide = 0;
+    this.y = 0;
+    this.vy = 0;
+    this.enter('hitstun');
+    this.stun = WALL_SPLAT_STUN;
+    return true;
+  }
+
   // ───────────────────────── 내부 ─────────────────────────
 
   private enter(state: FighterState) {
@@ -522,6 +562,7 @@ export class Fighter {
     this.combo = 0;
     this.comboDamage = 0;
     this.juggleCount = 0;
+    this.wallSplatUsed = false;
 
     if (this.tryAttack()) return;
     if (this.jumpPressed) return this.startJump();
@@ -691,6 +732,7 @@ export class Fighter {
     const pz = this.fx;
     const dot = px * ctx.awayX + pz * ctx.awayZ;
     this.sidestepSign = (dot >= 0 ? 1 : -1) * toward;
+    this.sidestepToward = toward;
     this.enter('sidestep');
   }
 

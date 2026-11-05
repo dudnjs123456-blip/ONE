@@ -1,11 +1,11 @@
 import type { HudState } from '@/game/core/match';
 
-function HealthBar({ hp, maxHp, side }: { hp: number; maxHp: number; side: 0 | 1 }) {
+function HealthBar({ hp, maxHp, side, rage = false }: { hp: number; maxHp: number; side: 0 | 1; rage?: boolean }) {
   const pct = `${(hp / maxHp) * 100}%`;
   const align = side === 0 ? 'right-0' : 'left-0';
   const low = hp / maxHp < 0.25;
   return (
-    <div className="relative h-5 flex-1 overflow-hidden rounded-sm border border-white/30 bg-black/60">
+    <div className={`relative h-5 w-full shrink-0 overflow-hidden rounded-sm border bg-black/60 ${rage ? 'animate-pulse border-red-400 shadow-[0_0_12px_rgba(248,113,113,0.8)]' : 'border-white/30'}`}>
       {/* 데미지 잔상: 늦게 줄어든다 */}
       <div
         className={`absolute top-0 h-full bg-white/70 transition-[width] delay-300 duration-700 ${align}`}
@@ -15,6 +15,11 @@ function HealthBar({ hp, maxHp, side }: { hp: number; maxHp: number; side: 0 | 1
         className={`absolute top-0 h-full ${align} ${low ? 'bg-red-500' : 'bg-gradient-to-b from-amber-300 to-amber-500'}`}
         style={{ width: pct }}
       />
+      {rage && (
+        <span className={`absolute top-1/2 -translate-y-1/2 text-[11px] font-black italic tracking-widest text-red-200 drop-shadow ${side === 0 ? 'left-1' : 'right-1'}`}>
+          RAGE
+        </span>
+      )}
     </div>
   );
 }
@@ -32,7 +37,8 @@ function Wins({ wins, side }: { wins: number; side: 0 | 1 }) {
   );
 }
 
-export default function Hud({ hud }: { hud: HudState }) {
+/** @param raised 화면 아래에 터치 버튼이 있으면 프레임 정보를 위로 올린다 */
+export default function Hud({ hud, raised = false }: { hud: HudState; raised?: boolean }) {
   const [p1, p2] = hud.fighters;
   const training = hud.mode === 'training';
   const lh = hud.lastHit;
@@ -42,7 +48,7 @@ export default function Hud({ hud }: { hud: HudState }) {
       {/* 상단: 체력바 + 타이머 */}
       <div className="flex items-start gap-3 px-6 pt-4">
         <div className="flex flex-1 flex-col gap-1">
-          <HealthBar hp={p1.hp} maxHp={p1.maxHp} side={0} />
+          <HealthBar hp={p1.hp} maxHp={p1.maxHp} side={0} rage={p1.rage} />
           <div className="flex items-center justify-between text-sm font-bold tracking-wider">
             <span className="text-red-400">{p1.name}</span>
             {!training && <Wins wins={p1.wins} side={0} />}
@@ -52,7 +58,7 @@ export default function Hud({ hud }: { hud: HudState }) {
           {training ? '∞' : hud.timer}
         </div>
         <div className="flex flex-1 flex-col gap-1">
-          <HealthBar hp={p2.hp} maxHp={p2.maxHp} side={1} />
+          <HealthBar hp={p2.hp} maxHp={p2.maxHp} side={1} rage={p2.rage} />
           <div className="flex items-center justify-between text-sm font-bold tracking-wider">
             {!training && <Wins wins={p2.wins} side={1} />}
             <span className="text-blue-400">{p2.name}</span>
@@ -79,7 +85,7 @@ export default function Hud({ hud }: { hud: HudState }) {
 
       {/* 프레임 데이터 (개발용) */}
       {lh && (
-        <div className="absolute bottom-4 left-4 rounded bg-black/60 px-3 py-2 font-mono text-xs leading-5">
+        <div className={`absolute left-4 rounded bg-black/60 px-3 py-2 font-mono text-xs leading-5 ${raised ? 'bottom-44' : 'bottom-4'}`}>
           <div>
             <span className={lh.attacker === 0 ? 'text-red-400' : 'text-blue-400'}>P{lh.attacker + 1}</span>{' '}
             {lh.name} <span className="text-white/50">[{lh.notation}]</span> i{lh.startup}

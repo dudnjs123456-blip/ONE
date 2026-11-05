@@ -278,6 +278,9 @@ export function toonify(root: THREE.Object3D, swapped = new Map<THREE.Material, 
  * 하늘: 지평선 → 하늘 꼭대기 그라데이션 + 해 주변 빛무리 (단색 배경 대신).
  * 안개 색은 지평선 색과 맞춘다.
  */
+const _c = new THREE.Color();
+const _g = new THREE.Color();
+
 export class SkyDome {
   readonly mesh: THREE.Mesh;
   private mat: THREE.ShaderMaterial;
@@ -321,15 +324,27 @@ export class SkyDome {
   }
 
   /** @returns 지평선 색 (안개 색으로 쓴다) */
-  update(daylight: number, dusk: number, sunDir: THREE.Vector3): THREE.Color {
+  update(daylight: number, dusk: number, sunDir: THREE.Vector3, cloud = 0, flash = 0): THREE.Color {
     const u = this.mat.uniforms;
     const night = 1 - daylight;
-    (u.top.value as THREE.Color).setHex(0x3d7fd1).lerp(new THREE.Color(0x050816), night).lerp(new THREE.Color(0x4a3a8a), dusk * 0.5);
-    (u.horizon.value as THREE.Color).setHex(0xcfe7f7).lerp(new THREE.Color(0x1a2142), night).lerp(new THREE.Color(0xff9a5c), Math.min(0.8, dusk));
-    (u.sunColor.value as THREE.Color).setHex(0xfff0c8).lerp(new THREE.Color(0xff7a3a), Math.min(1, dusk));
+    // 흐린 날: 노을도 구름에 묻히고 하늘이 회색으로
+    dusk *= 1 - cloud * 0.7;
+    const top = (u.top.value as THREE.Color).setHex(0x3d7fd1).lerp(_c.setHex(0x050816), night).lerp(_c.setHex(0x4a3a8a), dusk * 0.5);
+    const hor = (u.horizon.value as THREE.Color).setHex(0xcfe7f7).lerp(_c.setHex(0x1a2142), night).lerp(_c.setHex(0xff9a5c), Math.min(0.8, dusk));
+    if (cloud > 0) {
+      const grey = _g.setHex(0x8d959e).lerp(_c.setHex(0x15181f), night);
+      top.lerp(grey, cloud * 0.85);
+      hor.lerp(grey.multiplyScalar(1.12), cloud * 0.75);
+    }
+    // 번개: 하늘 전체가 번쩍
+    if (flash > 0) {
+      top.lerp(_c.setHex(0xdde4ff), flash * 0.8);
+      hor.lerp(_c.setHex(0xeef0ff), flash * 0.8);
+    }
+    (u.sunColor.value as THREE.Color).setHex(0xfff0c8).lerp(_c.setHex(0xff7a3a), Math.min(1, dusk));
     u.sunDir.value.copy(sunDir);
-    u.sunGlow.value = Math.max(0, daylight + dusk * 0.6);
-    return u.horizon.value as THREE.Color;
+    u.sunGlow.value = Math.max(0, daylight + dusk * 0.6) * (1 - cloud * 0.9);
+    return hor;
   }
 
   /** 카메라를 따라다닌다 (하늘이 멀리 있는 것처럼) */

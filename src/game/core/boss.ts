@@ -24,6 +24,8 @@ export interface BossResult {
   levelUps: number;
   newLevel: number;
   clearTime: number;
+  /** 이 보스 최단 기록을 깼나 (처음 깬 경우는 false — 비교할 기록이 없으니) */
+  newRecord?: boolean;
 }
 
 export interface BossHudState {
@@ -267,12 +269,14 @@ export class BossBattle {
       this.profile.bossClears[this.boss.id] = (this.profile.bossClears[this.boss.id] ?? 0) + 1;
       const clearTime = Math.round((this.boss.timeLimit - this.timerFrames / FPS) * 100) / 100;
       const best = this.profile.bossBest[this.boss.id];
+      const newRecord = best !== undefined && clearTime < best;
       if (best === undefined || clearTime < best) this.profile.bossBest[this.boss.id] = clearTime;
       this.profile.gold += gold;
       const levelUps = gainExp(this.profile, exp);
       this.result = {
         win: true, exp, gold, firstClear: first, levelUps, newLevel: this.profile.level,
         clearTime: this.boss.timeLimit - this.timerFrames / FPS,
+        newRecord,
       };
       this.setPhase('victory');
     } else if (p.hp <= 0 || this.timerFrames <= 0) {

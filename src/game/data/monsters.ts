@@ -35,6 +35,12 @@ export const MONSTERS: Record<string, MonsterType> = {
     color: 0xa23b3b, scale: 1.35, runSpeed: 0.045,
     moves: ['bodyBlow', 'highKick', 'sweep'], attackGap: 85, aggroRange: 6,
   },
+  // Lv.6 오우거와 Lv.10 마왕 사이를 잇는 사냥감 (필드 가장자리)
+  darkKnight: {
+    id: 'darkKnight', name: '흑기사', level: 9, maxHp: 520, power: 1.7, exp: 220, gold: 95,
+    color: 0x2b3550, scale: 1.2, runSpeed: 0.055,
+    moves: ['dfJab', 'uppercut', 'midKick', 'sweep'], attackGap: 70, aggroRange: 7,
+  },
 };
 
 export interface SpawnDef {
@@ -55,6 +61,8 @@ export const FIELD_SPAWNS: SpawnDef[] = [
   }),
   { type: 'ogre', x: 17, z: -15 },
   { type: 'ogre', x: -16, z: 16 },
+  { type: 'darkKnight', x: -18, z: -17 },
+  { type: 'darkKnight', x: 18, z: 18 },
 ];
 
 export const MONSTER_RESPAWN_FRAMES = 60 * 6;

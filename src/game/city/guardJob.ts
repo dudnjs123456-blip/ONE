@@ -1,10 +1,10 @@
-import { Fighter } from '../core/fighter';
+import { Fighter, type FighterState } from '../core/fighter';
 import { saveProfile } from '../core/profile';
-import { applyHit, detectHit } from '../core/combat';
+import { applyHit, detectHit, type CombatEvent } from '../core/combat';
 import { NEUTRAL_INPUT } from '../core/input';
 import { GUARD_GIFTS, JOB_BY_ID, ROBBER_TIERS, robberStats, type RobberTier } from '../data/jobs';
 import { MOVES } from '../data/moves';
-import { CORRIDOR, LOBBY, type CityWorld } from './cityWorld';
+import { CORRIDOR, LOBBY, type CityWorld, type Speech } from './cityWorld';
 import type { WorkEntry } from './calendar';
 
 /**
@@ -86,6 +86,40 @@ export interface LobbyPerson {
   showUntil: number;
 }
 
+/** 친구 화면에 보내는 로비·복도 사람 하나 */
+export interface NetJobPerson {
+  /** 사람 번호 (Fighter.index) */
+  i: number;
+  sl: number;
+  /** 있는 곳: 1 = 로비, 2+ = 그 층 복도 */
+  w: number;
+  k: 'v' | 'r';
+  t: string;
+  /** 강도 난이도 id */
+  tr?: string;
+  x: number;
+  z: number;
+  y: number;
+  fx: number;
+  fz: number;
+  s: FighterState;
+  f: number;
+  m: string | null;
+  hp: number;
+  mh: number;
+  ko: 0 | 1;
+  re?: 'help' | 'flee';
+  /** 머리 위 이름표를 보이나 */
+  sh: 0 | 1;
+}
+export type NetJobSpeech = Speech & { w: number };
+/** 근무하는 사람이 같은 건물의 친구에게 보내는 장면 */
+export interface NetJobScene {
+  p: NetJobPerson[];
+  sp: NetJobSpeech[];
+  ev: { w: number; e: CombatEvent }[];
+}
+
 export class GuardShift {
   readonly job = JOB;
   readonly minutesPerFrame = GUARD_MINUTES_PER_FRAME;
@@ -120,6 +154,43 @@ export class GuardShift {
   constructor(private world: CityWorld) {
     this.startDay = world.day;
     this.startMinutes = world.minutes;
+  }
+
+  // ───────── 같이 보기 (친구에게 보내는 근무 장면) ─────────
+
+  /** 근무를 시작한 실제 시각: 둘이 거의 동시에 시작하면 먼저 시작한 쪽이 근무한다 */
+  readonly startedAt = Date.now();
+  /** 친구에게 아직 안 보낸 말풍선·타격 이펙트 (어디서 일어났는지 함께) */
+  private netSpeech: NetJobSpeech[] = [];
+  private netEvents: { w: number; e: CombatEvent }[] = [];
+
+  /** 사람 말풍선: 내 화면에 띄우고, 같은 곳의 친구 화면에도 보낸다 */
+  private speak(where: number, s: Speech) {
+    this.world.pushSpeech(s);
+    this.netSpeech.push({ w: where, ...s });
+    if (this.netSpeech.length > 20) this.netSpeech.shift();
+  }
+
+  /** 타격 이펙트: 내 화면 + 친구 화면 */
+  private emit(where: number, e: CombatEvent) {
+    this.world.pushEvent(e);
+    this.netEvents.push({ w: where, e });
+    if (this.netEvents.length > 20) this.netEvents.shift();
+  }
+
+  /** 지금 로비·복도 장면 (친구에게 보낸다). 보낸 말풍선·이펙트는 비운다 */
+  netScene(): NetJobScene {
+    const q = (v: number) => Math.round(v * 100) / 100;
+    const frame = this.world.frame;
+    const p: NetJobPerson[] = this.people.map((v) => ({
+      i: v.f.index, sl: v.slot, w: v.where, k: v.kind === 'robber' ? 'r' : 'v', t: v.title, tr: v.tier?.id,
+      x: q(v.f.x), z: q(v.f.z), y: q(v.f.y), fx: q(v.f.fx), fz: q(v.f.fz), s: v.f.state, f: v.f.frame, m: v.f.move?.id ?? null,
+      hp: Math.round(v.f.hp), mh: v.f.maxHp, ko: v.koFrames >= 0 ? 1 : 0, re: v.reaction, sh: frame < v.showUntil ? 1 : 0,
+    }));
+    const out: NetJobScene = { p, sp: this.netSpeech, ev: this.netEvents };
+    this.netSpeech = [];
+    this.netEvents = [];
+    return out;
   }
 
   /** 이 층의 이 지점을 지금 순찰에서 점검해야 하나 */
@@ -300,11 +371,11 @@ export class GuardShift {
       life.hunger = Math.max(0, life.hunger - g.hunger);
       life.fatigue = Math.max(0, life.fatigue - g.fatigue);
       this.gifts++;
-      w.pushSpeech({ x: v.f.x, z: v.f.z, text: g.line, color: '#ffe08a' });
+      this.speak(v.where, { x: v.f.x, z: v.f.z, text: g.line, color: '#ffe08a' });
       const eff = [g.hunger ? `배고픔 -${g.hunger}` : '', g.fatigue ? `피로도 -${g.fatigue}` : ''].filter(Boolean).join(', ');
       w.say(`${g.icon} ${v.title}이(가) ${g.name}을(를) 주셨다 (${eff})`, 3.5);
     } else {
-      w.pushSpeech({ x: v.f.x, z: v.f.z, text: GREET[Math.floor(w.random() * GREET.length)] });
+      this.speak(v.where, { x: v.f.x, z: v.f.z, text: GREET[Math.floor(w.random() * GREET.length)] });
     }
   }
 
@@ -451,7 +522,7 @@ export class GuardShift {
       w.say(`🚨 비상! ${tier.name} 침입 — 어느 층으로 갔는지 모른다. ${HUNT_FRAMES / 60}초 안에 찾아서 퇴치하라!`, 5);
       return;
     }
-    w.pushSpeech({ x: f.x, z: f.z, text: tier.line, color: '#ff7a7a' });
+    this.speak(where, { x: f.x, z: f.z, text: tier.line, color: '#ff7a7a' });
     w.say(tier.warning ?? `🚨 ${tier.name}이(가) 로비에 들어왔다!`, 4);
     // 자동 체크 중이었으면 멈추고 바로 일어나 싸울 준비
     if (this.autoCheck) {
@@ -490,7 +561,7 @@ export class GuardShift {
         if (++v.waitFrames > WAIT_FRAMES) {
           this.missed++;
           v.phase = 'leave';
-          w.pushSpeech({ x: f.x, z: f.z, text: '경비 아저씨 어디 가셨지…?', color: '#c8c8c8' });
+          this.speak(v.where, { x: f.x, z: f.z, text: '경비 아저씨 어디 가셨지…?', color: '#c8c8c8' });
         }
         const dx = w.player.x - f.x;
         const dz = w.player.z - f.z;
@@ -526,7 +597,7 @@ export class GuardShift {
     const r = this.robberAt(v.where);
     if (!r) {
       // 상황 끝: 돕던 사람은 한마디 하고 갈 길 간다
-      if (v.reaction === 'help') w.pushSpeech({ x: f.x, z: f.z, text: RELIEF[Math.floor(w.random() * RELIEF.length)], color: '#bfe9ff' });
+      if (v.reaction === 'help') this.speak(v.where, { x: f.x, z: f.z, text: RELIEF[Math.floor(w.random() * RELIEF.length)], color: '#bfe9ff' });
       v.reaction = undefined;
       v.phase = 'leave';
       f.runSpeed = 0.035;
@@ -536,7 +607,7 @@ export class GuardShift {
       v.reaction = w.random() < HELP_CHANCE ? 'help' : 'flee';
       v.showUntil = w.frame + 60 * 60;
       const lines = v.reaction === 'help' ? BRAVE : SCARED;
-      w.pushSpeech({ x: f.x, z: f.z, text: lines[Math.floor(w.random() * lines.length)], color: v.reaction === 'help' ? '#9de6a0' : '#ffd0d0' });
+      this.speak(v.where, { x: f.x, z: f.z, text: lines[Math.floor(w.random() * lines.length)], color: v.reaction === 'help' ? '#9de6a0' : '#ffd0d0' });
       if (v.reaction === 'help') f.power = 0.6;
       // 도망: 들어오던 사람은 현관으로, 내려오던 사람은 위층으로
       if (v.reaction === 'flee') v.exit = Math.hypot(f.x - LOBBY_PATH.door.x, f.z - LOBBY_PATH.door.z) < Math.hypot(f.x - v.exit.x, f.z - v.exit.z) ? LOBBY_PATH.door : v.exit;
@@ -573,7 +644,6 @@ export class GuardShift {
 
   /** 돕는 주민의 공격이 강도에게, 강도의 공격이 돕는 주민에게 맞았나 */
   private helperHits() {
-    const w = this.world;
     for (const h of this.people) {
       if (h.kind !== 'visitor' || h.reaction !== 'help' || h.koFrames >= 0) continue;
       const r = this.robberAt(h.where);
@@ -581,16 +651,16 @@ export class GuardShift {
       const hit = detectHit(h.f, r.f);
       if (hit) {
         const out = applyHit(hit);
-        w.pushEvent(out.event);
+        this.emit(h.where, out.event);
         if (r.f.hp <= 0) this.robberDown(r, h);
       }
       const back = detectHit(r.f, h.f);
       if (back) {
         const out = applyHit(back);
-        w.pushEvent(out.event);
+        this.emit(h.where, out.event);
         if (h.f.hp <= 0) {
           h.koFrames = 0;
-          w.pushSpeech({ x: h.f.x, z: h.f.z, text: '으윽…', color: '#ffd0d0' });
+          this.speak(h.where, { x: h.f.x, z: h.f.z, text: '으윽…', color: '#ffd0d0' });
         }
       }
     }
@@ -640,7 +710,7 @@ export class GuardShift {
     if (this.hunt?.robber === v && !this.hunt.found) {
       this.hunt.found = true;
       w.say(`🔦 찾았다! ${v.where === 1 ? '1층 로비' : `${v.where}층 복도`}에 ${t.name}이(가) 있다!`, 3);
-      w.pushSpeech({ x: f.x, z: f.z, text: '들켰다…! 덤벼!', color: '#ff7a7a' });
+      this.speak(v.where, { x: f.x, z: f.z, text: '들켰다…! 덤벼!', color: '#ff7a7a' });
     }
     const dx = p.x - f.x;
     const dz = p.z - f.z;
@@ -667,7 +737,7 @@ export class GuardShift {
       const h = detectHit(f, p);
       if (h) {
         const out = applyHit(h);
-        w.pushEvent(out.event);
+        this.emit(v.where, out.event);
         w.hitstop = Math.max(w.hitstop, Math.min(out.hitstop, 4));
         w.lastCombatFrame = w.frame;
         w.standUp();
@@ -685,17 +755,17 @@ export class GuardShift {
       const h = detectHit(p, v.f);
       if (!h) continue;
       const out = applyHit(h);
-      w.pushEvent(out.event);
+      this.emit(v.where, out.event);
       w.hitstop = Math.max(w.hitstop, Math.min(out.hitstop, 5));
       w.lastCombatFrame = w.frame;
       v.showUntil = Math.max(v.showUntil, w.frame + 240);
       if (v.kind === 'visitor' && v.reaction === 'help') {
         // 같이 싸우던 주민을 실수로 친 건 봐준다
-        w.pushSpeech({ x: v.f.x, z: v.f.z, text: '아야! 저 말고요!', color: '#ffd0d0' });
+        this.speak(v.where, { x: v.f.x, z: v.f.z, text: '아야! 저 말고요!', color: '#ffd0d0' });
         continue;
       }
       if (v.kind === 'visitor') {
-        w.pushSpeech({ x: v.f.x, z: v.f.z, text: '아니 경비가 사람을 때려요?!', color: '#ff9d7a' });
+        this.speak(v.where, { x: v.f.x, z: v.f.z, text: '아니 경비가 사람을 때려요?!', color: '#ff9d7a' });
         w.fireFromJob();
         return;
       }

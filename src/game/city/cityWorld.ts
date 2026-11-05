@@ -2,7 +2,7 @@ import { FIGHTER_RADIUS, PLAYER_TEMPO } from '../core/constants';
 import { mulberry32 } from '../core/controllers';
 import { Fighter, type FighterState } from '../core/fighter';
 import { NEUTRAL_INPUT, dirFrom } from '../core/input';
-import { saveProfile, type FridgeFood, type PlayerProfile } from '../core/profile';
+import { gainExp, saveProfile, type FridgeFood, type PlayerProfile } from '../core/profile';
 import type { Buttons } from '../core/types';
 import { applyHit, detectHit, type CombatEvent } from '../core/combat';
 import { ITEMS, ITEM_IDS } from '../data/items';
@@ -11,13 +11,49 @@ import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
 import { MOVES, totalFrames, type MoveDef } from '../data/moves';
-import { ensureGear, playerStats } from '../data/equipment';
-import { JOB_BY_ID } from '../data/jobs';
-import { GuardShift, LOBBY_PATH, type ShiftEnd } from './guardJob';
+import { EQUIPS, ensureGear, playerStats } from '../data/equipment';
+import { COSMETIC_BY_ID, ensureWardrobe, wornList, type CosmeticDef, type CosmeticSlot } from '../data/fashion';
+import { JOB_BY_ID, ROBBER_TIERS } from '../data/jobs';
+import { GuardShift, LOBBY_PATH, type LobbyPerson, type NetJobScene, type ShiftEnd } from './guardJob';
 import { unitPlace, villaFloor } from './villa';
+import { SeniorAI } from './senior';
 import { roadSolids, stopLines, vehicleLight, type Light, type Rect as RoadRect } from './traffic';
+import { PetCare } from './pets';
+import { PenSim, petGoodsStock, petStock, storeLayout, type ClothesCorner, type StockPet, type StoreLayout } from './store';
+import { PET_BY_ID, PET_GOOD_BY_ID, PET_SHOP_NAME, coatOf } from '../data/pets';
+import { FishingSession, type FishPhase, type FishResult, type FishScene } from './fishing';
+import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
+import { weatherAt, type WeatherState } from './weather';
 
-export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor';
+export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store';
+
+/** 마지막으로 있던 곳 (새로고침 후 이어서 시작) */
+export interface PlaceSnapshot {
+  loc: CityLocation;
+  x: number;
+  z: number;
+  fx: number;
+  fz: number;
+  floor: number;
+  /** 가게 안이면 그 가게 간판 */
+  sign?: string;
+  /** 가게에서 나가면 설 자리 */
+  back?: { x: number; z: number };
+  friendHome?: boolean;
+}
+
+/** 문 하나 지나가기 (passDoor) */
+export interface DoorPass {
+  /** 처음에 열리는 문 / 들어선 쪽에서 닫히는 문 */
+  open: string;
+  close: string;
+  /** 문 쪽을 보는 방향 · 문턱까지 걸어갈 곳 · 들어선 뒤 걸어 나올 곳 */
+  face: { x: number; z: number };
+  to: { x: number; z: number };
+  out: { x: number; z: number };
+  /** 장소를 옮긴다 (화면이 깜깜할 때) */
+  arrive: () => void;
+}
 
 export interface CityInput {
   /** 월드 기준 이동 방향 (카메라 기준으로 이미 변환됨) */
@@ -32,6 +68,8 @@ export interface CityInput {
   /** 아래 방향키를 누르고 있나 (싸울 때는 숙이기) */
   down?: boolean;
   jump?: boolean;
+  /** 이번 프레임에 점프 키(Space)를 새로 눌렀나 (낚시 연타) */
+  jumpTap?: boolean;
 }
 
 export interface Rect {
@@ -61,7 +99,8 @@ export const HOME = {
     { id: 'bed', kind: 'home', label: '침대', x: 3.6, z: -0.5, radius: 1.1 },
     { id: 'pc', kind: 'home', label: '컴퓨터', x: -0.9, z: -2.8, radius: 1.0 },
     { id: 'fridge', kind: 'home', label: '냉장고', x: -3.8, z: 0.0, radius: 1.0 },
-    { id: 'sofa', kind: 'home', label: '소파', x: 3.4, z: 2.4, radius: 1.0 },
+    { id: 'sofa', kind: 'home', label: '소파 (눕기)', x: 3.4, z: 2.4, radius: 1.0 },
+    { id: 'tv', kind: 'home', label: 'TV (유튜브 보기)', x: 3.5, z: 0.95, radius: 0.8 },
     { id: 'calendar', kind: 'home', label: '달력 (근무 기록 보기)', x: -3.3, z: -3.0, radius: 0.9 },
     { id: 'window', kind: 'home', label: '창문 (열고 밖 보기)', x: 1.05, z: -3.0, radius: 0.75 },
   ] as Poi[],
@@ -76,19 +115,49 @@ export const HOME = {
     sit: { x: 2.4, z: -2.6, yaw: -Math.PI / 2 },
     lie: { x: 3.45, y: 0.8, z: -1.75, yaw: 0 },
   },
+  /** 소파: TV 쪽(북쪽)을 보고 앉는 골반 위치(sit), 서쪽 팔걸이에 머리를 괴고 옆으로 누운 골반 위치(lie) */
+  sofa: {
+    sit: { x: 3.4, z: 3.44, yaw: Math.PI },
+    lie: { x: 3.05, y: 0.6, z: 3.27, yaw: Math.PI },
+  },
 };
+
+/** 소파에서 할 수 있는 동작 (숫자 키 1~6) */
+export type SofaAct = 'sit' | 'relax' | 'lounge' | 'phone' | 'stretch' | 'cheer' | 'doze';
+export const SOFA_ACTS: { id: SofaAct; icon: string; label: string }[] = [
+  { id: 'relax', icon: '🛋️', label: '기대앉기' },
+  { id: 'lounge', icon: '😌', label: '옆으로 눕기' },
+  { id: 'phone', icon: '📱', label: '휴대폰' },
+  { id: 'stretch', icon: '🙆', label: '기지개' },
+  { id: 'cheer', icon: '👏', label: 'TV 응원' },
+  { id: 'doze', icon: '😴', label: '꾸벅꾸벅' },
+];
+/** 소파 동작끼리 넘어가는 프레임 */
+const SOFA_BLEND = 36;
+/** 기지개는 한 번 하고 기대앉기로 돌아간다 */
+const SOFA_STRETCH = 180;
 
 /**
  * 행복빌라 1층 로비 (로비 전용 좌표). 남쪽 유리문 = 현관, 북쪽 = 엘리베이터·계단.
  * 서쪽에 경비 데스크: 의자에 앉아 동쪽(현관 ↔ 엘리베이터 동선)을 바라본다.
+ * 서쪽 벽 북쪽 끝의 문으로 들어가면 박 반장의 반장실 (로비 서쪽에 붙은 작은 방).
  */
+const OFFICE = { x0: -8.4, x1: -5, z0: -4, z1: -0.6, doorZ0: -3.35, doorZ1: -2.25 };
 export const LOBBY = {
-  room: { x0: -5, x1: 5, z0: -4, z1: 4 } as Rect,
+  /** 걸어 다닐 수 있는 전체 범위 (로비 + 반장실) */
+  room: { x0: OFFICE.x0, x1: 5, z0: -4, z1: 4 } as Rect,
+  /** 로비 홀 */
+  hall: { x0: -5, x1: 5, z0: -4, z1: 4 } as Rect,
+  /** 반장실: 책상(북쪽) 뒤 의자에 앉아 남쪽을 본다. 동쪽 벽(로비 서쪽 벽)에 문 */
+  office: {
+    ...OFFICE,
+    doorZ: (OFFICE.doorZ0 + OFFICE.doorZ1) / 2,
+    chair: { x: -6.8, z: -3.2 },
+    desk: { x0: -7.6, x1: -6.0, z0: -2.85, z1: -2.2 } as Rect,
+  },
   spawn: { x: 0.5, z: 2.8 },
   /** 경비 의자 (앉으면 동쪽을 본다) */
   chair: { x: -4.25, z: 0, yaw: Math.PI / 2 },
-  /** 선임 경비 박 반장이 서 있는 곳 (데스크 북쪽, 벽 앞) */
-  senior: { x: -4.2, z: -3.0 },
   /** 계단 (북동쪽, 남쪽 끝에서 북쪽으로 9칸 올라간다). 걸어 올라가면 2층 복도 */
   stairs: { x0: 3.6, x1: 4.95, z0: -3.95, z1: -1.0, rise: 1.62 },
   furniture: [
@@ -97,10 +166,15 @@ export const LOBBY = {
     { id: 'stairRail', rect: { x0: 3.45, x1: 3.6, z0: -3.95, z1: -1.35 } },
     { id: 'mailbox', rect: { x0: 4.55, x1: 4.95, z0: 0.6, z1: 3.0 } },
     { id: 'plant', rect: { x0: -4.9, x1: -4.3, z0: 3.3, z1: 3.9 } },
-    { id: 'senior', rect: { x0: -4.5, x1: -3.9, z0: -3.3, z1: -2.7 } },
+    // 반장실: 책상, 서류함, 커피 탁자 / 로비와 사이 벽 (문 자리만 비운다) / 반장실 남쪽 바깥은 못 간다
+    { id: 'officeDesk', rect: { x0: -7.6, x1: -6.0, z0: -2.85, z1: -2.2 } },
+    { id: 'officeCabinet', rect: { x0: -8.4, x1: -7.85, z0: -2.0, z1: -0.6 } },
+    { id: 'officeCoffee', rect: { x0: -5.75, x1: -5.05, z0: -1.35, z1: -0.6 } },
+    { id: 'officeWallN', rect: { x0: -5.08, x1: -4.92, z0: -4, z1: OFFICE.doorZ0 } },
+    { id: 'officeWallS', rect: { x0: -5.08, x1: -4.92, z0: OFFICE.doorZ1, z1: 4 } },
+    { id: 'officeOutside', rect: { x0: OFFICE.x0, x1: -5.08, z0: OFFICE.z1, z1: 4 } },
   ] as { id: string; rect: Rect }[],
   pois: [
-    { id: 'senior', kind: 'job', label: '박 반장과 대화하기', x: -4.2, z: -2.2, radius: 1.0 },
     { id: 'lobbyExit', kind: 'home', label: '현관 (밖으로 나가기)', x: 0.5, z: 3.5, radius: 0.9 },
     { id: 'desk', kind: 'job', label: '경비 데스크', x: -4.25, z: 0, radius: 1.2 },
     { id: 'elevator', kind: 'home', label: '엘리베이터 (층 고르기)', x: 2.0, z: -3.2, radius: 0.9 },
@@ -128,6 +202,8 @@ export const CORRIDOR = {
 };
 /** 의자에 앉고 일어나는 데 걸리는 프레임 */
 const SIT_FRAMES = 30;
+/** 소파에 눕고 일어나는 데 걸리는 프레임 */
+const SOFA_FRAMES = 45;
 
 /** 잠자기 단계별 길이 (프레임) */
 const SLEEP_LIE = 90;
@@ -217,6 +293,10 @@ export interface RemotePlayer {
   fighter: Fighter;
   /** 지금 있는 곳 (roomKey). 같은 곳에 있어야 보이고 때릴 수 있다 */
   room: string;
+  /** 입은 코디 */
+  outfit?: string[];
+  /** 고른 몸 (남자·여자, 없으면 여자) */
+  body?: string;
   /** 마지막으로 받은 위치 (화면에선 여기로 부드럽게 따라간다) */
   target: { x: number; z: number; y: number; fx: number; fz: number } | null;
   /** 내가 방금 때렸다: 이 프레임까지는 받은 상태로 덮어쓰지 않는다 (맞는 모습이 튀지 않게) */
@@ -225,7 +305,56 @@ export interface RemotePlayer {
   myHitAt: number;
   /** 친구 레벨 (머리 위 이름표) */
   level: number;
+  /** 친구가 하고 있는 일자리 id (근무 중이 아니면 null) */
+  job: string | null;
+  /** 친구가 근무를 시작한 실제 시각 */
+  jobAt: number;
+  /** 친구가 앉거나 누운 곳 (경비 데스크·소파). 소파 동작이 바뀐 프레임도 기억해 자세를 이어 그린다 */
+  seat: { spot: 'desk' | 'sofa'; amt: number; act: SofaAct; prev: SofaAct; at: number; pt: number } | null;
+  /** 친구가 근무하며 보내 주는 로비·복도 사람들 (친구 화면과 같은 장면) */
+  scene: { people: Map<number, ObservedPerson>; at: number } | null;
+  /** 침대에 누운 정도·이불 (자는 중이 아니면 null) */
+  sleep: { rest: number; blanket: number } | null;
+  /** 친구의 낚시 (낚싯대·찌·물고기) */
+  fish: NetFish | null;
+  /** 친구 곁에 보이는 펫 */
+  pets: NetPet[];
 }
+
+/** 네트워크로 보내는 낚시 장면 */
+export interface NetFish {
+  p: FishPhase;
+  t: number;
+  n: number;
+  su: number;
+  te: number;
+  tf: 0 | 1;
+  sw: number;
+  lo: number;
+  /** 걸린 물고기 id */
+  fi: string | null;
+  kg: number;
+  x: number;
+  z: number;
+  rod: string;
+}
+
+/** 네트워크로 보내는 펫 하나 */
+export interface NetPet {
+  i: string;
+  sp: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  mv: number;
+  j: number;
+}
+
+/** 로비·복도에 그리는 사람 (내 근무의 사람이든, 친구 근무에서 받은 사람이든) */
+export type ShownPerson = Pick<LobbyPerson, 'f' | 'slot' | 'where' | 'kind' | 'title' | 'tier' | 'koFrames' | 'reaction' | 'showUntil'>;
+/** 친구 근무에서 받은 사람: 받은 위치로 부드럽게 따라간다 */
+export type ObservedPerson = ShownPerson & { target: { x: number; z: number; y: number; fx: number; fz: number } };
 
 /** 네트워크로 보내는 내 모습 (위치·방향·동작·체력) */
 export interface NetState {
@@ -242,6 +371,21 @@ export interface NetState {
   mh: number;
   /** 레벨 */
   lv: number;
+  /** 하고 있는 일자리 id (근무 중일 때만) */
+  jb?: string | null;
+  /** 근무를 시작한 실제 시각 */
+  ja?: number;
+  /** 앉은 곳: 'd' = 경비 데스크, 그 밖엔 소파 동작 id. 서 있으면 없음 */
+  se?: string | null;
+  /** 앉은 정도 0~1 */
+  sa?: number;
+  /** 침대에 누운 정도 · 이불 덮은 정도 (자는 중일 때만) */
+  sl?: number;
+  sb?: number;
+  /** 낚시 중이면 낚시 장면 */
+  fs?: NetFish | null;
+  /** 곁에 보이는 펫 */
+  pt?: NetPet[];
 }
 
 /** 내가 친구를 때렸다. 맞은 쪽이 혼자 할 때와 같은 계산(applyHit)으로 자기 체력에서 뺀다 */
@@ -345,7 +489,9 @@ export class CityWorld {
    * 반대편에서 밝아지며 몇 걸음 걷고 → 등 뒤로 문이 닫힌다.
    * kind: enter(밖 → 로비) / exit(로비 → 밖), stage 0 = 장소 바뀌기 전, 1 = 바뀐 뒤
    */
-  doorway: { kind: 'enter' | 'exit'; stage: 0 | 1; at: number } | null = null;
+  doorway: { kind: 'enter' | 'exit' | 'pass'; stage: 0 | 1; at: number; pass?: DoorPass } | null = null;
+  /** 지금 들어와 있는 가게의 바깥 문 id (나갈 때 그 문이 열렸다 닫힌다) */
+  private storeDoor = '';
   /** 내 집 창문이 열려 있나 (집 안 창가에서 E) */
   homeWindowOpen = false;
   police: Police = { phase: 'none', dispatchAt: 0, scene: { x: 0, z: 0 }, car: null, officers: [], lostFrames: 0, chaseFrames: 0 };
@@ -361,8 +507,49 @@ export class CityWorld {
   jobPanelRequest = false;
   /** 집 달력에서 E → 화면이 달력 창을 연다 */
   calendarRequest = false;
+  /** TV 앞에서 E → 화면이 유튜브 창을 연다 */
+  tvRequest = false;
   /** 카지노 입구에서 E → 화면이 카지노 창을 연다 */
   casinoRequest = false;
+  /** 펫샵 창을 열어 달라 (UI 가 읽고 끈다) */
+  petShopRequest = false;
+  /** 펫샵 놀이터에서 고른 아이 (UI 가 분양 창을 연다) */
+  petAdoptRequest: StockPet | null = null;
+  /** 옷가게: 열어 달라는 진열 구역 ('all' = 계산대에서 전체) / 탈의실 */
+  clothesShopRequest: ClothesCorner | 'all' | null = null;
+  wardrobeRequest = false;
+  /** 옷가게에서 입어보는 중인 (아직 안 산) 코디 옷: 칸마다 하나. 저장 안 하고, 입은 채 가게 안을 돌아다닐 수 있다 */
+  trial: Partial<Record<CosmeticSlot, string>> = {};
+  /**
+   * 코디 창: 게임 속 내 캐릭터를 빙 둘러보는 카메라 (null = 평소 카메라).
+   * yaw 0 = 캐릭터 정면, y = 보는 높이, shift = 화면 오른쪽 창에 가리지 않게 캐릭터를 왼쪽으로 미는 비율
+   */
+  mirror: { yaw: number; pitch: number; dist: number; y: number; shift: number } | null = null;
+  /** 입어보는 옷 중 아직 계산 안 한 것 (이게 있으면 가게 문밖으로 못 나간다) */
+  unpaidTrial(): CosmeticDef[] {
+    const owned = ensureWardrobe(this.profile).owned;
+    return Object.values(this.trial)
+      .map((id) => COSMETIC_BY_ID[id!])
+      .filter((c): c is CosmeticDef => !!c && !owned.includes(c.id));
+  }
+  /** 코디 창에서 마우스를 올려 둔 옷 (잠깐 입혀 보기) */
+  peek: string | null = null;
+  /** 입어보는 옷을 걸친 모습 (null = 산 옷 그대로) */
+  get outfitPreview(): string[] | null {
+    const peek = this.peek ? COSMETIC_BY_ID[this.peek] : undefined;
+    if (!peek && !this.unpaidTrial().length) return null;
+    const worn = { ...ensureWardrobe(this.profile).worn, ...this.trial };
+    if (peek) worn[peek.slot] = peek.id;
+    return wornList({ owned: [], worn });
+  }
+  /** 지금 들어와 있는 가게 */
+  store: StoreLayout | null = null;
+  /** 펫샵 놀이터 아이들 */
+  pen: PenSim | null = null;
+  /** 가게 주인 (계산대 뒤) */
+  readonly keeper: Fighter;
+  /** 내 애완동물 */
+  readonly pets: PetCare;
   /** 엘리베이터 안: 층 고르는 창이 열려 있다 (플레이어는 멈춘다) */
   elevatorOpen = false;
   /** 열린 창문으로 밖을 내다보는 중 (방향키로 둘러본다, E·Esc 로 돌아온다) */
@@ -370,6 +557,11 @@ export class CityWorld {
   /** 내다보는 방향: 좌우(라디안, +왼쪽) · 위아래(+위) */
   lookYaw = 0;
   lookPitch = -0.18;
+  /** 1인칭 시점 (V): 보는 방향(yaw = 북쪽 기준이 아니라 +z 기준 각도, pitch = 위아래)과 마우스로 보는 중인지 */
+  firstPerson = false;
+  fpYaw = 0;
+  fpPitch = 0;
+  fpMouse = false;
   /** 자동 행동 (배고픔·피로가 한계인데 방치하면): 남은 단계와 들고 있는 음식 */
   care: { why: 'eat' | 'sleep'; steps: CareStep[]; carry: FridgeFood[]; started: boolean } | null = null;
   private hungerFullFrames = 0;
@@ -377,7 +569,9 @@ export class CityWorld {
   /** 복도에 있을 때 몇 층인지 */
   floor = 2;
   /** 경비 의자에 앉는 중/앉음/일어나는 중 */
-  seat: { phase: 'sit' | 'seated' | 'stand'; at: number } | null = null;
+  seat: { phase: 'sit' | 'seated' | 'stand'; at: number; spot?: 'sofa' } | null = null;
+  /** 소파 동작: 지금 동작(id)과 시작 프레임(at), 넘어오기 전 동작(prev)과 그 동작이 돌던 프레임(pt) */
+  sofa: { id: SofaAct; at: number; prev: SofaAct; pt: number } = { id: 'sit', at: 0, prev: 'sit', pt: 0 };
   /** 소수점 체력 회복 누적 */
   private hpAcc = 0;
   private sofaAt = -99999;
@@ -385,8 +579,9 @@ export class CityWorld {
   dialog: { shop: string } | null = null;
   /** 대화형 NPC 와 이야기하는 중 (열려 있으면 플레이어는 움직이지 않는다) */
   npcChat: { npc: string } | null = null;
-  /** 로비에 상주하는 선임 경비 박 반장 */
+  /** 1층 반장실에서 일하고 수시로 층마다 순찰을 도는 선임 경비 박 반장 */
   readonly senior: Fighter;
+  readonly seniorAI: SeniorAI;
   /** 멀티플레이: 내 계정 id (오프라인이면 null) */
   netId: string | null = null;
   /** 내 아이디 (머리 위 이름표, 오프라인이면 null) */
@@ -439,7 +634,7 @@ export class CityWorld {
     ensureGear(profile);
     this.player = new Fighter(0, 'ME', { ...playerStats(profile), tempo: PLAYER_TEMPO, canBlock: false });
     this.senior = new Fighter(899, 'npc', { canBlock: false });
-    this.senior.reset(LOBBY.senior.x, LOBBY.senior.z, 1, 0);
+    this.seniorAI = new SeniorAI(this, this.senior);
     this.player.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
     this.player.hp = Math.max(1, Math.min(this.player.maxHp, Math.round(profile.life.hp ?? this.player.maxHp)));
     // 날짜·시각도 이어서
@@ -449,12 +644,19 @@ export class CityWorld {
     }
     this.spawnCars();
     for (let k = 0; k < 26; k++) this.npcs.push(this.makeNpc());
+    this.pets = new PetCare(profile, (t, s) => this.say(t, s), (s) => this.pushSpeech(s));
+    this.keeper = new Fighter(898, 'npc', { canBlock: false });
   }
 
   get clock(): string {
     const h = Math.floor(this.minutes / 60) % 24;
     const m = Math.floor(this.minutes % 60);
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  /** 지금 날씨 (날짜·시각으로 정해진다) */
+  get weather(): WeatherState {
+    return weatherAt(this.day, this.minutes);
   }
 
   /** 0 = 한밤, 1 = 한낮 (일출 6시 ~ 일몰 19시, 1시간에 걸쳐 밝아지고 어두워짐) */
@@ -517,6 +719,8 @@ export class CityWorld {
     const looking = this.lookingOut;
     if (looking) this.stepLookOut();
     const inp: CityInput = this.dialog || this.npcChat || this.elevatorOpen || looking || sleeping ? { move: null, run: false, interact: false } : { ...this.input.read(this) };
+    if (this.firstPerson && !looking && !sleeping) this.fpInput(inp);
+    if (this.fishing) this.stepFishing(inp);
     if (!sleeping && this.downedAt === null) this.stepCare(inp);
     if (sleeping) this.stepSleep(inp);
     else this.followAutopilot(inp);
@@ -554,10 +758,23 @@ export class CityWorld {
     }
     this.collideFighter(p);
     this.stepStairs();
+    this.pets.step({
+      frame: this.frame,
+      location: this.location,
+      homeOwner: this.homeOwner,
+      px: p.x,
+      pz: p.z,
+      fx: p.fx,
+      fz: p.fz,
+      homeRoom: HOME.room,
+      collide: (x, z) => this.collidePoint(x, z),
+      blockedAtHome: (x, z) => HOME.furniture.some((f) => x > f.rect.x0 - 0.3 && x < f.rect.x1 + 0.3 && z > f.rect.z0 - 0.3 && z < f.rect.z1 + 0.3),
+    });
+    if (this.location === 'store') this.stepStore();
     if (!frozen) this.hitRemotes();
 
     this.regenHp(inp);
-    this.nearby = sleeping || this.doorway || this.lookingOut ? null : this.findNearby();
+    this.nearby = sleeping || this.doorway || this.lookingOut || this.fishing || this.seat?.spot === 'sofa' ? null : this.findNearby();
     if (inp.interact && !sleeping && this.job?.tryInteract()) {
       // 출입 확인 처리됨
     } else if (inp.interact && this.nearby) this.interact(this.nearby);
@@ -569,13 +786,17 @@ export class CityWorld {
         this.stepNpcs();
         this.hitNpcs();
       }
+    } else if (looking) {
+      // 집에서 창밖을 보는 동안에도 바깥 도시는 계속 움직인다 (때리기 판정은 밖에서만)
+      this.stepCars();
+      this.stepNpcs();
     }
     if (!frozen) this.stepPolice();
     if (this.job) {
       const end = this.job.step(frozen);
       if (end) this.endJob(end);
     }
-    if (this.location === 'lobby') this.stepSenior();
+    this.stepSenior();
     if (p.hp <= 0 && this.downedAt === null) this.knockedDown();
     this.profile.life.hp = p.hp;
     const t = (this.profile.time ??= { day: this.day, minutes: this.minutes });
@@ -590,6 +811,8 @@ export class CityWorld {
     const job = JOB_BY_ID[id];
     if (!job) return '없는 일자리예요';
     if (this.job) return '이미 근무 중이에요';
+    const busy = this.jobTakenBy(id);
+    if (busy) return `${busy.name} 님이 지금 ${job.name} 근무 중이에요. 끝나면 할 수 있어요`;
     if (this.profile.level < job.minLevel) return `레벨 ${job.minLevel} 이상부터 할 수 있어요`;
     if (this.profile.life.fatigue >= 95) return '너무 피곤해서 일할 수 없어요. 먼저 자고 오세요';
     const c = LOBBY.chair;
@@ -604,6 +827,20 @@ export class CityWorld {
   /** 조기 퇴근 (일한 만큼 받는다) */
   quitJob() {
     if (this.job) this.endJob('quit');
+  }
+
+  /** 이 일자리를 지금 하고 있는 친구 (한 자리엔 한 명만 근무한다) */
+  jobTakenBy(id: string): RemotePlayer | null {
+    for (const r of this.remotes.values()) if (r.job === id) return r;
+    return null;
+  }
+
+  /** 친구가 거의 동시에 먼저 근무를 시작했다: 내 근무는 없던 일로 (급여·기록 없음) */
+  private yieldJob(to: RemotePlayer) {
+    if (!this.job) return;
+    this.job = null;
+    this.standUp();
+    this.say(`👮 ${to.name} 님이 먼저 근무를 시작해서 자리를 양보했어요`, 4);
   }
 
   /** 마지막 근무 정산 문구 (HUD 가 잠깐 보여준다) */
@@ -645,6 +882,7 @@ export class CityWorld {
   /** 체력이 0: 덤비던 사람들은 물러나고, 잠시 뒤 집에서 깨어난다 */
   private knockedDown() {
     this.downedAt = this.frame;
+    this.stopFishing(true);
     if (this.job) this.endJob('down');
     this.autopilot = null;
     this.dialog = null;
@@ -909,6 +1147,8 @@ export class CityWorld {
     this.nav ??= new CityNav(this.map);
     const path = this.nav.findPath(this.player.x, this.player.z, x, z);
     if (!path || !path.length) return '거기로는 갈 수 없어요';
+    const deck = this.map.fishDecks.find((d) => Math.abs(x - d.x) < d.w / 2 && z > d.z0 && z < d.z1);
+    if (deck) path.push({ x: deck.x, z: deck.z0 + 0.5 }, { x: deck.x, z: Math.min(z, deck.z1 - 0.7) });
     this.autopilot = { path, i: 0, label };
     this.dialog = null;
     this.say(`🧭 ${label}(으)로 이동 중… (방향키를 누르면 취소)`, 2.5);
@@ -952,23 +1192,14 @@ export class CityWorld {
 
   // ───────────────────────── 박 반장 (대화형 NPC) ─────────────────────────
 
-  /** 로비의 박 반장: 가까이 오면 플레이어를 보고, 아니면 현관 쪽을 본다. 강도가 들면 대화를 끊는다 */
+  /** 박 반장: 반장실 근무·순찰 (senior.ts). 같은 곳에 있으면 플레이어가 뚫고 못 지나가고, 강도가 들면 대화를 끊는다 */
   private stepSenior() {
     const s = this.senior;
-    s.snapshot();
-    const dx = this.player.x - s.x;
-    const dz = this.player.z - s.z;
-    const d = Math.hypot(dx, dz);
-    if (d < 3.5 && d > 1e-6) {
-      s.fx = dx / d;
-      s.fz = dz / d;
-    } else {
-      s.fx = 1;
-      s.fz = 0;
-    }
-    if (this.npcChat && this.job?.robber) {
+    this.seniorAI.step();
+    this.seniorAI.pushPlayer(this.player);
+    if (this.npcChat?.npc === 'senior' && this.job?.robber) {
       this.npcChat = null;
-      this.pushSpeech({ x: s.x, z: s.z, text: '강도다! 얼른 가 보게!', color: '#ff9d7a' });
+      if (this.seniorAI.visibleTo()) this.pushSpeech({ x: s.x, z: s.z, text: '강도다! 얼른 가 보게!', color: '#ff9d7a' });
     }
   }
 
@@ -994,8 +1225,8 @@ export class CityWorld {
   }
 
   /** 지금 가진 골드로 음식을 산다 */
-  buyFood(itemId: string): { ok: boolean; message: string } {
-    const s = this.shop;
+  buyFood(itemId: string, sign = this.dialog?.shop): { ok: boolean; message: string } {
+    const s = sign ? (SHOPS[sign] ?? null) : null;
     const item = s?.menu.find((m) => m.id === itemId);
     if (!s || !item) return { ok: false, message: '그런 메뉴는 없어요.' };
     const pr = this.profile;
@@ -1661,14 +1892,51 @@ export class CityWorld {
 
   /** 의자에서 일어난다 (맞거나 움직이면) */
   standUp() {
-    if (this.seat && this.seat.phase !== 'stand') this.seat = { phase: 'stand', at: this.frame };
+    if (this.seat && this.seat.phase !== 'stand') {
+      if (this.seat.spot === 'sofa') this.sofaAction('sit', true);
+      this.seat = { phase: 'stand', at: this.frame, spot: this.seat.spot };
+    }
+  }
+
+  /** 소파 동작 바꾸기 (force = 일어날 때 바른 자세로) */
+  sofaAction(id: SofaAct, force = false) {
+    const s = this.seat;
+    if (!force && (s?.spot !== 'sofa' || s.phase === 'stand')) return;
+    const cur = this.sofa;
+    if (cur.id === id && id !== 'stretch') return;
+    // 시작 전(예약)이면 지금 보이는 건 prev
+    const started = this.frame >= cur.at;
+    const from = started ? cur.id : cur.prev;
+    const pt = started ? this.frame - cur.at : cur.pt;
+    this.sofa = { id, at: this.frame, prev: from, pt };
+  }
+
+  /** 렌더러용: 소파 동작 사이 넘어가는 정도 */
+  get sofaView() {
+    const s = this.sofa;
+    const at = this.frame - s.at;
+    return { act: s.id, prev: s.prev, k: Math.max(0, at / SOFA_BLEND), at: Math.max(0, at), pt: s.pt + Math.max(0, at) };
+  }
+
+  /** 집 소파에 눕는다 (움직이거나 E 를 누르면 일어난다) */
+  lieOnSofa() {
+    const s = HOME.sofa.sit;
+    this.autopilot = null;
+    this.placePlayer(this.player.x, this.player.z, Math.sin(s.yaw), Math.cos(s.yaw));
+    this.seat = { phase: 'sit', at: this.frame, spot: 'sofa' };
+    // 앉고 나서 옆으로 눕는다
+    this.sofa = { id: 'lounge', at: this.frame + SOFA_FRAMES, prev: 'sit', pt: 0 };
+  }
+
+  private seatFrames() {
+    return this.seat?.spot === 'sofa' ? SOFA_FRAMES : SIT_FRAMES;
   }
 
   /** 앉기 연출: 0 = 서 있음, 1 = 완전히 앉음 */
   get seatAmount(): number {
     const s = this.seat;
     if (!s) return 0;
-    const u = Math.min(1, (this.frame - s.at) / SIT_FRAMES);
+    const u = Math.min(1, (this.frame - s.at) / this.seatFrames());
     return s.phase === 'sit' ? u : s.phase === 'seated' ? 1 : 1 - u;
   }
 
@@ -1676,10 +1944,15 @@ export class CityWorld {
   private stepSeat(inp: CityInput) {
     const s = this.seat!;
     const t = this.frame - s.at;
-    const wantsUp = !!inp.move || (inp.buttons ?? []).some(Boolean) || !!inp.jump;
-    if (s.phase === 'sit' && t >= SIT_FRAMES) s.phase = 'seated';
+    const n = this.seatFrames();
+    const sofa = s.spot === 'sofa';
+    const wantsUp = !!inp.move || (inp.buttons ?? []).some(Boolean) || !!inp.jump || (sofa && !!inp.interact);
+    if (s.phase === 'sit' && t >= n) s.phase = 'seated';
     if ((s.phase === 'seated' || s.phase === 'sit') && wantsUp) this.standUp();
-    if (this.seat?.phase === 'stand' && this.frame - this.seat.at >= SIT_FRAMES) this.seat = null;
+    if (this.seat?.phase === 'stand' && this.frame - this.seat.at >= n) this.seat = null;
+    // 소파에서는 E 가 '일어나기' (바로 다시 눕지 않게 막는다)
+    if (sofa) inp.interact = false;
+    if (sofa && this.sofa.id === 'stretch' && this.frame - this.sofa.at >= SOFA_STRETCH) this.sofaAction('relax');
     if (this.seat) {
       inp.move = null;
       inp.buttons = undefined;
@@ -1692,6 +1965,10 @@ export class CityWorld {
   }
 
   private interact(poi: Poi) {
+    if (poi.id.startsWith('store:')) {
+      this.interactStore(poi);
+      return;
+    }
     switch (poi.id) {
       case 'home':
         this.cityReturn = { x: this.player.x, z: this.player.z };
@@ -1725,10 +2002,23 @@ export class CityWorld {
         this.autopilot = null;
         this.elevatorOpen = true;
         return;
-      case 'myDoor':
-        this.moveTo('home', HOME.spawn.x + 0.8, HOME.spawn.z, 1, 0);
-        this.say('집에 왔다');
+      case 'myDoor': {
+        // 도어락 누르고 문을 열고 들어간다
+        const i = unitPlace(this.homeUnit).door;
+        this.say('삐삐삐삑 — 띠리링 🔓', 1.2);
+        this.passDoor({
+          open: `unit:${i}`,
+          face: { x: 0, z: -1 },
+          to: { x: CORRIDOR.doors[i], z: CORRIDOR.room.z0 + 0.3 },
+          arrive: () => {
+            this.moveTo('home', HOME.room.x0 + 0.35, HOME.spawn.z, 1, 0);
+            this.say('집에 왔다');
+          },
+          close: 'home',
+          out: { x: HOME.spawn.x + 0.8, z: HOME.spawn.z },
+        });
         return;
+      }
       case 'senior':
         this.autopilot = null;
         this.npcChat = { npc: 'senior' };
@@ -1736,15 +2026,28 @@ export class CityWorld {
       case 'desk':
         if (this.job) {
           if (!this.seat) this.sitAtDesk();
-        } else this.jobPanelRequest = true;
+        } else {
+          const t = this.jobTakenBy('aptGuard');
+          if (t) this.say(`👮 ${t.name} 님이 근무 중이에요. 끝나면 할 수 있어요`, 3);
+          else this.jobPanelRequest = true;
+        }
         return;
       case 'exit': {
         // 현관문을 열고 나가면 그 집이 있는 층 복도, 문 바로 앞
         const owner = this.homeOwner ? this.remotes.get(this.homeOwner) : null;
         const { floor, door } = unitPlace(owner?.unit ?? this.homeUnit);
-        this.floor = Math.max(2, Math.min(this.villaFloors, floor));
-        this.moveTo('corridor', CORRIDOR.doors[door], -0.45, 0, 1);
-        this.say(`${this.floor}층 복도`);
+        this.passDoor({
+          open: 'home',
+          face: { x: -1, z: 0 },
+          to: { x: HOME.room.x0 + 0.3, z: HOME.spawn.z },
+          arrive: () => {
+            this.floor = Math.max(2, Math.min(this.villaFloors, floor));
+            this.moveTo('corridor', CORRIDOR.doors[door], CORRIDOR.room.z0 + 0.35, 0, 1);
+            this.say(`${this.floor}층 복도`);
+          },
+          close: `unit:${door}`,
+          out: { x: CORRIDOR.doors[door], z: -0.45 },
+        });
         return;
       }
       case 'bed': {
@@ -1762,16 +2065,26 @@ export class CityWorld {
         this.toast = null;
         return;
       }
+      case 'tv':
+        this.tvRequest = true;
+        return;
       case 'calendar':
         this.calendarRequest = true;
         return;
       case 'sofa': {
+        // 소파엔 한 명만 눕는다
+        const taker = this.sofaTakenBy();
+        if (taker) {
+          this.say(`🛋️ ${taker.name} 님이 소파에 누워 있어요`, 2.5);
+          return;
+        }
         // 잠깐 쉬면 체력이 조금 찬다
         const p = this.player;
         const gain = this.frame - this.sofaAt < 600 ? 0 : Math.min(p.maxHp - p.hp, Math.round(p.maxHp * 0.15));
         if (gain > 0) this.sofaAt = this.frame;
         p.hp += gain;
-        this.say(gain > 0 ? `🛋️ 소파에 앉아 잠깐 쉬었다 (체력 +${gain})` : '🛋️ 소파에 앉아 잠깐 쉬었다');
+        this.lieOnSofa();
+        this.say(gain > 0 ? `🛋️ 소파에서 쉬는 중 (체력 +${gain}) · 1~6 동작 바꾸기 · E 일어나기` : '🛋️ 소파에서 쉬는 중 · 1~6 동작 바꾸기 · E 일어나기', 3);
         return;
       }
     }
@@ -1785,8 +2098,18 @@ export class CityWorld {
     if (poi.id.startsWith('visit:')) {
       const r = this.remotes.get(poi.id.slice(6));
       if (!r) return;
-      this.moveTo('home', HOME.spawn.x + 0.8, HOME.spawn.z, 1, 0, r.id);
-      this.say(`🏠 ${r.name}의 집 (${r.unit}호)에 놀러 왔다`);
+      const i = unitPlace(r.unit).door;
+      this.passDoor({
+        open: `unit:${i}`,
+        face: { x: 0, z: -1 },
+        to: { x: CORRIDOR.doors[i], z: CORRIDOR.room.z0 + 0.3 },
+        arrive: () => {
+          this.moveTo('home', HOME.room.x0 + 0.35, HOME.spawn.z, 1, 0, r.id);
+          this.say(`🏠 ${r.name}의 집 (${r.unit}호)에 놀러 왔다`);
+        },
+        close: 'home',
+        out: { x: HOME.spawn.x + 0.8, z: HOME.spawn.z },
+      });
       return;
     }
     if (poi.id.startsWith('door')) {
@@ -1795,13 +2118,29 @@ export class CityWorld {
       this.say(`🚪 ${poi.label} — ${note}`, 3);
       return;
     }
+    if (poi.id.startsWith('fish-')) {
+      this.startFishing(Number(poi.id.slice(5)));
+      return;
+    }
     if (poi.id === 'casino') {
       this.casinoRequest = true;
       return;
     }
-    // 음식점: 주인과 대화창을 연다
-    if (poi.kind === 'shop' && SHOPS[poi.label]) {
-      this.dialog = { shop: poi.label };
+    // 펫샵 · 음식점: 문을 열고 가게 안으로 들어간다
+    if (poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop' || (poi.kind === 'shop' && SHOPS[poi.label])) {
+      const L = storeLayout(poi.label);
+      // 가게 문은 건물 앞면 (POI 는 문에서 1.2m 앞)
+      const doorZ = poi.z - 1.2;
+      this.cityReturn = { x: poi.x, z: poi.z };
+      this.storeDoor = `shop:${poi.id}`;
+      this.passDoor({
+        open: this.storeDoor,
+        face: { x: 0, z: -1 },
+        to: { x: poi.x, z: doorZ + 0.35 },
+        arrive: () => this.enterStore(poi.label),
+        close: 'storeIn',
+        out: { x: L.spawn.x, z: L.spawn.z },
+      });
       return;
     }
     // 아직 만들지 않은 곳
@@ -1816,12 +2155,517 @@ export class CityWorld {
     else this.say(soon[poi.kind] ?? `${poi.label} (준비 중)`);
   }
 
+  // ───────────────────────── 가게 안 (먹거리 · 펫샵) ─────────────────────────
+
+  /** 가게 문을 열고 들어간다 */
+  private enterStore(sign: string) {
+    const L = storeLayout(sign);
+    this.autopilot = null;
+    this.dialog = null;
+    this.store = L;
+    this.keeper.reset(L.keeper.x, L.keeper.z, 0, 1);
+    this.pen = L.spots.length ? new PenSim(L.spots, this.todayStock(), this.day * 31 + 7) : null;
+    this.moveTo('store', 0, L.room.z1 - 0.35, 0, -1);
+    const s = SHOPS[sign];
+    const hi =
+      L.kind === 'fishing'
+        ? ['어서 와요~ 오늘 한강 물 좋아요! 🎣', '왔어요? 어제 누가 저기서 메기 대물을 걸었대요!', '미끼는 냉장고에, 낚싯대는 벽에! 잡은 고기는 계산대로 가져와요~'][Math.floor(this.rng() * 3)]
+        : L.kind === 'clothes'
+        ? ['어서 오세요~ 스타일 하우스예요! 편하게 둘러보세요 ✨', '신상 들어왔어요! 탈의실에서 입어보셔도 돼요~'][Math.floor(this.rng() * 2)]
+        : L.kind === 'pet'
+        ? this.pen?.animals.length
+          ? '어서 오세요~ 오늘 들어온 아이들 구경하세요! 🐾'
+          : '어서 오세요~ 오늘 아이들은 다 새 가족을 찾아갔어요. 내일 또 들어와요!'
+        : s
+          ? s.greetings[Math.floor(this.rng() * s.greetings.length)]
+          : '어서 오세요!';
+    this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: hi });
+    this.say(`🚪 ${sign}에 들어왔다`, 2);
+  }
+
+  /** 옷가게: 전투 장비 사기 (가방으로) */
+  buyGear(id: string): { ok: boolean; message: string } {
+    const e = EQUIPS[id];
+    if (!e?.price) return { ok: false, message: '파는 물건이 아니에요' };
+    const pr = this.profile;
+    if (pr.gold < e.price) return { ok: false, message: `${(e.price - pr.gold).toLocaleString()}G 가 모자라요` };
+    pr.gold -= e.price;
+    ensureGear(pr).owned.push(id);
+    saveProfile(pr);
+    this.thankShopper();
+    return { ok: true, message: `${e.icon} ${e.name}을(를) 샀다! 장비창(T)이나 탈의실에서 낄 수 있어요` };
+  }
+
+  /** 옷가게: 코디 옷 사기 (한 벌씩만) */
+  buyCosmetic(id: string): { ok: boolean; message: string } {
+    const c = COSMETIC_BY_ID[id];
+    if (!c) return { ok: false, message: '파는 물건이 아니에요' };
+    const pr = this.profile;
+    const w = ensureWardrobe(pr);
+    if (w.owned.includes(id)) return { ok: false, message: '이미 가진 옷이에요' };
+    if (pr.gold < c.price) return { ok: false, message: `${(c.price - pr.gold).toLocaleString()}G 가 모자라요` };
+    pr.gold -= c.price;
+    w.owned.push(id);
+    saveProfile(pr);
+    this.thankShopper();
+    return { ok: true, message: `${c.icon} ${c.name}을(를) 샀다!` };
+  }
+
+  private thankShopper() {
+    const L = this.store;
+    if (L?.kind === 'fishing') this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: ['감사합니다~ 대물 낚아요! 🎣', '어복 충만하길!', '좋은 선택이에요, 손맛 보실 거예요~'][Math.floor(this.rng() * 3)] });
+    if (L?.kind === 'clothes') this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: ['감사합니다~ 잘 어울리세요!', '좋은 선택이에요 ✨', '또 놀러 오세요~'][Math.floor(this.rng() * 3)] });
+  }
+
+// ───────────────────────── 한강 낚시 ─────────────────────────
+
+  /** 낚시 중 (한강 데크 끝에 서서). null = 안 하는 중 */
+  fishing: FishingSession | null = null;
+  /** 낚시하는 자리 (데크 끝) */
+  fishSpot: { x: number; z: number; deck: number } | null = null;
+  /** 낚시점 창을 열어 달라 (계산대 = 전체, 진열대 = 그 칸). UI 가 읽고 끈다 */
+  fishingShopRequest: 'all' | 'rods' | 'bait' | 'sell' | null = null;
+  /** 낚시 도감 창을 열어 달라 (수조 = 도감, 명예의 전당 = 기록) */
+  fishDexRequest: 'dex' | 'records' | null = null;
+  private fishRnd = mulberry32(4242);
+  private fishTapQueued = false;
+
+  /** 화면 버튼으로 Space 대신 누르기 (터치) */
+  fishTap() {
+    this.fishTapQueued = true;
+  }
+
+  get fishingState(): FishingState {
+    return ensureFishing(this.profile);
+  }
+
+  /** 지금 낚싯대 · 미끼 · 시간대 (없으면 null) */
+  get fishSetup(): FishSetup | null {
+    const s = currentSetup(this.fishingState, this.minutes);
+    // 비 오는 날은 물고기 입질이 잦다
+    if (s) s.rain = Math.max(this.weather.rain, this.weather.storm);
+    return s;
+  }
+
+  /** 낚시꾼으로서 내 힘 (레벨 + 장비 공격력 · 최대 체력) */
+  get angler(): Angler {
+    return anglerOf(playerStats(this.profile));
+  }
+
+  /** 데크 끝에 서서 낚시 시작 */
+  private startFishing(deck: number) {
+    const d = this.map.fishDecks[deck];
+    const fs = this.fishingState;
+    if (!d) return;
+    if (!fs.rods.length) {
+      this.say(`🎣 낚싯대가 없어요 — 행복빌라 옆 상가 「${FISHING_SHOP_NAME}」에서 사 오세요`, 4);
+      return;
+    }
+    if (!fs.rod || !fs.rods.includes(fs.rod)) fs.rod = fs.rods[fs.rods.length - 1];
+    if (!fs.use || (fs.bait[fs.use] ?? 0) <= 0) fs.use = BAITS.find((b) => (fs.bait[b.id] ?? 0) > 0)?.id ?? fs.use;
+    this.autopilot = null;
+    const x = Math.max(d.x - d.w / 2 + 0.6, Math.min(d.x + d.w / 2 - 0.6, this.player.x));
+    this.fishSpot = { x, z: d.z1 - 0.55, deck };
+    this.placePlayer(x, d.z1 - 0.55, 0, 1);
+    this.fishRnd = mulberry32(this.frame * 7919 + this.day * 31 + 17);
+    this.fishing = new FishingSession({
+      setup: () => this.fishSetup,
+      angler: () => this.angler,
+      canCast: () => {
+        const s = this.fishingState;
+        if (!s.rod) return '🎣 낚싯대가 없어요';
+        if (!s.use || (s.bait[s.use] ?? 0) <= 0) return `🐛 미끼가 없어요 — 「${FISHING_SHOP_NAME}」에서 사 오거나, F (낚시 도감) → 내 장비에서 다른 미끼를 고르세요`;
+        return null;
+      },
+      onCast: () => {
+        this.fishingState.stats.casts++;
+      },
+      onBaitTaken: () => {
+        const s = this.fishingState;
+        s.stats.bites++;
+        const b = s.use ? BAIT_BY_ID[s.use] : null;
+        if (b && !b.reusable) {
+          s.bait[b.id] = Math.max(0, (s.bait[b.id] ?? 0) - 1);
+          if (!s.bait[b.id]) {
+            const next = BAITS.find((x) => (s.bait[x.id] ?? 0) > 0);
+            if (next) s.use = next.id;
+            this.say(next ? `${b.icon} ${b.name}을(를) 다 썼다 → ${next.icon} ${next.name}(으)로 바꿨다` : `${b.icon} ${b.name}을(를) 다 썼다… 미끼를 사러 가야겠다`, 3);
+          }
+        }
+        saveProfile(this.profile);
+      },
+      onLureLost: () => {
+        const s = this.fishingState;
+        s.bait.lure = Math.max(0, (s.bait.lure ?? 0) - 1);
+        if (!s.bait.lure) s.use = BAITS.find((x) => (s.bait[x.id] ?? 0) > 0)?.id ?? s.use;
+      },
+      onResult: (r) => this.fishResult(r),
+      say: (t, sec) => this.say(t, sec),
+      rnd: () => this.fishRnd(),
+    });
+    const st = this.fishSetup;
+    this.say(st ? `🎣 ${st.rod.name} · ${st.bait.icon} ${st.bait.name} — Space 로 던지기 (${TIME_LABEL[st.band]})` : '🎣 낚싯대를 펼쳤다 — 미끼가 없어요!', 3);
+  }
+
+  /** 낚싯대를 거두고 일어선다 */
+  stopFishing(quiet = false) {
+    if (!this.fishing) return;
+    this.fishing = null;
+    this.fishSpot = null;
+    saveProfile(this.profile);
+    if (!quiet) this.say('🎣 낚싯대를 거뒀다', 1.5);
+  }
+
+  /** 결과 기록: 도감 · 살림망 · 경험치 · 통계 */
+  private fishResult(r: FishResult): FishResult {
+    const s = this.fishingState;
+    const fish = r.fish;
+    if (r.kind === 'missed') s.stats.missed++;
+    else if (r.kind === 'escaped') s.stats.escaped++;
+    else if (r.kind === 'snapped') s.stats.snapped++;
+    if (r.kind !== 'caught') {
+      saveProfile(this.profile);
+      return r;
+    }
+    s.stats.catches++;
+    const prev = s.dex[fish.id];
+    const isNew = !prev;
+    const record = !!prev && r.kg > prev.best;
+    s.dex[fish.id] = { n: (prev?.n ?? 0) + 1, best: Math.max(prev?.best ?? 0, r.kg), first: prev?.first ?? this.day };
+    const exp = TIER_INFO[fish.tier].exp * (isNew ? 2 : 1);
+    const price = sellPrice(fish, r.kg);
+    let released = false;
+    if (fish.protect || s.basket.length >= BASKET_MAX) released = true;
+    else s.basket.push({ id: fish.id, kg: r.kg, day: this.day });
+    const ups = gainExp(this.profile, exp);
+    if (ups) {
+      this.refreshStats();
+      this.player.hp = this.player.maxHp;
+    }
+    saveProfile(this.profile);
+    const msg = fish.protect
+      ? `📸 ${fish.icon} ${fish.name}! 천연기념물이라 사진만 찍고 놓아줬다 (+${exp} EXP)`
+      : released
+        ? `${fish.icon} ${fish.name} ${fmtKg(r.kg)} — 살림망이 가득 차서 놓아줬다 (낚시마트에서 팔아요)`
+        : `${fish.icon} ${fish.name} ${fmtKg(r.kg)}${isNew ? ' ✨ 도감 등록!' : record ? ' 📏 최대 기록!' : ''} (+${exp} EXP)`;
+    // 잡은 고기는 화면 카드로 보여 주니, 알림은 레벨 업 · 놓아줬을 때만
+    if (ups) this.say(`${msg} · ⬆️ 레벨 업! Lv.${this.profile.level}`, 3.5);
+    else if (released) this.say(msg, 3.5);
+    return { ...r, isNew, record, price, exp, released };
+  }
+
+  /** 낚시 중 한 프레임: 키 입력을 가로채서 낚시에만 쓴다 (걷기 · 공격 · 점프 없음) */
+  private stepFishing(inp: CityInput) {
+    const f = this.fishing!;
+    const spot = this.fishSpot;
+    const tap = !!inp.jumpTap || this.fishTapQueued;
+    this.fishTapQueued = false;
+    const quit = (!!inp.move || inp.interact) && f.canQuit;
+    inp.move = null;
+    inp.run = false;
+    inp.jump = false;
+    inp.jumpTap = false;
+    inp.buttons = undefined;
+    inp.interact = false;
+    if (this.location !== 'city' || !spot || this.downedAt !== null || this.caughtAt !== null) {
+      this.stopFishing(true);
+      return;
+    }
+    if (quit) {
+      this.stopFishing();
+      return;
+    }
+    // 물가 쪽을 보고 제자리
+    const p = this.player;
+    p.x = spot.x;
+    p.z = spot.z;
+    p.fx = 0;
+    p.fz = 1;
+    f.step(tap);
+  }
+
+  /** 낚시점: 낚싯대 사기 (사면 바로 그걸 쓴다) */
+  buyRod(id: string): { ok: boolean; message: string } {
+    const r = ROD_BY_ID[id];
+    const s = this.fishingState;
+    if (!r) return { ok: false, message: '없는 낚싯대예요' };
+    if (s.rods.includes(id)) {
+      s.rod = id;
+      saveProfile(this.profile);
+      return { ok: true, message: `${r.icon} ${r.name}(으)로 바꿨다` };
+    }
+    if (this.profile.gold < r.price) return { ok: false, message: `${(r.price - this.profile.gold).toLocaleString()}G 가 모자라요` };
+    this.profile.gold -= r.price;
+    s.rods.push(id);
+    s.rod = id;
+    saveProfile(this.profile);
+    this.thankShopper();
+    return { ok: true, message: `${r.icon} ${r.name}을(를) 샀다! 한강공원 낚시 데크에서 E` };
+  }
+
+  /** 쓸 낚싯대 · 미끼 고르기 */
+  selectRod(id: string) {
+    const s = this.fishingState;
+    if (s.rods.includes(id)) s.rod = id;
+    saveProfile(this.profile);
+  }
+
+  selectBait(id: BaitId) {
+    const s = this.fishingState;
+    if ((s.bait[id] ?? 0) > 0) s.use = id;
+    saveProfile(this.profile);
+  }
+
+  /** 미끼 사기 (묶음 단위) */
+  buyBait(id: BaitId, packs = 1): { ok: boolean; message: string } {
+    const b = BAIT_BY_ID[id];
+    const s = this.fishingState;
+    if (!b) return { ok: false, message: '없는 미끼예요' };
+    const cost = b.price * packs;
+    if (this.profile.gold < cost) return { ok: false, message: `${(cost - this.profile.gold).toLocaleString()}G 가 모자라요` };
+    this.profile.gold -= cost;
+    s.bait[id] = (s.bait[id] ?? 0) + b.pack * packs;
+    if (!s.use || (s.bait[s.use] ?? 0) <= 0) s.use = id;
+    saveProfile(this.profile);
+    this.thankShopper();
+    return { ok: true, message: `${b.icon} ${b.name} ${b.pack * packs}개를 샀다 (가진 것 ${s.bait[id]}개)` };
+  }
+
+  /** 살림망의 물고기 팔기 (index 없으면 전부) */
+  sellFish(index?: number): { ok: boolean; message: string } {
+    const s = this.fishingState;
+    if (this.location !== 'store' || this.store?.kind !== 'fishing') return { ok: false, message: '낚시마트 계산대에서 팔 수 있어요' };
+    const list = index === undefined ? s.basket.map((_, i) => i) : [index];
+    let gold = 0;
+    let n = 0;
+    for (const i of list.sort((a, b) => b - a)) {
+      const c = s.basket[i];
+      const fish = c ? FISH_BY_ID[c.id] : undefined;
+      if (!c || !fish) continue;
+      gold += sellPrice(fish, c.kg);
+      n++;
+      s.basket.splice(i, 1);
+    }
+    if (!n) return { ok: false, message: '팔 물고기가 없어요' };
+    this.profile.gold += gold;
+    s.stats.earned += gold;
+    saveProfile(this.profile);
+    const L = this.store;
+    if (L) this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: gold >= 1000 ? '어이쿠, 이거 대물이네! 🐟' : '싱싱하네~ 잘 받을게요!' });
+    return { ok: true, message: `🐟 ${n}마리를 ${gold.toLocaleString()}G 에 팔았다` };
+  }
+
+  /** 살림망의 물고기 놓아주기 */
+  releaseFish(index: number) {
+    const s = this.fishingState;
+    s.basket.splice(index, 1);
+    saveProfile(this.profile);
+  }
+
+  /** 낚시점 진열대 이름표 */
+  private fishItemLabel(id: string): string {
+    const s = this.fishingState;
+    if (id.startsWith('rod:')) {
+      const r = ROD_BY_ID[id.slice(4)];
+      if (!r) return id;
+      if (s.rods.includes(r.id)) return s.rod === r.id ? `${r.icon} ${r.name} — 쓰는 중` : `${r.icon} ${r.name} — 이걸로 바꾸기`;
+      return `${r.icon} ${r.name} ${r.price.toLocaleString()}G — 사기 (힘 ×${r.power} · 행운 +${Math.round(r.luck * 100)}%)`;
+    }
+    if (id.startsWith('bait:')) {
+      const b = BAIT_BY_ID[id.slice(5) as BaitId];
+      if (!b) return id;
+      return `${b.icon} ${b.name}${b.pack > 1 ? ` ${b.pack}개` : ''} ${b.price}G — 사기 (가진 것 ${s.bait[b.id] ?? 0}${b.reusable ? '' : '개'})`;
+    }
+    return id;
+  }
+
+  /** 오늘 펫샵 입고 (분양된 아이는 빠진다). 날이 바뀌면 새로 들어온다 */
+  todayStock(): StockPet[] {
+    const pr = this.profile;
+    if (!pr.petShop || pr.petShop.day !== this.day) pr.petShop = { day: this.day, sold: [], goods: {} };
+    return petStock(this.day, pr.petShop.sold);
+  }
+
+  /** 펫샵 진열대에 오늘 남은 용품 개수 */
+  goodsLeft(id: string): number {
+    this.todayStock();
+    const total = petGoodsStock(this.day, storeLayout(PET_SHOP_NAME))[id] ?? 0;
+    return Math.max(0, total - (this.profile.petShop!.goods?.[id] ?? 0));
+  }
+
+  /** 펫 용품 사기: 진열된 개수만큼만 */
+  buyPetGood(id: string, n = 1): { ok: boolean; message: string } {
+    const left = this.goodsLeft(id);
+    const g = PET_GOOD_BY_ID[id];
+    if (!g) return { ok: false, message: '없는 상품이에요' };
+    if (left <= 0) return { ok: false, message: `${g.icon} ${g.name}은(는) 오늘 다 팔렸어요 — 내일 다시 들어와요` };
+    if (left < n) return { ok: false, message: `진열대에 ${left}개밖에 없어요` };
+    const r = this.pets.buyGood(id, n);
+    if (r.ok) {
+      const ps = this.profile.petShop!;
+      ps.goods ??= {};
+      ps.goods[id] = (ps.goods[id] ?? 0) + n;
+      saveProfile(this.profile);
+    }
+    return r;
+  }
+
+  /** 가게 안에서 E 를 누를 수 있는 곳들 (진열대 이름·가격, 놀이터 아이들) */
+  private storePois(): Poi[] {
+    const L = this.store;
+    if (!L) return [];
+    const out: Poi[] = L.pois.map((q) => {
+      if (!q.id.startsWith('store:item:')) return q;
+      const id = q.id.slice(11);
+      if (L.kind === 'fishing') return { ...q, label: this.fishItemLabel(id) };
+      if (L.kind === 'pet') {
+        const g = PET_GOOD_BY_ID[id];
+        const left = this.goodsLeft(id);
+        return { ...q, label: g ? (left > 0 ? `${g.icon} ${g.name} ${g.price}G — 1개 사기 (진열 ${left}개 · 가진 것 ${this.profile.inventory[id] ?? 0})` : `${g.icon} ${g.name} — 오늘 품절`) : id };
+      }
+      const m = SHOPS[L.sign]?.menu.find((x) => x.id === id);
+      return { ...q, label: m ? `${m.icon} ${m.name} ${m.price}G — 사 먹기` : id };
+    });
+    for (const a of this.pen?.animals ?? []) {
+      const sp = PET_BY_ID[a.stock.species];
+      if (!sp) continue;
+      const coat = coatOf(sp, a.stock.coat).name;
+      const spot = this.pen!.spotOf(a);
+      out.push({ id: `store:pet:${a.stock.id}`, kind: 'shop', label: `${sp.icon} ${sp.name}${coat ? ` (${coat})` : ''} — 분양 ${sp.price.toLocaleString()}G`, x: spot.x, z: spot.z + 0.5, radius: 0.55 });
+    }
+    return out;
+  }
+
+  private interactStore(poi: Poi) {
+    const L = this.store;
+    if (!L) return;
+    const id = poi.id;
+    if (id === 'store:exit') {
+      // 계산 안 한 옷을 입고는 못 나간다: 점원이 붙잡고 계산대로 안내한다
+      const unpaid = this.unpaidTrial();
+      if (L.kind === 'clothes' && unpaid.length) {
+        this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: ['손님~! 그 옷 계산 안 하셨어요!', '잠깐만요~ 입어보신 옷은 계산하고 가셔야 해요!'][Math.floor(this.rng() * 2)] });
+        this.say(`🚫 계산 안 한 옷: ${unpaid.map((c) => c.name).join(', ')} — 계산대에서 계산하거나 벗어야 나갈 수 있어요`, 3);
+        return;
+      }
+      const back = { ...this.cityReturn };
+      this.passDoor({
+        open: 'storeIn',
+        face: { x: 0, z: 1 },
+        to: { x: 0, z: L.room.z1 - 0.2 },
+        arrive: () => {
+          this.pen = null;
+          this.moveTo('city', back.x, back.z - 0.85, 0, 1);
+          this.say(L.kind === 'pet' ? '🐾 또 놀러 와요~' : '또 오세요~', 1.5);
+        },
+        close: this.storeDoor,
+        out: back,
+      });
+      return;
+    }
+    if (id.startsWith('store:rack:')) {
+      this.clothesShopRequest = id.slice(11) as ClothesCorner;
+      return;
+    }
+    if (id === 'store:fit') {
+      this.wardrobeRequest = true;
+      this.say('🚪 탈의실 커튼을 쳤다', 1.5);
+      return;
+    }
+    if (L.kind === 'fishing') {
+      if (id === 'store:counter') this.fishingShopRequest = 'all';
+      else if (id === 'store:tank') this.fishDexRequest = 'dex';
+      else if (id === 'store:records') this.fishDexRequest = 'records';
+      else if (id.startsWith('store:item:rod:')) {
+        const r = this.buyRod(id.slice(15));
+        this.say(r.message, 3);
+      } else if (id.startsWith('store:item:bait:')) {
+        const r = this.buyBait(id.slice(16) as BaitId, 1);
+        this.say(r.message, 3);
+      }
+      if (id !== 'store:exit') return;
+    }
+    if (id === 'store:counter') {
+      if (L.kind === 'clothes') this.clothesShopRequest = 'all';
+      else if (L.kind === 'pet') this.petShopRequest = true;
+      else this.dialog = { shop: L.sign };
+      return;
+    }
+    if (id.startsWith('store:item:')) {
+      const item = id.slice(11);
+      const r = L.kind === 'pet' ? this.buyPetGood(item, 1) : this.buyFood(item, L.sign);
+      this.say(r.message, 3);
+      if (r.ok) this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: L.kind === 'pet' ? '감사합니다~ 🐾' : '감사합니다!' });
+      return;
+    }
+    if (id.startsWith('store:pet:')) {
+      const a = this.pen?.animals.find((q) => q.stock.id === id.slice(10));
+      if (a) this.petAdoptRequest = a.stock;
+    }
+  }
+
+  /** 오늘 입고된 아이 분양 (놀이터에 있어야 한다 — 없으면 못 산다) */
+  adoptStock(stockId: string, name: string): { ok: boolean; message: string } {
+    const a = this.pen?.animals.find((q) => q.stock.id === stockId);
+    if (!a) return { ok: false, message: '그 아이는 이미 새 가족을 찾아갔어요' };
+    const r = this.pets.adopt(a.stock.species, name, a.stock.coat);
+    if (r.ok) {
+      this.todayStock();
+      this.profile.petShop!.sold.push(stockId);
+      this.pen!.remove(stockId);
+      saveProfile(this.profile);
+    }
+    return r;
+  }
+
+  /** 가게 안: 주인은 계산대 뒤에서 손님을 보고, 펫샵 아이들은 놀이터를 돌아다닌다 */
+  private stepStore() {
+    const k = this.keeper;
+    k.snapshot();
+    k.freeMove = null;
+    const dx = this.player.x - k.x;
+    const dz = this.player.z - k.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.1) {
+      k.fx = dx / d;
+      k.fz = dz / d;
+    }
+    k.feed(NEUTRAL_INPUT);
+    k.tick({ opponent: k, awayX: 0, awayZ: -1 });
+    if (this.store) {
+      k.x = this.store.keeper.x;
+      k.z = this.store.keeper.z;
+    }
+    this.pen?.step(this.player.x, this.player.z);
+  }
+
   // ───────────────────────── 빌라 현관 드나들기 ─────────────────────────
 
   /** 빌라 바깥 현관 문 앞 (건물 정면 벽에서 이만큼 앞) */
   private villaDoorZ(off: number) {
     const b = this.map.home.building;
     return b.z + b.d / 2 + off;
+  }
+
+  /** 문 하나를 지나 다른 곳으로: 문 쪽을 보고 → 문이 열리면 걸어 들어가고 → (화면 암전) → 들어선 쪽 문이 등 뒤로 닫힌다 */
+  private passDoor(p: DoorPass) {
+    this.autopilot = null;
+    this.doorway = { kind: 'pass', stage: 0, at: this.frame, pass: p };
+    if (this.firstPerson) {
+      this.fpYaw = Math.atan2(p.face.x, p.face.z);
+      this.fpPitch = 0;
+    }
+  }
+
+  /** 문 id 가 열린 정도 (0~1). 'villa' · 'lobby' · 'home' · 'unit:0~2' · 'storeIn' · 'shop:<poi id>' */
+  doorOpen(id: string): number {
+    const d = this.doorway;
+    if (!d) return 0;
+    if (d.kind !== 'pass' || !d.pass) return id === 'villa' ? this.villaDoorOpen : id === 'lobby' ? this.lobbyDoorOpen : 0;
+    const t = this.frame - d.at;
+    if (d.stage === 0 && d.pass.open === id) return clamp01(t / 18);
+    if (d.stage === 1 && d.pass.close === id) return 1 - clamp01((t - 20) / 28);
+    return 0;
   }
 
   private stepDoorway(inp: CityInput) {
@@ -1836,6 +2680,24 @@ export class CityWorld {
     const walk = (x: number, z: number) => {
       if (Math.hypot(x - p.x, z - p.z) > 0.08) inp.move = { x: x - p.x, z: z - p.z };
     };
+    if (d.kind === 'pass' && d.pass) {
+      const ps = d.pass;
+      if (d.stage === 0) {
+        if (t < 16) {
+          const n = Math.hypot(ps.face.x, ps.face.z) || 1;
+          p.fx = ps.face.x / n;
+          p.fz = ps.face.z / n;
+        } else walk(ps.to.x, ps.to.z);
+        if (t >= DOOR_SWITCH) {
+          ps.arrive();
+          this.doorway = { kind: 'pass', stage: 1, at: this.frame, pass: ps };
+        }
+        return;
+      }
+      walk(ps.out.x, ps.out.z);
+      if (t >= DOOR_AFTER) this.doorway = null;
+      return;
+    }
     const hx = this.map.home.x;
     if (d.stage === 0) {
       if (d.kind === 'enter') {
@@ -1896,14 +2758,113 @@ export class CityWorld {
     return 1 - clamp01(t / 18);
   }
 
+  /** 1인칭 켜기/끄기 (켜면 지금 보는 방향 그대로) */
+  toggleFirstPerson() {
+    this.firstPerson = !this.firstPerson;
+    if (this.firstPerson) {
+      this.fpYaw = Math.atan2(this.player.fx, this.player.fz);
+      this.fpPitch = 0;
+      this.say('👀 1인칭 시점 — ↑↓ 걷기 · ←→ 돌기 · 화면 클릭하면 마우스로 둘러보기 (V 되돌리기)', 3.5);
+    } else {
+      this.fpMouse = false;
+      this.say('3인칭 시점', 1.2);
+    }
+  }
+
+  /** 마우스로 둘러보기 (픽셀 이동량) */
+  fpLook(dx: number, dy: number) {
+    if (!this.firstPerson) return;
+    this.fpYaw -= dx * 0.0024;
+    this.fpPitch = Math.max(-1.25, Math.min(1.25, this.fpPitch - dy * 0.0024));
+  }
+
+  /**
+   * 1인칭 조작: 방향키는 화면(지도) 기준 → 보는 방향 기준으로 바꾼다.
+   * ↑↓ 앞뒤, ←→ 는 몸 돌리기 (마우스로 보는 중이면 옆걸음). 서 있으면 보는 쪽을 향한다 (공격도 그쪽으로)
+   */
+  private fpInput(inp: CityInput) {
+    const p = this.player;
+    const m = inp.move;
+    if (m) {
+      const fwd = -m.z;
+      let side = 0;
+      if (this.fpMouse) side = m.x;
+      else this.fpYaw -= m.x * 0.045;
+      const fx = Math.sin(this.fpYaw);
+      const fz = Math.cos(this.fpYaw);
+      // 오른쪽 = (-cos, sin)
+      const x = fx * fwd - fz * side;
+      const z = fz * fwd + fx * side;
+      inp.move = Math.hypot(x, z) > 1e-6 ? { x, z } : null;
+    }
+    if (!inp.move) {
+      p.fx = Math.sin(this.fpYaw);
+      p.fz = Math.cos(this.fpYaw);
+    }
+  }
+
   /** @param owner 집에 들어갈 때 그 집 주인 (null = 내 집) */
   private moveTo(loc: CityLocation, x: number, z: number, fx: number, fz: number, owner: string | null = null) {
     this.doorway = null;
+    // 가게를 벗어나면 입어보던 옷은 벗는다 (문 말고 다른 길로 나가도)
+    if (loc !== 'store') this.trial = {};
+    if (loc !== 'city') this.stopFishing(true);
     this.lookingOut = false;
     this.location = loc;
     this.homeOwner = loc === 'home' ? owner : null;
     this.locationChangedAt = this.frame;
     this.placePlayer(x, z, fx, fz);
+    // 1인칭이면 들어선 방향을 본다
+    if (this.firstPerson && (fx || fz)) {
+      this.fpYaw = Math.atan2(fx, fz);
+      this.fpPitch = 0;
+    }
+  }
+
+  /** 실내면 그 방 범위 (코디 카메라가 벽 밖으로 나가지 않게), 바깥이면 null */
+  indoorBounds(): { x0: number; x1: number; z0: number; z1: number } | null {
+    const w = this.location;
+    return w === 'home' ? HOME.room : w === 'lobby' ? LOBBY.room : w === 'corridor' ? CORRIDOR.room : w === 'store' && this.store ? this.store.room : null;
+  }
+
+  /** 지금 있는 곳 (새로고침해도 여기서 다시 시작하려고 저장한다). 문을 지나는 중이면 null */
+  placeSnapshot(): PlaceSnapshot | null {
+    if (this.doorway) return null;
+    const p = this.player;
+    return {
+      loc: this.location,
+      x: p.x,
+      z: p.z,
+      fx: p.fx,
+      fz: p.fz,
+      floor: this.floor,
+      sign: this.location === 'store' ? this.store?.sign : undefined,
+      back: this.location === 'store' ? { ...this.cityReturn } : undefined,
+      // 친구 집은 다시 들어갈 수 없을 수도 있어서 저장하지 않는다
+      friendHome: this.location === 'home' && !!this.homeOwner,
+    };
+  }
+
+  /** 저장해 둔 곳에서 다시 시작 (못 쓰는 값이면 아무것도 안 한다) */
+  restorePlace(s: PlaceSnapshot | null | undefined) {
+    if (!s || ![s.x, s.z].every(Number.isFinite)) return;
+    const fx = Number.isFinite(s.fx) ? s.fx : 0;
+    const fz = Number.isFinite(s.fz) ? s.fz : 1;
+    if (s.loc === 'home' && s.friendHome) return; // 친구 집이었으면 빌라 앞에서
+    if (s.loc === 'store') {
+      if (!s.sign || !s.back) return;
+      const L = storeLayout(s.sign);
+      this.store = L;
+      this.cityReturn = { ...s.back };
+      // 나갈 때 열리는 바깥 유리문
+      const door = this.map.pois.find((q) => q.label === s.sign);
+      if (door) this.storeDoor = `shop:${door.id}`;
+      this.keeper.reset(L.keeper.x, L.keeper.z, 0, 1);
+      this.pen = L.spots.length ? new PenSim(L.spots, this.todayStock(), this.day * 31 + 7) : null;
+    } else if (s.loc === 'corridor') {
+      this.floor = Math.max(2, Math.min(this.villaFloors, s.floor || 2));
+    } else if (s.loc !== 'city' && s.loc !== 'home' && s.loc !== 'lobby') return;
+    this.moveTo(s.loc, s.x, s.z, fx, fz);
   }
 
   /** 플레이어 위치만 옮긴다 (Fighter.reset 은 체력까지 채우므로 체력은 그대로 둔다) */
@@ -1916,7 +2877,7 @@ export class CityWorld {
   private findNearby(): Poi | null {
     const p = this.player;
     // 친구 집에선 침대·냉장고 등은 쓰지 않고 소파와 현관만
-    const pois = this.location === 'home' ? (this.homeOwner ? HOME.pois.filter((q) => q.id === 'exit' || q.id === 'sofa') : HOME.pois) : this.location === 'lobby' ? LOBBY.pois : this.location === 'corridor' ? this.corridorPois() : this.map.pois;
+    const pois = this.location === 'home' ? (this.homeOwner ? HOME.pois.filter((q) => q.id === 'exit' || q.id === 'sofa') : HOME.pois) : this.location === 'lobby' ? LOBBY.pois : this.location === 'corridor' ? this.corridorPois() : this.location === 'store' ? this.storePois() : this.map.pois;
     let best: Poi | null = null;
     let bestD = Infinity;
     for (const poi of pois) {
@@ -1926,7 +2887,20 @@ export class CityWorld {
         bestD = d;
       }
     }
+    const sp = this.location === 'lobby' || this.location === 'corridor' ? this.seniorAI.poi() : null;
+    if (sp) {
+      const d = Math.hypot(sp.x - p.x, sp.z - p.z);
+      if (d < sp.radius && d < bestD) best = sp;
+    }
     if (best?.id === 'window' && this.homeWindowOpen) return { ...best, label: '창문 (밖 내다보기)' };
+    if (best?.id === 'sofa') {
+      const t = this.sofaTakenBy();
+      if (t) return { ...best, label: `소파 (${t.name} 님이 누워 있음)` };
+    }
+    if (best?.id === 'desk' && !this.job) {
+      const t = this.jobTakenBy('aptGuard');
+      if (t) return { ...best, label: `경비 데스크 (${t.name} 님 근무 중)` };
+    }
     if (best?.id === 'lobby') return { ...best, label: `행복빌라 현관 (들어가기 · 내 집 ${this.homeUnit}호)` };
     return best;
   }
@@ -1942,6 +2916,7 @@ export class CityWorld {
   get roomKey(): string {
     if (this.location === 'home') return `h:${this.homeOwner ?? this.netId ?? 'me'}`;
     if (this.location === 'corridor') return `c${this.floor}`;
+    if (this.location === 'store') return `s:${this.store?.sign ?? ''}`;
     return this.location;
   }
 
@@ -1960,21 +2935,24 @@ export class CityWorld {
     }
     if (this.location === 'lobby') return '행복빌라 1층 로비';
     if (this.location === 'corridor') return `행복빌라 ${this.floor}층 복도`;
+    if (this.location === 'store' && this.store) return `${this.store.sign} (가게 안)`;
     return '서울 · 한강공원 일대';
   }
 
   /** 친구가 들어왔거나 정보(이름·호수)가 바뀌었다 */
-  upsertRemote(id: string, name: string, unit: string) {
+  upsertRemote(id: string, name: string, unit: string, outfit: string[] = [], body?: string) {
     let r = this.remotes.get(id);
     if (!r) {
       const f = new Fighter(this.remoteIndex++, name, { canBlock: false });
       f.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
-      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1 };
+      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, pets: [] };
       this.remotes.set(id, r);
       this.say(`👋 ${name} 님이 접속했어요`, 3);
     }
     r.name = name;
     r.unit = unit;
+    r.outfit = outfit;
+    r.body = body;
   }
 
   /** 친구가 나갔다. 그 친구 집에 놀러 가 있었다면 밖으로 나온다 */
@@ -1992,7 +2970,131 @@ export class CityWorld {
   netState(): NetState {
     const p = this.player;
     const q = (v: number) => Math.round(v * 100) / 100;
-    return { r: this.roomKey, x: q(p.x), z: q(p.z), y: q(p.y), fx: q(p.fx), fz: q(p.fz), s: p.state, f: p.frame, m: p.move?.id ?? null, hp: Math.round(p.hp), mh: p.maxHp, lv: this.profile.level };
+    const seat = this.seat;
+    return {
+      r: this.roomKey, x: q(p.x), z: q(p.z), y: q(p.y), fx: q(p.fx), fz: q(p.fz), s: p.state, f: p.frame, m: p.move?.id ?? null, hp: Math.round(p.hp), mh: p.maxHp, lv: this.profile.level,
+      jb: this.job?.job.id ?? null,
+      ja: this.job?.startedAt,
+      se: seat ? (seat.spot === 'sofa' ? this.sofa.id : 'd') : null,
+      sa: seat ? Math.round(this.seatAmount * 20) / 20 : 0,
+      ...this.netExtras(),
+    };
+  }
+
+  /** 자는 모습·낚시·펫 (친구 화면에서도 똑같이 보이게) */
+  private netExtras(): Pick<NetState, 'sl' | 'sb' | 'fs' | 'pt'> {
+    const q = (v: number) => Math.round(v * 100) / 100;
+    const out: Pick<NetState, 'sl' | 'sb' | 'fs' | 'pt'> = {};
+    const sv = this.location === 'home' ? this.sleepView : null;
+    if (sv && sv.rest > 0) {
+      out.sl = q(sv.rest);
+      out.sb = q(sv.blanket);
+    }
+    const fsc = this.fishScene();
+    if (fsc) {
+      const l = fsc.f;
+      out.fs = {
+        p: l.phase, t: l.t, n: q(l.nibble), su: l.surge, te: Math.round(l.tension), tf: l.tapFlash ? 1 : 0, sw: q(l.swim), lo: q(l.lineOut),
+        fi: l.fish?.id ?? null, kg: l.kg, x: q(fsc.spot.x), z: q(fsc.spot.z), rod: fsc.rod.id,
+      };
+    }
+    if (this.pets.poses.length) {
+      out.pt = this.pets.poses.slice(0, 6).map((p) => ({ i: p.pet.id, sp: p.pet.species, x: q(p.x), y: q(p.y), z: q(p.z), yaw: q(p.yaw), mv: q(p.moving), j: Math.round(p.pet.joy) }));
+    }
+    return out;
+  }
+
+  /** 내 낚시 장면 (낚시 중이 아니면 null) */
+  fishScene(): FishScene | null {
+    const f = this.fishing;
+    const spot = this.fishSpot;
+    if (!f || !spot || this.location !== 'city') return null;
+    return {
+      f: { phase: f.phase, t: f.t, nibble: f.nibble, surge: f.surge, tension: f.tension, tapFlash: f.view.tapFlash, swim: f.swim, lineOut: f.lineOut, fish: f.fish, kg: f.kg },
+      spot,
+      rod: this.fishSetup?.rod ?? ROD_BY_ID[this.fishingState.rod ?? 'bamboo'] ?? ROD_BY_ID.bamboo,
+    };
+  }
+
+  /** 친구 낚시 장면 (같은 곳에 있을 때만) */
+  remoteFishScene(r: RemotePlayer): FishScene | null {
+    const n = r.fish;
+    if (!n || r.room !== this.roomKey) return null;
+    return {
+      f: { phase: n.p, t: n.t, nibble: n.n, surge: n.su, tension: n.te, tapFlash: !!n.tf, swim: n.sw, lineOut: n.lo, fish: n.fi ? (FISH_BY_ID[n.fi] ?? null) : null, kg: n.kg },
+      spot: { x: n.x, z: n.z },
+      rod: ROD_BY_ID[n.rod] ?? ROD_BY_ID.bamboo,
+    };
+  }
+
+  /** 소파에 누워 있는 친구 (같은 집에 있을 때만) */
+  sofaTakenBy(): RemotePlayer | null {
+    if (this.location !== 'home') return null;
+    for (const r of this.remotes.values()) if (r.room === this.roomKey && r.seat?.spot === 'sofa') return r;
+    return null;
+  }
+
+  /** 렌더러용: 친구가 앉은·누운 자세 (소파 동작 넘어가는 정도 포함) */
+  remoteSeatView(r: RemotePlayer) {
+    const s = r.seat;
+    if (!s) return null;
+    const at = Math.max(0, this.frame - s.at);
+    return { spot: s.spot, amt: s.amt, sofa: { act: s.act, prev: s.prev, k: at / SOFA_BLEND, at, pt: s.pt + at } };
+  }
+
+  /** 로비·복도에 그릴 사람: 내가 근무 중이면 내 근무, 아니면 근무 중인 친구가 보내 준 장면 */
+  get shownPeople(): readonly ShownPerson[] {
+    if (this.job) return this.job.people;
+    for (const r of this.remotes.values()) if (r.job && r.scene) return [...r.scene.people.values()];
+    return [];
+  }
+
+  /** 근무 중인 친구가 보낸 로비·복도 장면 */
+  applyRemoteJob(id: string, sc: NetJobScene) {
+    const r = this.remotes.get(id);
+    if (!r || !r.job) return;
+    const scene = (r.scene ??= { people: new Map(), at: 0 });
+    scene.at = this.frame;
+    const seen = new Set<number>();
+    for (const n of sc.p) {
+      seen.add(n.i);
+      let v = scene.people.get(n.i);
+      const tier = n.tr ? ROBBER_TIERS.find((t) => t.id === n.tr) : undefined;
+      if (!v) {
+        const f = new Fighter(n.i, 'npc', { maxHp: n.mh, canBlock: false });
+        f.reset(n.x, n.z, n.fx, n.fz);
+        v = { f, slot: n.sl, where: n.w, kind: n.k === 'r' ? 'robber' : 'visitor', title: n.t, tier, koFrames: -1, showUntil: 0, target: { x: n.x, z: n.z, y: n.y, fx: n.fx, fz: n.fz } };
+        scene.people.set(n.i, v);
+      }
+      const f = v.f;
+      // 다른 층으로 옮겼으면 미끄러지지 않고 바로 그 자리에
+      if (v.where !== n.w) {
+        f.x = n.x;
+        f.z = n.z;
+        f.snapshot();
+      }
+      v.slot = n.sl;
+      v.where = n.w;
+      v.title = n.t;
+      v.tier = tier;
+      v.reaction = n.re;
+      v.koFrames = n.ko ? Math.max(0, v.koFrames) : -1;
+      v.showUntil = n.sh ? this.frame + 30 : 0;
+      v.target = { x: n.x, z: n.z, y: n.y, fx: n.fx, fz: n.fz };
+      if (f.state !== n.s || (f.move?.id ?? null) !== n.m) {
+        f.state = n.s;
+        f.move = n.m ? (MOVES[n.m] ?? null) : null;
+        f.frame = n.f;
+      } else if (Math.abs(f.frame - n.f) > 6) f.frame = n.f;
+      f.maxHp = n.mh;
+      f.hp = n.hp;
+    }
+    for (const i of [...scene.people.keys()]) if (!seen.has(i)) scene.people.delete(i);
+    // 같은 곳에서 일어난 말풍선·타격 이펙트만 띄운다
+    const here = this.location === 'lobby' ? 1 : this.location === 'corridor' ? this.floor : 0;
+    if (!here) return;
+    for (const s of sc.sp) if (s.w === here) this.pushSpeech({ x: s.x, z: s.z, text: s.text, color: s.color });
+    for (const e of sc.ev) if (e.w === here) this.pushEvent(e.e);
   }
 
   /** 친구의 최신 모습을 받았다 */
@@ -2005,6 +3107,7 @@ export class CityWorld {
     r.room = s.r;
     r.level = s.lv ?? r.level;
     r.target = { x: s.x, z: s.z, y: s.y, fx: s.fx, fz: s.fz };
+    this.applyRemoteBusy(r, s);
     if (moved) {
       // 다른 곳으로 옮겼으면 미끄러지듯 따라가지 않고 바로 그 자리에
       f.x = s.x;
@@ -2027,24 +3130,77 @@ export class CityWorld {
     }
   }
 
+  /** 친구가 하는 일(근무)과 앉은 곳(데스크·소파). 한 자리엔 한 명만: 거의 동시에 차지했으면 늦은 쪽이 비킨다 */
+  private applyRemoteBusy(r: RemotePlayer, s: NetState) {
+    r.sleep = s.sl ? { rest: s.sl, blanket: s.sb ?? 0 } : null;
+    r.fish = s.fs && typeof s.fs.p === 'string' ? { ...s.fs } : null;
+    r.pets = Array.isArray(s.pt) ? s.pt.slice(0, 6) : [];
+    const job = s.jb ?? null;
+    if (job !== r.job) r.scene = null;
+    r.job = job;
+    r.jobAt = s.ja ?? 0;
+    const me = this.netId ?? '';
+    if (job && this.job?.job.id === job && (r.jobAt < this.job.startedAt || (r.jobAt === this.job.startedAt && r.id < me))) this.yieldJob(r);
+
+    const se = s.se ?? null;
+    if (!se) r.seat = null;
+    else {
+      const spot = se === 'd' ? 'desk' : 'sofa';
+      const act = (spot === 'sofa' ? se : 'sit') as SofaAct;
+      const old = r.seat;
+      if (!old || old.spot !== spot) r.seat = { spot, amt: s.sa ?? 1, act, prev: 'sit', at: this.frame, pt: 0 };
+      else {
+        old.amt = s.sa ?? 1;
+        if (old.act !== act) {
+          // 동작이 바뀌었다: 지금 보이던 동작에서 새 동작으로 넘어간다
+          old.pt += this.frame - old.at;
+          old.prev = old.act;
+          old.act = act;
+          old.at = this.frame;
+        }
+      }
+      // 둘이 동시에 소파에 누웠으면 id 가 큰 쪽이 일어난다
+      if (spot === 'sofa' && r.room === this.roomKey && this.seat?.spot === 'sofa' && this.seat.phase !== 'stand' && r.id < me) {
+        this.standUp();
+        this.say(`🛋️ ${r.name} 님이 먼저 소파에 누웠어요`, 2.5);
+      }
+    }
+  }
+
+  /** 받은 위치로 부드럽게 따라간다 */
+  private follow(f: Fighter, t: { x: number; z: number; y: number; fx: number; fz: number }) {
+    const d = Math.hypot(t.x - f.x, t.z - f.z);
+    const k = d > 4 ? 1 : 0.3;
+    f.x += (t.x - f.x) * k;
+    f.z += (t.z - f.z) * k;
+    f.y += (t.y - f.y) * 0.5;
+    const fx = f.fx + (t.fx - f.fx) * 0.4;
+    const fz = f.fz + (t.fz - f.fz) * 0.4;
+    const len = Math.hypot(fx, fz) || 1;
+    f.fx = fx / len;
+    f.fz = fz / len;
+  }
+
   /** 친구 모습을 받은 위치로 부드럽게 옮기고, 받는 사이에도 동작이 이어지게 프레임을 진행한다 */
   private stepRemotes() {
     for (const r of this.remotes.values()) {
       const f = r.fighter;
-      const t = r.target;
       f.snapshot();
       f.frame++;
-      if (!t) continue;
-      const d = Math.hypot(t.x - f.x, t.z - f.z);
-      const k = d > 4 ? 1 : 0.3;
-      f.x += (t.x - f.x) * k;
-      f.z += (t.z - f.z) * k;
-      f.y += (t.y - f.y) * 0.5;
-      const fx = f.fx + (t.fx - f.fx) * 0.4;
-      const fz = f.fz + (t.fz - f.fz) * 0.4;
-      const len = Math.hypot(fx, fz) || 1;
-      f.fx = fx / len;
-      f.fz = fz / len;
+      if (r.target) this.follow(f, r.target);
+      // 낚시 장면은 받는 사이에도 시간이 흐른다 (던지기 동작이 끊기지 않게)
+      if (r.fish) r.fish.t++;
+      // 친구 근무 장면: 3초 넘게 소식이 없으면 치운다
+      const sc = r.scene;
+      if (sc && this.frame - sc.at > 180) r.scene = null;
+      else if (sc) {
+        for (const v of sc.people.values()) {
+          v.f.snapshot();
+          v.f.frame++;
+          if (v.koFrames >= 0) v.koFrames++;
+          this.follow(v.f, v.target);
+        }
+      }
     }
   }
 
@@ -2116,7 +3272,14 @@ export class CityWorld {
     this.collideFighter(f, where);
   }
 
-  private collideFighter(p: Fighter, where: CityLocation = this.location) {
+  /** 펫처럼 작은 것 하나를 지금 장소의 벽·가구·건물(·차도)에 막히게 */
+  collidePoint(x: number, z: number): { x: number; z: number } {
+    const f = { x, z } as unknown as Fighter;
+    this.collideFighter(f, this.location, true);
+    return { x: f.x, z: f.z };
+  }
+
+  private collideFighter(p: Fighter, where: CityLocation = this.location, roads = p === this.player) {
     const r = FIGHTER_RADIUS * 0.8;
     // 앉아 있는 동안 플레이어는 의자에 그대로
     if (p === this.player && this.seat) return;
@@ -2127,9 +3290,11 @@ export class CityWorld {
           ? LOBBY.furniture.map((f) => f.rect)
           : where === 'corridor'
             ? this.corridorSolids()
+            : where === 'store'
+              ? (this.store?.furniture ?? []).map((f) => f.rect)
         : this.map.buildings.map((b) => ({ x0: b.x - b.w / 2, x1: b.x + b.w / 2, z0: b.z - b.d / 2, z1: b.z + b.d / 2 }));
     // 플레이어는 차도에 못 들어간다 (횡단보도로만 건넌다). 경찰·행인은 그대로
-    if (where === 'city' && p === this.player) solids.push(...this.roadRects);
+    if (where === 'city' && roads) solids.push(...this.roadRects);
     for (const s of solids) {
       // 원(사람) vs 상자: 가장 가까운 점에서 밀어낸다
       const cx = Math.max(s.x0, Math.min(p.x, s.x1));
@@ -2155,10 +3320,13 @@ export class CityWorld {
         }
       }
     }
-    const b = where === 'home' ? HOME.room : where === 'lobby' ? LOBBY.room : where === 'corridor' ? CORRIDOR.room : this.map.bounds;
+    const b = where === 'home' ? HOME.room : where === 'lobby' ? LOBBY.room : where === 'corridor' ? CORRIDOR.room : where === 'store' && this.store ? this.store.room : this.map.bounds;
     const onBridge = where === 'city' && Math.abs(p.x - this.map.bridgeX) < 5;
+    // 한강 낚시 데크: 강둑 너머 물 위로 나간 나무 데크 안에서만 (양옆 · 끝은 난간)
+    const deck = where === 'city' && p.z > b.z1 - r ? this.map.fishDecks.find((d) => Math.abs(p.x - d.x) < d.w / 2 + 0.8) : undefined;
+    if (deck) p.x = Math.max(deck.x - deck.w / 2 + r, Math.min(deck.x + deck.w / 2 - r, p.x));
     p.x = Math.max(b.x0 + r, Math.min(b.x1 - r, p.x));
-    p.z = Math.max(b.z0 + r, Math.min((onBridge ? 260 : b.z1) - r, p.z));
+    p.z = Math.max(b.z0 + r, Math.min((onBridge ? 260 : deck ? deck.z1 : b.z1) - r, p.z));
   }
 
   // ───────────────────────── 차·행인 ─────────────────────────

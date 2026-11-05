@@ -30,6 +30,8 @@ export interface EquipDef {
   hp?: number;
   /** 공격력 + (0.05 = +5%) */
   power?: number;
+  /** 옷가게 가격 (없으면 가게에서 안 판다) */
+  price?: number;
   desc: string;
 }
 
@@ -44,9 +46,26 @@ export const EQUIPS: Record<string, EquipDef> = Object.fromEntries(
       { id: 'workGloves', name: '목장갑', icon: '🧤', slot: 'gloves', rarity: 'common', power: 0.04, desc: '주먹이 덜 아프다.' },
       { id: 'silverChain', name: '은 목걸이', icon: '📿', slot: 'necklace', rarity: 'rare', hp: 10, power: 0.03, desc: '은은하게 빛난다.' },
       { id: 'luckyRing', name: '행운의 반지', icon: '💍', slot: 'ring', rarity: 'rare', power: 0.05, desc: '끼면 왠지 일이 잘 풀린다.' },
+      // 옷가게 전투 장비 (공격력 위주)
+      { id: 'aluBat', name: '알루미늄 배트', icon: '🏏', slot: 'weapon', rarity: 'common', power: 0.14, price: 600, desc: '나무보다 단단하고 가볍다.' },
+      { id: 'steelPipe', name: '쇠파이프', icon: '🔧', slot: 'weapon', rarity: 'rare', power: 0.22, price: 1500, desc: '묵직한 한 방.' },
+      { id: 'fightStick', name: '삼단봉', icon: '🦯', slot: 'weapon', rarity: 'epic', power: 0.32, price: 3500, desc: '경비원들이 탐내는 전문 장비.' },
+      { id: 'leatherKnuckle', name: '가죽 너클', icon: '🥊', slot: 'gloves', rarity: 'common', power: 0.1, price: 500, desc: '주먹에 힘이 실린다.' },
+      { id: 'steelKnuckle', name: '강철 너클', icon: '🥊', slot: 'gloves', rarity: 'rare', power: 0.18, price: 1400, desc: '맞으면 아프다. 많이.' },
+      { id: 'combatBoots', name: '전투화', icon: '🥾', slot: 'shoes', rarity: 'rare', hp: 10, power: 0.08, price: 900, desc: '발차기가 매서워진다.' },
+      { id: 'riderJacket', name: '라이더 재킷', icon: '🧥', slot: 'top', rarity: 'rare', hp: 30, power: 0.05, price: 1100, desc: '두꺼운 가죽이 몸을 지켜준다.' },
+      { id: 'cargoPants', name: '전술 카고바지', icon: '👖', slot: 'bottom', rarity: 'common', hp: 18, power: 0.04, price: 600, desc: '움직이기 편하다.' },
+      { id: 'helmet', name: '오토바이 헬멧', icon: '⛑️', slot: 'head', rarity: 'common', hp: 25, price: 500, desc: '머리는 소중하니까.' },
+      { id: 'goldChain', name: '금 목걸이', icon: '📿', slot: 'necklace', rarity: 'rare', hp: 12, power: 0.08, price: 1600, desc: '자신감이 붙는다.' },
+      { id: 'fighterRing', name: '파이터 반지', icon: '💍', slot: 'ring', rarity: 'epic', power: 0.15, price: 2800, desc: '전설의 파이터가 끼던 반지.' },
     ] satisfies EquipDef[]
   ).map((e) => [e.id, e]),
 );
+
+/** 옷가게에서 파는 전투 장비 (가격 순) */
+export const SHOP_GEAR: EquipDef[] = Object.values(EQUIPS)
+  .filter((e) => e.price)
+  .sort((a, b) => a.price! - b.price!);
 
 /** 처음 받는 기본 장비 8개 (칸마다 하나) */
 export const STARTER_GEAR = ['woodBat', 'cap', 'hoodie', 'jeans', 'sneakers', 'workGloves', 'silverChain', 'luckyRing'];

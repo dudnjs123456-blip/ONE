@@ -5,11 +5,15 @@ import type { Fighter } from '../core/fighter';
 import { FIELD_SPAWNS } from '../data/monsters';
 import { smooth, type FrameClock } from './clock';
 import { FloatingTexts, Nameplate, SparkSystem } from './effects';
-import { PLAYER_LOOK } from './looks';
+import { playerLook } from './looks';
+import { wornList } from '../data/fashion';
 import type { Appearance } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
+import { playCoin, playHit, playLevelUp } from './sfx';
 
+/** 16:10 화면에서 45° 일 때 보이는 옆 시야각 — 세로 화면도 이만큼은 보이게 */
+const WIDE_HFOV = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(45) / 2) * 1.6);
 const CAM_OFFSET = new THREE.Vector3(0, 8.5, 9);
 const TEXT_COLORS: Record<FloatText['kind'], string> = { exp: '#b8f36b', gold: '#ffd54a', level: '#ffe066' };
 
@@ -74,6 +78,9 @@ export class FieldRenderer {
   resize(width: number, height: number) {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(1, height);
+    // 세로 화면(폰): 옆 시야가 좁으니 시야각을 넓힌다 (가로·PC 는 그대로 45°)
+    const wantV = (2 * Math.atan(Math.tan(WIDE_HFOV / 2) / this.camera.aspect) * 180) / Math.PI;
+    this.camera.fov = THREE.MathUtils.clamp(wantV, 45, 75);
     this.camera.updateProjectionMatrix();
   }
 
@@ -81,6 +88,8 @@ export class FieldRenderer {
     this.syncActors(world, clock);
 
     for (const e of world.drainCombatEvents()) {
+      // 내가 맞으면 크게, 몬스터를 때리면 작게 (자동사냥은 쉬지 않고 때린다)
+      playHit(e.kind, e.heavy, e.victim === 0 ? 0.9 : 0.45);
       this.shake = Math.max(this.shake, this.sparks.spawn(e) * (e.victim === 0 ? 1.5 : 0.6));
       if (e.damage > 0) {
         const color = e.victim === 0 ? '#ff5a4a' : e.kind === 'counter' ? '#ffb020' : '#ffffff';
@@ -88,6 +97,8 @@ export class FieldRenderer {
       }
     }
     for (const t of world.drainTexts()) {
+      if (t.kind === 'gold') playCoin();
+      else if (t.kind === 'level') playLevelUp();
       this.texts.spawn(t.text, t.x, t.y, t.z, TEXT_COLORS[t.kind], t.kind === 'level' ? 1.6 : 0.9);
     }
     this.sparks.update(clock.dt);
@@ -149,7 +160,7 @@ export class FieldRenderer {
     };
 
     const p = world.player;
-    const pa = ensure(p, PLAYER_LOOK, 1, false);
+    const pa = ensure(p, playerLook(wornList(world.profile.wardrobe), world.profile.body), 1, false);
     pa.mannequin.update(p, clock);
     pa.plate.draw(`Lv.${world.level} PLAYER`, p.hp, p.maxHp);
     const pp = p.lerped(clock.alpha);

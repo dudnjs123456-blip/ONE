@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import OutfitSection from './OutfitSection';
 import type { CityWorld } from '@/game/city/cityWorld';
 import { EQUIPS, EQUIP_SLOTS, ensureGear, equipItem, gearBonus, playerStats, unequipSlot, type EquipDef, type EquipSlot, type Rarity } from '@/game/data/equipment';
 
@@ -13,7 +14,7 @@ const RARITY: Record<Rarity, { label: string; cls: string }> = {
 const effect = (e: EquipDef) => [e.hp ? `HP +${e.hp}` : '', e.power ? `공격력 +${Math.round(e.power * 100)}%` : ''].filter(Boolean).join(' · ');
 
 /** 장비창 (T): 8칸 + 가방. 가방 장비를 누르면 끼고, 칸을 누르면 그 칸 장비만 보거나 벗는다 */
-export default function GearPanel({ world, onClose }: { world: CityWorld; onClose: () => void }) {
+export default function GearPanel({ world, onClose, onWardrobe }: { world: CityWorld; onClose: () => void; onWardrobe?: () => void }) {
   const profile = world.profile;
   const g = ensureGear(profile);
   const [, redraw] = useState(0);
@@ -59,11 +60,21 @@ export default function GearPanel({ world, onClose }: { world: CityWorld; onClos
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-[640px] max-w-full rounded-xl border border-white/20 bg-zinc-900/95 p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[94vh] w-[1080px] max-w-full overflow-y-auto rounded-xl border border-white/20 bg-zinc-900/95 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-xl font-bold">🛡️ 장비</div>
-          <div className="text-xs text-white/50">T / Esc 닫기</div>
+          <div className="text-xl font-bold">🛡️ 장비 · 👗 코디</div>
+          <div className="flex items-center gap-3">
+            {onWardrobe && (
+              <button onClick={onWardrobe} className="rounded-lg bg-pink-400 px-3 py-1 text-sm font-bold text-black hover:bg-pink-300">
+                👗 코디 창 열기 (O)
+              </button>
+            )}
+            <span className="text-xs text-white/50">T / Esc 닫기</span>
+          </div>
         </div>
+        <div className="flex flex-col gap-5 lg:flex-row">
+        <div className="min-w-0 flex-1">
+        <div className="mb-2 text-sm font-bold text-amber-300">⚔️ 전투 장비 <span className="font-normal text-white/50">— 공격력 · 체력</span></div>
 
         <div className="flex items-stretch justify-center gap-3">
           <div className="flex flex-col gap-2">
@@ -125,6 +136,9 @@ export default function GearPanel({ world, onClose }: { world: CityWorld; onClos
           </div>
         )}
         <div className="mt-2 text-[11px] text-white/40">가방의 장비를 누르면 낍니다 (같은 칸에 있던 장비는 가방으로). 칸을 누르면 그 칸 장비만 보여요.</div>
+        </div>
+        <OutfitSection world={world} />
+        </div>
       </div>
     </div>
   );

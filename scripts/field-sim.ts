@@ -28,3 +28,35 @@ if (w.profile.kills === 0) process.exitCode = 1;
   console.log(`${ok ? 'PASS' : 'FAIL'}  field life stats tick (hunger ${before.h.toFixed(1)} → ${w.profile.life.hunger.toFixed(1)}, moveScale ${w.player.moveScale})`);
   if (!ok) process.exitCode = 1;
 }
+
+// 자동사냥 사냥감 고르기: 레벨이 높으면 흑기사(Lv.9)도 잡으러 가고, 죽지 않는다
+{
+  const prof = newProfile();
+  prof.level = 9;
+  const w2 = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), prof);
+  const seen = new Set<number>();
+  let knights = 0, goblins = 0, died = false;
+  for (let f = 0; f < 8 * 3600; f++) {
+    w2.step();
+    for (const l of w2.log) if (!seen.has(l.id)) { seen.add(l.id); if (l.text.startsWith('흑기사 처치')) knights++; if (l.text.startsWith('고블린 처치')) goblins++; }
+    if (w2.player.hp <= 0) died = true;
+  }
+  const ok = knights >= 3 && !died;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  auto-hunt picks level-appropriate prey (Lv.9 8분: 흑기사 ${knights}, 고블린 ${goblins}, 사망 ${died ? '있음' : '없음'})`);
+  if (!ok) process.exitCode = 1;
+}
+
+// 보스 권장 레벨에 닿으면 필드 기록에 도전 안내가 뜬다 (Lv.3 → 고블린 킹)
+{
+  const prof = newProfile();
+  const w3 = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), prof);
+  let notice = '';
+  const seen = new Set<number>();
+  for (let f = 0; f < 6 * 3600 && !notice; f++) {
+    w3.step();
+    for (const l of w3.log) if (!seen.has(l.id)) { seen.add(l.id); if (l.text.includes('고블린 킹')) notice = l.text; }
+  }
+  const ok = !!notice && w3.level >= 3;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  boss-ready notice at Lv.3 (${notice || '없음'})`);
+  if (!ok) process.exitCode = 1;
+}

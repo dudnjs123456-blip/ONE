@@ -10,12 +10,25 @@ function Bar({ value, max, color, height = 'h-3' }: { value: number; max: number
   );
 }
 
-export default function FieldHud({ hud, onToggleAuto }: { hud: FieldHudState; onToggleAuto: () => void }) {
+/** @param touch 터치 조작 화면: 로그를 위로 올리고 키 설명은 숨김 */
+export default function FieldHud({
+  hud,
+  onToggleAuto,
+  touch = false,
+  portrait = false,
+}: {
+  hud: FieldHudState;
+  onToggleAuto: () => void;
+  touch?: boolean;
+  /** 폰 세로 화면: 정보 칸을 위아래로 쌓는다 (옆으로 놓을 폭이 없음) */
+  portrait?: boolean;
+}) {
+  const tall = touch && portrait;
   const t = hud.target;
   return (
     <div className="pointer-events-none absolute inset-0 select-none text-white">
       {/* 내 정보 */}
-      <div className="absolute left-4 top-4 w-72 rounded-lg border border-white/15 bg-black/50 p-3 backdrop-blur-sm">
+      <div className={`absolute left-4 top-4 rounded-lg border border-white/15 bg-black/50 p-3 backdrop-blur-sm ${touch ? 'w-64' : 'w-72'}`}>
         <div className="flex items-baseline justify-between">
           <span className="text-lg font-black">
             <span className="text-amber-300">Lv.{hud.level}</span> PLAYER
@@ -40,7 +53,7 @@ export default function FieldHud({ hud, onToggleAuto }: { hud: FieldHudState; on
 
       {/* 타겟 */}
       {t && (
-        <div className="absolute left-1/2 top-4 w-80 -translate-x-1/2 rounded-lg border border-red-400/30 bg-black/50 px-3 py-2 backdrop-blur-sm">
+        <div className={`absolute left-1/2 top-4 -translate-x-1/2 rounded-lg border border-red-400/30 bg-black/50 px-3 py-2 backdrop-blur-sm ${tall ? '!left-4 top-[13.5rem] w-60 !translate-x-0' : touch ? 'w-60' : 'w-80'}`}>
           <div className="mb-1 flex justify-between text-sm font-bold">
             <span>
               <span className="text-red-300">Lv.{t.level}</span> {t.name}
@@ -54,8 +67,8 @@ export default function FieldHud({ hud, onToggleAuto }: { hud: FieldHudState; on
       )}
 
       {/* 로그 */}
-      <div className="absolute bottom-28 left-4 w-80 space-y-0.5 text-xs">
-        {hud.log.map((l) => (
+      <div className={`absolute w-72 space-y-0.5 text-xs ${tall ? 'left-4 top-[18.5rem]' : touch ? 'left-1/2 top-24 -translate-x-1/2' : 'bottom-28 left-4'}`}>
+        {(touch ? hud.log.slice(-2) : hud.log).map((l) => (
           <div key={l.id} className="rounded bg-black/40 px-2 py-0.5 text-white/85">
             {l.text}
           </div>
@@ -63,7 +76,7 @@ export default function FieldHud({ hud, onToggleAuto }: { hud: FieldHudState; on
       </div>
 
       {/* AUTO 버튼 */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
+      <div className={`absolute left-1/2 -translate-x-1/2 ${tall ? 'bottom-48' : 'bottom-6'}`}>
         <button
           onClick={onToggleAuto}
           className={`pointer-events-auto flex h-20 w-20 flex-col items-center justify-center rounded-full border-4 font-black transition ${
@@ -73,11 +86,11 @@ export default function FieldHud({ hud, onToggleAuto }: { hud: FieldHudState; on
           }`}
         >
           <span className="text-lg leading-none">AUTO</span>
-          <span className="text-[10px] font-bold opacity-70">{hud.auto ? 'ON' : 'OFF'} · Z</span>
+          <span className="text-[10px] font-bold opacity-70">{hud.auto ? 'ON' : 'OFF'}{!touch && ' · Z'}</span>
         </button>
       </div>
 
-      {!hud.auto && (
+      {!hud.auto && !touch && (
         <div className="absolute bottom-6 right-4 rounded bg-black/50 px-3 py-2 text-xs leading-5 text-white/80">
           <div>방향키 이동 · {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리</div>
           <div>{bindLabel('run')} = 아래 ({bindLabel('run')}+앞+{bindLabel('b2')} = 어퍼)</div>

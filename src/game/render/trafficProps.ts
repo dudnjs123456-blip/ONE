@@ -131,7 +131,7 @@ export class TrafficProps {
       const cz = (c.z0 + c.z1) / 2;
       const span = along ? c.x1 - c.x0 : c.z1 - c.z0;
       for (let k = -span / 2 + 0.6; k <= span / 2 - 0.4; k += 1.1) {
-        put(paint, new THREE.BoxGeometry(0.55, 0.02, stripeLen), along ? at(cx + k, 0.06, cz) : at(cx, 0.06, cz + k, Math.PI / 2));
+        put(paint, new THREE.BoxGeometry(0.55, 0.02, stripeLen), along ? at(cx + k, 0.075, cz) : at(cx, 0.075, cz + k, Math.PI / 2));
       }
     }
     for (const r of map.roads) {
@@ -141,7 +141,7 @@ export class TrafficProps {
           // 진행 방향 오른쪽 절반 차로를 가로지르는 흰 선
           const line = s + dir * 0.35;
           const lat = r.axis === 'x' ? r.at + (dir * hw) / 2 : r.at - (dir * hw) / 2;
-          put(paint, new THREE.BoxGeometry(0.4, 0.02, hw - 0.3), r.axis === 'x' ? at(line, 0.061, lat) : at(lat, 0.061, line, Math.PI / 2));
+          put(paint, new THREE.BoxGeometry(0.4, 0.02, hw - 0.3), r.axis === 'x' ? at(line, 0.075, lat) : at(lat, 0.075, line, Math.PI / 2));
         }
       }
     }

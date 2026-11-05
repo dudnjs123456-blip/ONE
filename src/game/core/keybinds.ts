@@ -34,8 +34,8 @@ const DEFAULT_BINDS: Record<BindAction, string[]> = {
   interact: ['KeyE', 'Enter'],
 };
 
-/** 다른 기능 단축키라 바꿀 수 없는 키 (지도 M, 가방 I, 일자리 J, 자동근무 G·P, 장비 T, 메뉴 Esc, 판정 표시 `) */
-const RESERVED = new Set(['Escape', 'KeyM', 'KeyI', 'KeyJ', 'KeyG', 'KeyP', 'KeyT', 'Backquote', 'Tab', 'MetaLeft', 'MetaRight']);
+/** 다른 기능 단축키라 바꿀 수 없는 키 (지도 M, 가방 I, 일자리 J, 자동근무 G·P, 장비 T, 낚시 도감 F, 메뉴 Esc, 판정 표시 `) */
+const RESERVED = new Set(['Escape', 'KeyM', 'KeyI', 'KeyJ', 'KeyG', 'KeyP', 'KeyT', 'KeyV', 'KeyK', 'KeyF', 'Backquote', 'Tab', 'MetaLeft', 'MetaRight']);
 
 const STORAGE_KEY = 'ironfist.keybinds';
 let binds: Record<BindAction, string[]> = clone(DEFAULT_BINDS);

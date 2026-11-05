@@ -21,6 +21,8 @@ export interface CorridorView {
   setFloor(v: CorridorFloorView): void;
   /** 순찰에서 아직 점검할 곳을 표시 (지점 id → 보이기) */
   setPending(ids: Set<string>, t: number): void;
+  /** 현관문 i 가 열린 정도 (0~1, 복도 쪽으로 열린다) */
+  setDoor(i: number, t: number): void;
 }
 
 export function buildCorridorScene(s: THREE.Scene): CorridorView {
@@ -208,12 +210,19 @@ export function buildCorridorScene(s: THREE.Scene): CorridorView {
 
   // 현관문 3개 (북쪽 벽) + 호수·이름 명패
   const doorMats: THREE.MeshStandardMaterial[] = [];
+  // 문짝은 왼쪽 경첩에 매달려 복도 쪽(+z)으로 열린다
+  const leaves: THREE.Group[] = [];
   const plates = CORRIDOR.doors.map((dx) => {
     const m = std(0x5b3d2b, 0.5);
     doorMats.push(m);
-    box(0.95, 2.05, 0.06, m, dx, 1.03, z0 + 0.09);
-    box(0.06, 0.06, 0.06, std(0xd4af37, 0.3, 0.8), dx + 0.35, 1.0, z0 + 0.14); // 손잡이
-    box(0.12, 0.18, 0.04, std(0x1d1f23, 0.4, 0.4), dx + 0.35, 1.35, z0 + 0.13); // 도어락
+    box(1.07, 2.12, 0.05, std(0x2f2925, 0.6), dx, 1.06, z0 + 0.04); // 문틀 (안쪽 어둠)
+    const leaf = new THREE.Group();
+    leaf.position.set(dx - 0.475, 0, z0 + 0.09);
+    s.add(leaf);
+    leaves.push(leaf);
+    box(0.95, 2.05, 0.06, m, 0.475, 1.03, 0, leaf);
+    box(0.06, 0.06, 0.06, std(0xd4af37, 0.3, 0.8), 0.825, 1.0, 0.05, leaf); // 손잡이
+    box(0.12, 0.18, 0.04, std(0x1d1f23, 0.4, 0.4), 0.825, 1.35, 0.04, leaf); // 도어락
     const p = label(0.62, 0.26, 248, 104);
     p.mesh.position.set(dx, 2.28, z0 + 0.08);
     return p;
@@ -345,6 +354,12 @@ export function buildCorridorScene(s: THREE.Scene): CorridorView {
 
   let shown = '';
   return {
+    setDoor(i: number, t: number) {
+      const l = leaves[i];
+      if (!l) return;
+      const e = t * t * (3 - 2 * t);
+      l.rotation.y = -1.35 * e;
+    },
     setFloor(v: CorridorFloorView) {
       const key = `${v.floor}|${v.top}|${v.owners.join(',')}`;
       if (key === shown) return;

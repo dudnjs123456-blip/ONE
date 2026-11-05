@@ -13,6 +13,8 @@ export interface TreeSpot {
   x: number;
   z: number;
   s: number;
+  /** 옆으로 퍼질 수 있는 최대 반지름 (m, 건물 벽까지). 없으면 제한 없음 */
+  room?: number;
 }
 
 interface Species {
@@ -234,6 +236,10 @@ export class TreeKit {
       if (!mine.length) return;
       const { woodGeo, leafGeo } = growTree(sp, 1000 + ki * 77);
       this.geos.push(woodGeo, leafGeo);
+      // 이 종류 잎 덩어리의 가로 반지름 (건물 쪽으로 넘치지 않게 폭을 줄이는 기준)
+      const pos = leafGeo.attributes.position;
+      let reach = 0.5;
+      for (let i = 0; i < pos.count; i++) reach = Math.max(reach, Math.hypot(pos.getX(i), pos.getZ(i)));
       const bark = new THREE.MeshStandardMaterial({ map: barkTex, color: sp.bark, roughness: 0.95, emissive: sp.bark, emissiveMap: barkTex, emissiveIntensity: 0 });
       const leaf = new THREE.MeshStandardMaterial({
         map: leafTex,
@@ -270,7 +276,7 @@ export class TreeKit {
         new THREE.Matrix4().compose(
           new THREE.Vector3(t.x, 0, t.z),
           new THREE.Quaternion().setFromAxisAngle(UP, (i * 2.39 + t.x * 0.13) % (Math.PI * 2)),
-          new THREE.Vector3(t.s, t.s * (0.92 + ((i * 7) % 5) * 0.04), t.s),
+          new THREE.Vector3(...((w) => [w, t.s * (0.92 + ((i * 7) % 5) * 0.04), w] as const)(Math.min(t.s, Math.max(0.3, (t.room ?? Infinity) / reach)))),
         ),
       );
       for (const [geo, mat] of [[woodGeo, bark], [leafGeo, leaf]] as const) {

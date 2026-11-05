@@ -1,5 +1,6 @@
 // 엔진 헤드리스 검증: npx tsx scripts/sim-test.ts
 import { Match } from '../src/game/core/match';
+import * as moveData from '../src/game/data/moves';
 import type { Controller } from '../src/game/core/controllers';
 import type { RelInput } from '../src/game/core/input';
 import type { Dir } from '../src/game/core/types';
@@ -139,4 +140,43 @@ function p2DirFrames(dir: number) { return dir === 6 ? 11 : 3; }
   check('jump + kick = flying kick in the air', kicks === 1 && airborneAtStart, `(${used.join(', ')})`);
   check('flying kick hits', m.lastHit?.name.startsWith('날아차기') === true, `(${m.lastHit?.name ?? 'none'} ${m.lastHit?.result ?? ''})`);
   check('lands and recovers', m.fighters[0].y === 0 && m.fighters[0].isActionable, `(state ${m.fighters[0].state})`);
+}
+
+// 대시 +3 = 대시 니킥, 대시 +4 = 슬라이딩 킥 (둘 다 쓸 수 있어야 한다)
+for (const [btn, want] of [[3, 'dashKnee'], [4, 'slideKick']] as const) {
+  const { m, p1 } = setup(4);
+  p1.hold(6, 1).hold(5, 1).hold(6, 1).press(6, btn).hold(5, 40);
+  let used = '';
+  for (let i = 0; i < 30; i++) { m.step(); used ||= m.fighters[0].move?.id ?? ''; }
+  check(`dash → ${btn} = ${want}`, used === want, `(${used})`);
+}
+
+// 기술표 정합성: 모든 기술은 실제로 나갈 수 있고, 표기 = 실제 입력, 같은 입력에 두 기술이 겹치지 않는다
+{
+  const { PLAYER_MOVE_LIST, MOVES, DASH_MOVES, JUMP_MOVES } = moveData;
+  const reach = new Set<string>();
+  for (const m of PLAYER_MOVE_LIST) if (m.input) reach.add(m.id);
+  for (const id of Object.values(DASH_MOVES)) if (id) reach.add(id);
+  for (const id of Object.values(JUMP_MOVES)) reach.add(id);
+  for (const m of Object.values(MOVES)) for (const c of m.cancels ?? []) reach.add(c.into);
+  const unreachable = PLAYER_MOVE_LIST.filter((m) => !reach.has(m.id)).map((m) => m.id);
+  check('기술표의 모든 기술을 쓸 수 있다', unreachable.length === 0, unreachable.join(', '));
+
+  const bad: string[] = [];
+  const seen = new Map<string, string>();
+  for (const m of PLAYER_MOVE_LIST) {
+    if (!m.input) continue;
+    const btns = [m.input.button, m.input.with].filter(Boolean);
+    const want = (m.input.dir === 'n' ? '' : m.input.dir + '+') + btns.join('+');
+    if (m.notation !== want) bad.push(`${m.id}: ${m.notation}≠${want}`);
+    const key = m.input.dir + ':' + [...btns].sort().join('+');
+    if (seen.has(key)) bad.push(`입력 겹침 ${key}: ${seen.get(key)}, ${m.id}`);
+    seen.set(key, m.id);
+  }
+  for (const [b, id] of Object.entries(DASH_MOVES)) {
+    const n = MOVES[id!].notation;
+    if (!n.startsWith('f,f+') || !n.slice(4).split('/').includes(b)) bad.push(`대시+${b}→${id}: ${n}`);
+  }
+  for (const [b, id] of Object.entries(JUMP_MOVES)) if (!MOVES[id].notation.includes(b)) bad.push(`점프+${b}→${id}: ${MOVES[id].notation}`);
+  check('기술표 표기 = 실제 입력', bad.length === 0, bad.join(' / '));
 }

@@ -90,7 +90,11 @@ export class Keyboard {
     if (isGameKey(e.code)) e.preventDefault();
     this.pressed.delete(e.code);
   };
-  private onBlur = () => this.pressed.clear();
+  private onBlur = () => {
+    this.pressed.clear();
+    this.unread.clear();
+    this.lateRelease.clear();
+  };
 
   attach(target: Window) {
     target.addEventListener('keydown', this.onDown);
@@ -104,13 +108,31 @@ export class Keyboard {
     target.removeEventListener('blur', this.onBlur);
   }
 
+  /** 화면 터치로 눌렀지만 아직 게임이 한 번도 읽지 않은 키 (아주 짧은 탭도 놓치지 않게) */
+  private unread = new Set<string>();
+  /** 읽히기 전에 손을 뗀 키: 다음 read 뒤에 뗀다 */
+  private lateRelease = new Set<string>();
+
+  /** 화면 터치 버튼 등에서 키를 누른 것처럼 넣는다 */
+  setVirtual(code: string, down: boolean) {
+    if (down) {
+      this.pressed.add(code);
+      this.unread.add(code);
+      this.lateRelease.delete(code);
+    } else if (this.unread.has(code)) {
+      this.lateRelease.add(code);
+    } else {
+      this.pressed.delete(code);
+    }
+  }
+
   has(code: string): boolean {
     return this.pressed.has(code);
   }
 
   read(map: KeyMap): RawInput {
     const p = this.pressed;
-    return {
+    const out: RawInput = {
       up: p.has(map.up),
       down: p.has(map.down),
       left: p.has(map.left),
@@ -118,5 +140,89 @@ export class Keyboard {
       buttons: map.buttons.map((k) => p.has(k)) as Buttons,
       jump: (map.jump ?? []).some((k) => p.has(k)),
     };
+    if (this.unread.size) {
+      for (const k of [map.up, map.down, map.left, map.right, ...map.buttons, ...(map.jump ?? [])]) {
+        this.unread.delete(k);
+        if (this.lateRelease.delete(k)) p.delete(k);
+      }
+    }
+    return out;
   }
+}
+
+// ───────────────────────── 게임패드 ─────────────────────────
+
+/** 스틱이 이만큼 이상 기울면 방향 입력 */
+const STICK_DEAD = 0.45;
+
+/** 패드 버튼 번호 (브라우저 표준 배치) → 철권 패드 배치: 1 = 왼쪽(X/□), 2 = 위(Y/△), 3 = 아래(A/✕), 4 = 오른쪽(B/○) */
+export const PAD_BUTTONS: [number, number, number, number] = [2, 3, 0, 1];
+/** 점프: 오른쪽 숄더(RB/R1) */
+const PAD_JUMP = 5;
+
+type PadLike = { buttons: readonly { pressed: boolean }[]; axes: readonly number[] } | null;
+
+/** 패드 상태 → 화면 기준 입력 (방향 패드 또는 왼쪽 스틱). 패드가 없으면 null */
+export function padToRaw(pad: PadLike): RawInput | null {
+  if (!pad) return null;
+  const b = (i: number) => !!pad.buttons[i]?.pressed;
+  const ax = pad.axes[0] ?? 0;
+  const ay = pad.axes[1] ?? 0;
+  return {
+    up: b(12) || ay < -STICK_DEAD,
+    down: b(13) || ay > STICK_DEAD,
+    left: b(14) || ax < -STICK_DEAD,
+    right: b(15) || ax > STICK_DEAD,
+    buttons: PAD_BUTTONS.map(b) as Buttons,
+    jump: b(PAD_JUMP),
+  };
+}
+
+/** index 번째로 연결된 패드 입력 (없으면 null) */
+export function readGamepad(index: number): RawInput | null {
+  if (typeof navigator === 'undefined' || !navigator.getGamepads) return null;
+  const pads = Array.from(navigator.getGamepads()).filter((p): p is Gamepad => !!p && p.connected);
+  return padToRaw(pads[index] ?? null);
+}
+
+/** 키보드 입력과 패드 입력을 합친다 (둘 중 하나라도 누르면 눌림) */
+export function mergeRaw(a: RawInput, b: RawInput | null): RawInput {
+  if (!b) return a;
+  return {
+    up: a.up || b.up,
+    down: a.down || b.down,
+    left: a.left || b.left,
+    right: a.right || b.right,
+    buttons: a.buttons.map((v, i) => v || b.buttons[i]) as Buttons,
+    jump: !!(a.jump || b.jump),
+  };
+}
+
+/** 패드 버튼 번호(표준 배치) → 누른 순간 할 일. 메뉴 조작용 (A=0, B=1, Back=8, Start=9, 방향 12~15). @returns 정리 함수 */
+export function watchPad(handlers: Partial<Record<number, () => void>>, index = 0): () => void {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.getGamepads) return () => {};
+  const prev = new Map<number, boolean>();
+  const timer = window.setInterval(() => {
+    const pads = Array.from(navigator.getGamepads()).filter((p): p is Gamepad => !!p && p.connected);
+    const pad = pads[index];
+    for (const [k, fn] of Object.entries(handlers)) {
+      const b = Number(k);
+      const down = !!pad?.buttons[b]?.pressed;
+      if (down && !prev.get(b)) fn?.();
+      prev.set(b, down);
+    }
+  }, 50);
+  return () => window.clearInterval(timer);
+}
+
+/** 패드의 메뉴 버튼(Start = 9, Back/Select = 8)을 누른 순간을 알려준다. @returns 정리 함수 */
+export function watchPadButtons(handlers: { start?: () => void; select?: () => void }, index = 0): () => void {
+  return watchPad({ 9: handlers.start, 8: handlers.select }, index);
+}
+
+/** 패드 LB(4) — 필드에서 앉기 */
+export function padHeld(button: number, index = 0): boolean {
+  if (typeof navigator === 'undefined' || !navigator.getGamepads) return false;
+  const pads = Array.from(navigator.getGamepads()).filter((p): p is Gamepad => !!p && p.connected);
+  return !!pads[index]?.buttons[button]?.pressed;
 }

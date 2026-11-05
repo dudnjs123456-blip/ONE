@@ -1,6 +1,6 @@
 import { mulberry32 } from './controllers';
 import type { FieldCommand, FieldWorld, PlayerController } from './field';
-import { Keyboard, NEUTRAL_INPUT, P1_KEYS, dirFrom, makeInput, type KeyMap, type RelInput } from './input';
+import { Keyboard, NEUTRAL_INPUT, P1_KEYS, dirFrom, makeInput, mergeRaw, padHeld, readGamepad, type KeyMap, type RelInput } from './input';
 import { bindCodes } from './keybinds';
 import type { Button, Dir } from './types';
 
@@ -69,11 +69,13 @@ export class FieldKeyboardController implements PlayerController {
   constructor(
     private kb: Keyboard,
     private map: KeyMap = P1_KEYS,
+    /** 같이 읽을 게임패드 순번 (LB = 앉기). 없으면 키보드만 */
+    private padIndex?: number,
   ) {}
 
   read(w: FieldWorld): FieldCommand {
-    const raw = this.kb.read(this.map);
-    const crouch = bindCodes('run').some((k) => this.kb.has(k));
+    const raw = this.padIndex === undefined ? this.kb.read(this.map) : mergeRaw(this.kb.read(this.map), readGamepad(this.padIndex));
+    const crouch = bindCodes('run').some((k) => this.kb.has(k)) || (this.padIndex !== undefined && padHeld(4, this.padIndex));
     const mx = (raw.right ? 1 : 0) - (raw.left ? 1 : 0);
     const mz = (raw.down ? 1 : 0) - (raw.up ? 1 : 0);
     const p = w.player;

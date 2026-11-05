@@ -15,10 +15,11 @@ const H = Math.round((W * (Z1 - Z0)) / (X1 - X0));
 const sx = (x: number) => ((x - X0) / (X1 - X0)) * W;
 const sz = (z: number) => ((z - Z0) / (Z1 - Z0)) * H;
 
-const ICON: Record<Poi['kind'], string> = { home: '🏠', shop: '🏪', subway: '🚇', bus: '🚌', park: '🌳', job: '💼', casino: '🎰' };
+const ICON: Record<Poi['kind'], string> = { home: '🏠', shop: '🏪', subway: '🚇', bus: '🚌', park: '🌳', job: '💼', casino: '🎰', fish: '🎣' };
 
 function iconOf(p: Poi) {
   if (p.kind === 'shop' && SHOPS[p.label]) return SHOPS[p.label].menu[0]?.icon ?? '🍽️';
+  if (p.id === 'fishingshop') return '🎣';
   return ICON[p.kind];
 }
 
@@ -28,9 +29,10 @@ function groupOf(p: Poi) {
   if (p.kind === 'park') return '공원';
   if (p.kind === 'job') return '일자리';
   if (p.kind === 'casino') return '오락';
+  if (p.kind === 'fish') return '낚시';
   return '교통';
 }
-const GROUPS = ['내 집', '일자리', '오락', '음식점', '가게', '공원', '교통'];
+const GROUPS = ['내 집', '일자리', '오락', '낚시', '음식점', '가게', '공원', '교통'];
 
 /**
  * M 키 전체 지도: 장소(아이콘·목록)나 빈 길을 누르면 그곳까지 자동으로 걸어간다.

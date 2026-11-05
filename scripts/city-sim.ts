@@ -93,13 +93,21 @@ check('villa door enters lobby (not straight home)', w.location === 'lobby', `($
   w.player.reset(CORRIDOR.doors[1], -1.0, 0, -1);
   cmd = { move: null, run: false, interact: true };
   w.step();
-  check('my door enters home', w.location === 'home');
   cmd = { move: null, run: false, interact: false };
+  // 문이 열리고 걸어 들어가는 동안
+  let doorMax = 0;
+  for (let i = 0; i < 200 && w.doorway; i++) {
+    w.step();
+    doorMax = Math.max(doorMax, w.doorOpen('unit:1'));
+  }
+  check('my door opens, then enters home', w.location === 'home' && doorMax > 0.9, `(문 ${doorMax.toFixed(2)})`);
   w.step();
   const ex = HOME.pois.find((q) => q.id === 'exit')!;
   w.player.reset(ex.x, ex.z, -1, 0);
   cmd = { move: null, run: false, interact: true };
   w.step();
+  cmd = { move: null, run: false, interact: false };
+  for (let i = 0; i < 200 && w.doorway; i++) w.step();
   check('exit home → my floor corridor, in front of my door', w.location === 'corridor' && w.floor === 3 && Math.abs(w.player.x - CORRIDOR.doors[1]) < 0.3, `(${w.location} ${w.floor}F x=${w.player.x.toFixed(1)})`);
   cmd = { move: null, run: false, interact: false };
   w.step();
@@ -469,7 +477,14 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   w.step();
   c = { move: null, run: false, interact: false };
   for (let i = 0; i < 200 && w.doorway; i++) w.step(); // 현관 문 여닫는 동안
-  check('food shop opens dialog', w.dialog?.shop === '분식천국' && !!w.greeting());
+  // 가게 안으로 들어가고, 계산대에서 E → 대화창
+  check('food shop: E enters the store', w.location === 'store' && w.store?.sign === '분식천국');
+  const ctr = w.store!.pois.find((p) => p.id === 'store:counter')!;
+  w.player.reset(ctr.x, ctr.z, 0, -1);
+  c = { move: null, run: false, interact: true };
+  w.step();
+  c = { move: null, run: false, interact: false };
+  check('food shop counter opens dialog', w.dialog?.shop === '분식천국' && !!w.greeting());
   w.profile.gold = 2;
   const poor = w.buyFood('kimbap');
   check('cannot buy without enough gold', !poor.ok && w.profile.gold === 2, `("${poor.message}")`);
@@ -1351,6 +1366,11 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   for (let i = 0; i < 20; i++) w.step();
   c = { move: null, run: false, interact: false };
   check('arrow keys pan the view, body stays put', w.lookYaw < -0.2 && Math.abs(w.player.x - x0) < 0.01, `(yaw ${w.lookYaw.toFixed(2)})`);
+  // 창밖을 보는 동안에도 바깥 차들은 달린다 (신호 한 주기 넘게 지켜본다)
+  const carsBefore = w.cars.map((q) => [q.x, q.z]);
+  for (let i = 0; i < 60 * 40; i++) w.step();
+  const moved = w.cars.filter((q, i) => Math.hypot(q.x - carsBefore[i][0], q.z - carsBefore[i][1]) > 1).length;
+  check('cars keep driving while looking out the window', w.lookingOut && moved > w.cars.length / 2, `(${moved}/${w.cars.length} moved)`);
   press();
   check('E: back inside, window stays open', !w.lookingOut && w.homeWindowOpen);
   check('open window offers look-out', w.nearby?.label.includes('내다보기') === true, `(${w.nearby?.label})`);

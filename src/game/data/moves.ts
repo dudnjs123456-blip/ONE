@@ -1,4 +1,5 @@
 import type { Button, Dir, HitLevel } from '../core/types';
+import { PLAYER_TEMPO } from '../core/constants';
 
 export type DirKey = 'n' | 'f' | 'b' | 'd' | 'df' | 'db' | 'u' | 'uf' | 'ub';
 
@@ -57,6 +58,8 @@ export interface MoveDef {
   launch?: number;
   /** 앉은 자세로 나가는 기술 (상단 회피) */
   crouching?: boolean;
+  /** 잡기: 가드로 못 막는다 (상단이라 앉으면 피함) */
+  unblockable?: boolean;
   /** 발생 전까지 프레임당 전진 거리 */
   lunge?: number;
   cancels?: CancelDef[];
@@ -134,7 +137,7 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
 
   // ───── 대시 중에만 나가는 기술 (input: null, Fighter.tryAttack 이 대시 상태에서 고른다) ─────
   dashStraight: {
-    name: '대시 스트레이트', notation: 'f,f+2', input: null,
+    name: '대시 스트레이트', notation: 'f,f+1/2', input: null,
     startup: 11, active: 4, recovery: 22, damage: 22, level: 'mid', lunge: 0.09,
     range: 1.4, tracking: 0.15, onBlock: -8, onHit: 0, pushback: 0.9, launch: 0.08, anim: 'straightR',
   },
@@ -150,13 +153,13 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
     range: 1.4, tracking: 0.25, onBlock: -6, onHit: 0, pushback: 1.0, launch: 0.08, anim: 'flyKick',
   },
   dashKnee: {
-    name: '대시 니킥 (띄우기)', notation: 'f,f+4', input: null,
+    name: '대시 니킥 (띄우기)', notation: 'f,f+3', input: null,
     startup: 12, active: 4, recovery: 24, damage: 20, level: 'mid', lunge: 0.09,
     range: 1.15, tracking: 0.15, onBlock: -14, onHit: 0, pushback: 0.15, launch: 0.17, anim: 'kneeR',
   },
 
   slideKick: {
-    name: '슬라이딩 킥 (다운)', notation: 'f,f+3/4', input: null, crouching: true,
+    name: '슬라이딩 킥 (다운)', notation: 'f,f+4', input: null, crouching: true,
     startup: 9, active: 9, recovery: 22, damage: 16, level: 'low', lunge: 0.05,
     range: 1.35, tracking: 0.15, onBlock: -16, onHit: 2, pushback: 0.4, launch: 0.08, anim: 'slide',
   },
@@ -176,6 +179,12 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
     name: '어깨 태클', notation: '1+3', input: { dir: 'n', button: 1, with: 3 },
     startup: 15, active: 4, recovery: 22, damage: 16, level: 'mid', lunge: 0.1,
     range: 1.1, tracking: 0.2, onBlock: -8, onHit: 8, pushback: 1.1, anim: 'charge',
+  },
+  grab: {
+    // 가드만 하는 상대를 뚫는 수단. 사거리가 짧고, 앉으면 헛치며, 헛치면 빈틈이 크다
+    name: '잡아 던지기 (가드 불가·다운)', notation: 'f+1+3', input: { dir: 'f', button: 1, with: 3 },
+    startup: 12, active: 3, recovery: 30, damage: 26, level: 'high', unblockable: true,
+    range: 0.7, tracking: 0.1, onBlock: -20, onHit: 0, pushback: 0.6, launch: 0.07, anim: 'bodyBlowR',
   },
   flyingKnee: {
     name: '날아 무릎 (띄우기)', notation: '2+4', input: { dir: 'n', button: 2, with: 4 },
@@ -225,14 +234,22 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
 
 export const MOVE_LIST: MoveDef[] = Object.values(MOVES);
 /** 대시 중에 누르면 나가는 전용 기술 (없는 버튼은 일반 기술이 대시 속도를 실은 채 나간다) */
-/** 대시 중 공격: 펀치 = 대시 스트레이트, 발차기 = 슬라이딩으로 미끄러지며 하단 */
-export const DASH_MOVES: Partial<Record<Button, string>> = { 1: 'dashStraight', 2: 'dashStraight', 3: 'slideKick', 4: 'slideKick' };
+/** 대시 중 공격: 펀치 = 대시 스트레이트, 3 = 대시 니킥(띄우기), 4 = 슬라이딩 킥(하단) */
+export const DASH_MOVES: Partial<Record<Button, string>> = { 1: 'dashStraight', 2: 'dashStraight', 3: 'dashKnee', 4: 'slideKick' };
 
 /** 점프 중에 누르면 나가는 공중 기술 (손 = 점프 펀치, 발 = 날아차기) */
 export const JUMP_MOVES: Record<Button, string> = { 1: 'jumpPunch', 2: 'jumpPunch', 3: 'jumpKick', 4: 'jumpKick' };
 
 /** 기술표에 보여줄 플레이어 기술 */
 export const PLAYER_MOVE_LIST: MoveDef[] = MOVE_LIST.filter((m) => m.notation !== 'BOSS');
+
+/**
+ * 대전에서 실제로 나가는 발생 프레임. 플레이어는 템포(PLAYER_TEMPO)만큼 빨라진다
+ * (묵직한 발차기는 제외 — core/fighter.ts withTempo 와 같은 규칙). 기술표 표시용.
+ */
+export function playerStartup(m: MoveDef): number {
+  return m.weighty ? m.startup : Math.max(1, Math.round(m.startup / PLAYER_TEMPO));
+}
 
 export function totalFrames(m: MoveDef): number {
   return m.startup + m.active - 1 + m.recovery;
@@ -269,3 +286,6 @@ export function findMove(button: Button, dir: Dir, pair?: Button): MoveDef | nul
 export function hasComboWith(button: Button): boolean {
   return MOVE_LIST.some((m) => m.input?.with && (m.input.button === button || m.input.with === button));
 }
+
+/** 가장 빠른 반격(잽)의 실제 발생 프레임. 막힌 뒤 이만큼 이상 손해면 반격당한다 */
+export const PUNISH_FRAMES = playerStartup(MOVES.jab);

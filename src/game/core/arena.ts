@@ -31,8 +31,9 @@ export function forwardIsRight(cam: CameraAxis, self: Fighter, opp: Fighter): bo
   return (opp.x - self.x) * cam.camNz + (opp.z - self.z) * -cam.camNx > 0;
 }
 
-/** 겹침 해소 + 원형 경기장 밖으로 못 나가게 */
-export function separateInRing(a: Fighter, b: Fighter, radius = STAGE_RADIUS) {
+/** 겹침 해소 + 원형 경기장 밖으로 못 나가게. @returns 이번 프레임 경기장 끝(벽)에 막힌 캐릭터들 */
+export function separateInRing(a: Fighter, b: Fighter, radius = STAGE_RADIUS): Fighter[] {
+  const walled: Fighter[] = [];
   const dx = b.x - a.x;
   const dz = b.z - a.z;
   const d = Math.hypot(dx, dz);
@@ -50,6 +51,8 @@ export function separateInRing(a: Fighter, b: Fighter, radius = STAGE_RADIUS) {
     if (r > max) {
       f.x *= max / r;
       f.z *= max / r;
+      walled.push(f);
     }
   }
+  return walled;
 }

@@ -1,5 +1,6 @@
 import type { PlayerProfile } from '@/game/core/profile';
 import { ITEMS } from '@/game/data/items';
+import { PET_GOOD_BY_ID } from '@/game/data/pets';
 
 /** I 키로 여닫는 인벤토리: 골드와 주운 물건 */
 export default function InventoryPanel({ profile, onClose }: { profile: PlayerProfile; onClose: () => void }) {
@@ -21,7 +22,7 @@ export default function InventoryPanel({ profile, onClose }: { profile: PlayerPr
       ) : (
         <ul className="grid grid-cols-1 gap-1.5">
           {items.map(([id, n]) => {
-            const it = ITEMS[id];
+            const it = ITEMS[id] ?? PET_GOOD_BY_ID[id];
             if (!it) return null;
             return (
               <li key={id} className="flex items-center gap-3 rounded-lg bg-white/5 px-3 py-2">

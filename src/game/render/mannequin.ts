@@ -657,7 +657,7 @@ export type Appearance =
   | { kind: 'basic'; color: number }
   | { kind: 'heroine'; palette: HeroinePalette }
   /** VRM 3D 모델 파일. 불러오는 동안은 fallback 으로 그린다. tint 는 2P 컬러 구분용 색 곱 */
-  | { kind: 'vrm'; url: string; fallback: HeroinePalette; tint?: number };
+  | { kind: 'vrm'; url: string; fallback: HeroinePalette; tint?: number; /** 코디 옷 id (data/fashion) */ outfit?: string[] };
 
 /** 렌더러가 다루는 캐릭터 표현 (절차적 Mannequin 또는 VRM) */
 /** 침대에 눕기: t 0 = 서 있음 → 0.35 걸터앉음 → 1 누움. sit·lie 는 골반/발 기준 위치와 몸 방향 */
@@ -672,6 +672,11 @@ export interface RestPose {
   phone?: number;
   /** 이쪽을 쳐다본다 (월드 좌표) */
   look?: { x: number; z: number } | null;
+  /**
+   * 소파 동작 (있으면 침대 눕기 대신 소파 자세). t 는 앉는 정도 0~1.
+   * act 동작으로 k(0~1) 만큼 넘어가는 중, at = 지금 동작 시작 뒤 지난 프레임, pt = 이전 동작이 돌던 프레임
+   */
+  sofa?: { act: string; prev: string; k: number; at: number; pt: number } | null;
 }
 
 export interface CharacterView {

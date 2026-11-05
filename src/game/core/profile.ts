@@ -20,6 +20,10 @@ export interface PlayerProfile {
   time?: { day: number; minutes: number };
   /** 장비 (가방 + 낀 장비 8칸) */
   gear?: import('../data/equipment').GearState;
+  /** 코디 옷 (겉모습만, 옷가게) */
+  wardrobe?: import('../data/fashion').Wardrobe;
+  /** 캐릭터 몸 (코디 창에서 고른다, 없으면 여자) */
+  body?: import('../render/looks').BodyType;
   /** 마지막으로 저장한 시각 (ms). 기기 두 대의 기록이 다르면 최신 쪽을 쓴다 */
   savedAt?: number;
   /** 카지노 기록 */
@@ -32,6 +36,12 @@ export interface PlayerProfile {
   npcs?: Record<string, import('../data/npcs').NpcBond>;
   /** 행복빌라 내 집 호수와 받은 시각 (친구와 겹치면 늦게 받은 쪽이 다른 집으로 옮긴다) */
   home?: { unit: string; claimedAt: number };
+  /** 키우는 애완동물 (펫샵) */
+  pets?: import('../data/pets').PetState;
+  /** 펫샵: 그날(게임 날짜) 이미 분양된 아이들 */
+  petShop?: { day: number; sold: string[]; /** 용품 id → 오늘 산 개수 */ goods?: Record<string, number> };
+  /** 한강 낚시: 낚싯대 · 미끼 · 살림망 · 도감 */
+  fishing?: import('../data/fishing').FishingState;
 }
 
 export interface FridgeFood {

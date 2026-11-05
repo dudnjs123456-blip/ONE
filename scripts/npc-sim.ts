@@ -17,13 +17,21 @@ w.step();
 cmd = { move: null, run: false, interact: false };
 for (let i = 0; i < 200 && w.doorway; i++) w.step();
 check('enter lobby', w.location === 'lobby');
-const spot = LOBBY.pois.find((p) => p.id === 'senior')!;
-for (let i = 0; i < 400; i++) {
-  const dx = spot.x - w.player.x;
-  const dz = spot.z - w.player.z;
-  cmd = { move: Math.hypot(dx, dz) > 0.2 ? { x: dx, z: dz } : null, run: false, interact: false };
-  w.step();
+check('박 반장 sits in his office', w.seniorAI.seated && w.seniorAI.where === 1 && w.senior.x < LOBBY.office.x1);
+const spot = w.seniorAI.poi()!;
+// 데스크를 돌아 반장실 문으로 들어가 반장님 책상 앞에 선다
+const o = LOBBY.office;
+for (const t of [{ x: -2.0, z: -2.7 }, { x: o.x1 + 0.5, z: o.doorZ }, { x: o.x1 - 0.6, z: o.doorZ }, { x: -6.0, z: -1.7 }, spot]) {
+  for (let i = 0; i < 400; i++) {
+    const dx = t.x - w.player.x;
+    const dz = t.z - w.player.z;
+    if (Math.hypot(dx, dz) < 0.2) break;
+    cmd = { move: { x: dx, z: dz }, run: false, interact: false };
+    w.step();
+  }
 }
+cmd = { move: null, run: false, interact: false };
+w.step();
 check('can walk up to 박 반장', Math.hypot(spot.x - w.player.x, spot.z - w.player.z) < spot.radius, `(${w.player.x.toFixed(2)}, ${w.player.z.toFixed(2)}) nearby=${w.nearby?.id}`);
 check('박 반장 turns to face player (south)', w.senior.fz > 0.5 && Math.hypot(w.senior.fx, w.senior.fz) > 0.9, `(fx=${w.senior.fx.toFixed(2)} fz=${w.senior.fz.toFixed(2)})`);
 cmd = { move: null, run: false, interact: true };
@@ -33,7 +41,7 @@ const x0 = w.player.x;
 cmd = { move: { x: 1, z: 0 }, run: false, interact: false };
 for (let i = 0; i < 30; i++) w.step();
 check('player frozen while chatting', Math.abs(w.player.x - x0) < 1e-6);
-check('player cannot walk through 박 반장', Math.hypot(w.player.x - LOBBY.senior.x, w.player.z - LOBBY.senior.z) > 0.4);
+check('player cannot walk through 박 반장', Math.hypot(w.player.x - w.senior.x, w.player.z - w.senior.z) > 0.4);
 console.log('  greeting:', greeting(w, 'senior'));
 const ctx = buildContext(w, 'senior');
 check('context has time and bond', !!ctx.clock && ctx.affinity === 30 && ctx.canGift);
@@ -55,4 +63,23 @@ w.closeNpcChat();
 cmd = { move: { x: 1, z: 0 }, run: false, interact: false };
 for (let i = 0; i < 30; i++) w.step();
 check('can move after closing chat', Math.abs(w.player.x - x0) > 0.1);
+
+// 순찰: 반장실에서 일어나 엘리베이터로 2층 ~ 꼭대기 층 복도를 돌고 돌아와 다시 앉는다
+cmd = { move: null, run: false, interact: false };
+w.seniorAI.startPatrol();
+const visited = new Set<number>();
+let maxFrames = 0;
+for (let i = 0; i < 60 * 240 && w.seniorAI.patrolling; i++) {
+  w.step();
+  if (w.seniorAI.where >= 2) visited.add(w.seniorAI.where);
+  maxFrames = i;
+}
+const all = Array.from({ length: w.villaFloors - 1 }, (_, k) => k + 2);
+check('patrol visits every floor', all.every((f) => visited.has(f)), `visited=${[...visited].join(',')} (${(maxFrames / 60).toFixed(0)}s)`);
+check('back to the office chair, seated', !w.seniorAI.patrolling && w.seniorAI.seated && Math.hypot(w.senior.x - o.chair.x, w.senior.z - o.chair.z) < 0.05);
+// 순찰 중 대화 지점은 반장님을 따라다닌다
+w.seniorAI.startPatrol();
+for (let i = 0; i < 60 * 12; i++) w.step();
+const pp = w.seniorAI.poi();
+check('while patrolling the talk spot follows him', !pp || (pp.label.includes('순찰') && Math.hypot(pp.x - w.senior.x, pp.z - w.senior.z) < 1e-6), w.seniorAI.status);
 })();

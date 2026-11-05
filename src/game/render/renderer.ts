@@ -8,6 +8,8 @@ import { PLAYER2_LOOK, PLAYER_LOOK } from './looks';
 import type { Appearance } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
+import { playHit, playThud, playWhoosh } from './sfx';
+import { rumble } from './haptics';
 
 /** 1:1 경기장 렌더러가 읽는 최소 상태 (Match, BossBattle 둘 다 만족) */
 export interface ArenaView {
@@ -23,15 +25,31 @@ export interface ArenaOptions {
   /** 기본값: 플레이어 캐릭터 1P / 2P 컬러 */
   looks?: [Appearance, Appearance];
   scales?: [number, number];
-  theme?: 'dojo' | 'boss';
+  theme?: ArenaTheme;
   /** 데미지 숫자 표시 (보스전) */
   damageNumbers?: boolean;
 }
 
+/** 카메라: 기본 세로 시야각, 가로 화면(16:10)에서 보이는 옆 시야각, 세로 화면에서 넓힐 수 있는 최대 시야각 */
+const BASE_FOV = 38;
+const WIDE_HFOV = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2) * 1.6);
+const MAX_FOV = 70;
+
+/** 경기장 둘레 벽 높이(m)와 평소 투명도 */
+const WALL_HEIGHT = 1.1;
+const WALL_OPACITY = 0.07;
+
 const THEMES = {
   dojo: { bg: 0x0b0d17, floor: 0x2a2f45, grid: [0x3d4466, 0x2f3550], edge: 0xff7a3d, glow: 0x2aa8ff, rim: 0xff7a3d },
   boss: { bg: 0x14070a, floor: 0x2b1a1c, grid: [0x5a2a2a, 0x3a1c1e], edge: 0xff3a1d, glow: 0xff2a1a, rim: 0xff3a3a },
+  // 대전용 추가 무대 (경기마다 무작위)
+  dusk: { bg: 0x2a1530, floor: 0x3a2a3c, grid: [0x6a4560, 0x4a3048], edge: 0xffb347, glow: 0xff6fa8, rim: 0xffa040 },
+  snow: { bg: 0x0d1a2a, floor: 0x5d6f86, grid: [0x8aa0bb, 0x6f8299], edge: 0x9fe0ff, glow: 0xdff4ff, rim: 0x9fd8ff },
 };
+
+export type ArenaTheme = keyof typeof THEMES;
+/** VS CPU·2P 대전에서 무작위로 고르는 무대 */
+export const VERSUS_THEMES: ArenaTheme[] = ['dojo', 'dusk', 'snow'];
 
 interface HitboxViz {
   hurt: THREE.LineLoop;
@@ -56,6 +74,13 @@ export class GameRenderer {
   /** 카메라 거리 배율 (Ctrl+휠). 작을수록 캐릭터가 크게 */
   zoom = 1;
   private shake = 0;
+  /** 경기장 둘레 반투명 벽 (벽꽝 때 번쩍인다) */
+  private wallMat!: THREE.MeshBasicMaterial;
+  private wallFlash = 0;
+  /** 기술이 새로 나갔는지 보려고 기억하는 moveSerial (헛스윙 소리) */
+  private lastSerial = [-1, -1];
+  /** 직전 상태 (다운되는 순간 "쿵" 소리) */
+  private lastState: string[] = ['', ''];
 
   constructor(canvas: HTMLCanvasElement, opts: ArenaOptions = {}) {
     this.theme = THEMES[opts.theme ?? 'dojo'];
@@ -85,6 +110,9 @@ export class GameRenderer {
   resize(width: number, height: number) {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(1, height);
+    // 세로 화면: 옆 시야가 좁아지니 시야각을 넓힌다 (최대 MAX_FOV, 나머지는 카메라를 뒤로 빼서 보충)
+    const wantV = (2 * Math.atan(Math.tan(WIDE_HFOV / 2) / this.camera.aspect) * 180) / Math.PI;
+    this.camera.fov = THREE.MathUtils.clamp(wantV, BASE_FOV, MAX_FOV);
     this.camera.updateProjectionMatrix();
   }
 
@@ -92,13 +120,36 @@ export class GameRenderer {
     const [a, b] = match.fighters;
     match.fighters.forEach((f, i) => this.mannequins[i].update(f, clock));
 
+    match.fighters.forEach((f, i) => {
+      if ((f.state === 'knockdown' || f.state === 'ko') && this.lastState[i] !== f.state && this.lastState[i] !== 'knockdown') {
+        playThud(f.state === 'ko');
+        if (f.state === 'ko') rumble(1, 320);
+      }
+      this.lastState[i] = f.state;
+      if (f.moveSerial !== this.lastSerial[i]) {
+        if (this.lastSerial[i] >= 0 && f.state === 'attack' && f.move) playWhoosh(f.move.damage >= 14 || !!f.move.launch);
+        this.lastSerial[i] = f.moveSerial;
+      }
+    });
     for (const e of match.drainEvents()) {
+      playHit(e.kind, e.heavy);
+      // 1P 가 크게 맞거나(강공격·카운터) 벽꽝을 내면 패드/폰이 짧게 떨린다
+      if (e.victim === 0 && (e.heavy || e.kind === 'counter')) rumble(0.7, 140);
+      else if (e.wall && e.victim === 1) rumble(0.4, 90);
+      // 카운터 히트는 맞은 자리에 크게 알려준다 (구석 프레임 정보만으론 잘 안 보임)
+      if (e.kind === 'counter') this.texts.spawn('COUNTER!', e.x, e.y + 0.8, e.z, '#ffb020', 1.5);
+      if (e.wall) {
+        this.texts.spawn('WALL!', e.x, e.y + 0.9, e.z, '#7dd3fc', 1.5);
+        this.wallFlash = 1;
+      }
       this.shake = Math.max(this.shake, this.sparks.spawn(e));
       if (this.damageNumbers && e.damage > 0) {
         const color = e.victim === 0 ? '#ff5a4a' : e.kind === 'counter' ? '#ffb020' : '#ffffff';
         this.texts.spawn(String(e.damage), e.x, e.y + 0.4, e.z, color, e.kind === 'counter' ? 1.3 : 1);
       }
     }
+    this.wallFlash = Math.max(0, this.wallFlash - clock.dt * 2.5);
+    this.wallMat.opacity = WALL_OPACITY + this.wallFlash * 0.35;
     this.sparks.update(clock.dt);
     this.texts.update(clock.dt);
     match.fighters.forEach((f, i) => this.updateHitbox(this.hitboxes[i], f, showHitboxes));
@@ -160,6 +211,26 @@ export class GameRenderer {
     );
     edge.rotation.x = -Math.PI / 2;
     s.add(edge);
+
+    // 낮은 반투명 벽: 경기장 끝이 벽이라는 걸 보여준다 (벽꽝)
+    this.wallMat = new THREE.MeshBasicMaterial({
+      color: th.edge,
+      transparent: true,
+      opacity: WALL_OPACITY,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(STAGE_RADIUS, STAGE_RADIUS, WALL_HEIGHT, 96, 1, true), this.wallMat);
+    wall.position.y = WALL_HEIGHT / 2;
+    s.add(wall);
+    const wallTop = new THREE.Mesh(
+      new THREE.TorusGeometry(STAGE_RADIUS, 0.025, 6, 128),
+      new THREE.MeshStandardMaterial({ color: th.edge, emissive: th.edge, emissiveIntensity: 0.8 }),
+    );
+    wallTop.rotation.x = -Math.PI / 2;
+    wallTop.position.y = WALL_HEIGHT;
+    s.add(wallTop);
 
     const outer = new THREE.Mesh(
       new THREE.RingGeometry(STAGE_RADIUS, 60, 64),
@@ -226,7 +297,10 @@ export class GameRenderer {
     const midZ = (a.z + b.z) / 2;
     const sep = Math.hypot(b.x - a.x, b.z - a.z);
     const k = this.sizeBias;
-    const wantDist = THREE.MathUtils.clamp(sep * 0.9 + 3.6 * k, 4.2 * k, 10) * this.zoom;
+    // 넓힌 시야각으로도 모자란 옆 폭만큼만 뒤로 물러난다 (너무 빠지면 기둥이 가린다)
+    const hfov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2) * this.camera.aspect);
+    const narrow = THREE.MathUtils.clamp(Math.tan(WIDE_HFOV / 2) / Math.tan(hfov / 2), 1, 1.6);
+    const wantDist = THREE.MathUtils.clamp(sep * 0.9 + 3.6 * k, 4.2 * k, 10) * this.zoom * narrow;
     this.camDist += (wantDist - this.camDist) * smooth(0.08, clock.dt);
 
     const sx = (Math.random() - 0.5) * this.shake;

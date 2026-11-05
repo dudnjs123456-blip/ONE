@@ -99,6 +99,8 @@ export interface NpcContext {
   affinity: number;
   canGift: boolean;
   memories: string[];
+  /** NPC 가 지금 어디서 뭘 하는지 (예: 반장실에 앉아 일 보는 중 / 3층 순찰 중) */
+  doing?: string;
 }
 
 export interface NpcReply {

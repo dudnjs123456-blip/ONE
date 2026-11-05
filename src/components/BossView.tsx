@@ -5,12 +5,21 @@ import { BossBattle, type BossHudState } from '@/game/core/boss';
 import { FRAME_MS } from '@/game/core/constants';
 import { makeClock } from '@/game/render/clock';
 import { KeyboardController } from '@/game/core/controllers';
-import { Keyboard, P1_KEYS } from '@/game/core/input';
+import { Keyboard, P1_KEYS, watchPad, watchPadButtons } from '@/game/core/input';
 import { saveProfile, type PlayerProfile } from '@/game/core/profile';
 import type { BossDef } from '@/game/data/bosses';
-import { PLAYER_LOOK } from '@/game/render/looks';
+import { playerLook } from '@/game/render/looks';
+import { wornList } from '@/game/data/fashion';
 import { GameRenderer } from '@/game/render/renderer';
 import BossHud from './BossHud';
+import SoundToggle from './SoundToggle';
+import VibrationToggle from './VibrationToggle';
+import MusicToggle from './MusicToggle';
+import { startBgm, stopBgm } from '@/game/render/bgm';
+import TouchControls, { useIsTouch } from './TouchControls';
+import RotateHint, { usePortrait } from './RotateHint';
+import MoveListPanel from './MoveListPanel';
+import { playCue, unlockAudioOnInput } from '@/game/render/sfx';
 import { attachZoomControls } from './zoomControls';
 
 /** 보스 레이드 (수동 조작) */
@@ -28,7 +37,16 @@ export default function BossView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hud, setHud] = useState<BossHudState | null>(null);
   const [paused, setPaused] = useState(false);
+  const [showMoves, setShowMoves] = useState(false);
+  // 일시정지를 풀면 기술표도 닫는다 (다음 일시정지 때 갑자기 열려 있지 않게)
+  useEffect(() => {
+    if (!paused) setShowMoves(false);
+  }, [paused]);
   const [hitboxes, setHitboxes] = useState(false);
+  // 키보드와 화면 터치 버튼이 같은 입력을 쓴다
+  const [kb] = useState(() => new Keyboard());
+  const touch = useIsTouch();
+  const portrait = usePortrait();
   const pausedRef = useRef(paused);
   const hitboxRef = useRef(hitboxes);
   pausedRef.current = paused;
@@ -36,12 +54,13 @@ export default function BossView({
 
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const kb = new Keyboard();
     kb.attach(window);
+    const unlock = unlockAudioOnInput();
+    startBgm('boss');
 
-    const battle = new BossBattle(boss, profile, new KeyboardController(kb, P1_KEYS), Date.now() & 0xffff);
+    const battle = new BossBattle(boss, profile, new KeyboardController(kb, P1_KEYS, 0), Date.now() & 0xffff);
     const renderer = new GameRenderer(canvas, {
-      looks: [PLAYER_LOOK, { kind: 'basic', color: boss.color }],
+      looks: [playerLook(wornList(profile.wardrobe), profile.body), { kind: 'basic', color: boss.color }],
       scales: [1, boss.scale],
       theme: 'boss',
       damageNumbers: true,
@@ -56,11 +75,15 @@ export default function BossView({
       if (e.code === 'Backquote') setHitboxes((h) => !h);
     };
     window.addEventListener('keydown', onKey);
+    // 패드 Start = 일시정지
+    const unwatchPad = watchPadButtons({ start: () => setPaused((p) => !p) });
 
     let raf = 0;
     let last = performance.now();
     let acc = 0;
     let lastHudKey = '';
+    let lastBanner: string | null = null;
+    let wasEnraged = false;
     let saved = false;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
@@ -83,6 +106,17 @@ export default function BossView({
       const h = battle.hud();
       const key = JSON.stringify(h);
       if (key !== lastHudKey) {
+        if (h.banner !== lastBanner) {
+          if (h.phase === 'intro' && h.banner === boss.name) playCue('round');
+          else if (h.banner === 'FIGHT!') playCue('fight');
+          else if (h.banner === 'VICTORY') {
+            playCue('ko');
+            window.setTimeout(() => playCue('win'), 700);
+          } else if (h.banner === 'DEFEAT' || h.banner === 'TIME OVER') playCue('lose');
+          lastBanner = h.banner;
+        }
+        if (h.enraged && !wasEnraged) playCue('roar');
+        wasEnraged = h.enraged;
         lastHudKey = key;
         setHud(h);
       }
@@ -93,16 +127,44 @@ export default function BossView({
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
+      unwatchPad();
       kb.detach(window);
+      unlock();
+      stopBgm();
       detachZoom();
       renderer.dispose();
     };
-  }, [boss, profile]);
+  }, [boss, profile, kb]);
+
+  // 패드로 메뉴: 일시정지 A 계속·B 나가기, 결과 화면 A 다시 도전·B 보스 선택 (뜬 직후 0.7초는 무시 — 연타하던 버튼이 바로 누르지 않게)
+  const hasResult = !!hud?.result;
+  useEffect(() => {
+    if (!paused && !hasResult) return;
+    const openedAt = performance.now();
+    const ready = () => performance.now() - openedAt > 700;
+    return watchPad({
+      0: () => ready() && (hasResult ? onRetry() : setPaused(false)),
+      1: () => ready() && onExit(),
+    });
+  }, [paused, hasResult, onRetry, onExit]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       <canvas ref={canvasRef} className="block h-full w-full" />
-      {hud && <BossHud hud={hud} onRetry={onRetry} onExit={onExit} />}
+      {hud && <BossHud hud={hud} onRetry={onRetry} onExit={onExit} touch={touch} portrait={portrait} />}
+
+      {touch && !paused && hud && !hud.result && <TouchControls kb={kb} map={P1_KEYS} />}
+      <RotateHint touch={touch} />
+
+      {!hud?.result && (
+        <div className="absolute right-4 top-24 flex gap-2 whitespace-nowrap text-xs">
+          <SoundToggle compact={touch} />
+          <MusicToggle compact={touch} />
+          <button onClick={() => setPaused(true)} className="rounded bg-white/10 px-3 py-1.5 text-white/80 hover:bg-white/20">
+            일시정지{!touch && ' (Esc)'}
+          </button>
+        </div>
+      )}
 
       {paused && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
@@ -111,6 +173,10 @@ export default function BossView({
             <button onClick={() => setPaused(false)} className="rounded bg-amber-500 py-2 font-bold text-black hover:bg-amber-400">
               계속하기
             </button>
+            <button onClick={() => setShowMoves(true)} className="rounded bg-white/10 py-2 hover:bg-white/20">
+              기술표 보기
+            </button>
+            <VibrationToggle />
             <button onClick={() => setHitboxes((h) => !h)} className="rounded bg-white/10 py-2 hover:bg-white/20">
               판정 표시 {hitboxes ? 'ON' : 'OFF'}
             </button>
@@ -120,6 +186,7 @@ export default function BossView({
           </div>
         </div>
       )}
+      {paused && showMoves && <MoveListPanel onClose={() => setShowMoves(false)} />}
     </div>
   );
 }

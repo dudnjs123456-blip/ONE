@@ -103,6 +103,7 @@ A.player.reset(visit!.x, visit!.z, 0, -1);
 ca = { move: null, run: false, interact: true };
 stepBoth(1);
 ca = idle;
+for (let i = 0; i < 200 && A.doorway; i++) stepBoth(1);
 stepBoth(3);
 check('visited friend home', A.location === 'home' && A.homeOwner === 'b' && A.roomKey === B.roomKey, `(${A.roomKey})`);
 check('friend home label', A.placeLabel.includes('친구B'), `(${A.placeLabel})`);

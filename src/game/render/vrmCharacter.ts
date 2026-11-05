@@ -5,6 +5,7 @@ import { VRMLoaderPlugin, VRMUtils, type VRM, type VRMHumanBoneName } from '@pix
 import type { Fighter } from '../core/fighter';
 import { smooth, type FrameClock } from './clock';
 import { track } from './loadTracker';
+import { OutfitDresser } from './outfitKit';
 import {
   CLIP_BONES,
   CLIP_PARENTS,
@@ -60,6 +61,7 @@ async function loadVrm(url: string): Promise<VRM> {
   VRMUtils.removeUnnecessaryVertices(gltf.scene);
   VRMUtils.combineSkeletons(gltf.scene);
   VRMUtils.rotateVRM0(vrm); // VRM 0.x 는 -Z 를 보므로 1.0 과 같게 +Z 로
+  if (vrm.meta?.metaVersion === '0') tameVroid0(vrm);
   vrm.scene.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) {
       o.castShadow = true;
@@ -67,6 +69,23 @@ async function loadVrm(url: string): Promise<VRM> {
     }
   });
   return vrm;
+}
+
+/**
+ * 옛 VRoid(0.x) 샘플 재질 다듬기: 옷의 반사 그림(matcap)이 검은 바지에 금색 광택으로 번져서
+ * 다리를 들면 허벅지가 금색 덩어리처럼 보인다 → 옷 광택만 끈다 (안쪽 보라 머리는 원래 디자인)
+ */
+function tameVroid0(vrm: VRM) {
+  const seen = new Set<THREE.Material>();
+  vrm.scene.traverse((o) => {
+    const mats = (o as THREE.Mesh).material;
+    for (const m of Array.isArray(mats) ? mats : mats ? [mats] : []) {
+      const mt = m as THREE.Material & { isMToonMaterial?: boolean; matcapFactor?: THREE.Color };
+      if (!mt.isMToonMaterial || seen.has(m)) continue;
+      seen.add(m);
+      if (/_CLOTH/.test(m.name)) mt.matcapFactor?.setScalar(0);
+    }
+  });
 }
 
 /** T포즈(정규화 포즈)에서 팔을 몸 옆으로 내리는 각도 */
@@ -83,6 +102,157 @@ const _axR = new THREE.Vector3();
 /** 절차적 포즈가 직접 움직이지 않는 뼈. 매 프레임 기본 자세로 돌려서 클립이 끝난 뒤 자세가 남지 않게 */
 const UNDRIVEN: VRMHumanBoneName[] = ['upperChest', 'neck', 'leftShoulder', 'rightShoulder', 'leftHand', 'rightHand', 'leftToes', 'rightToes'];
 
+/** 소파 자세 한 장: 골반의 월드 위치, 몸 방향(YXZ), 뼈 회전, 표정 */
+interface SofaPose {
+  hx: number;
+  hy: number;
+  hz: number;
+  rx: number;
+  ry: number;
+  rz: number;
+  bones: Map<VRMHumanBoneName, THREE.Quaternion>;
+  phone: number;
+  blink: number;
+  aa: number;
+  happy: number;
+}
+
+const SOFA_BONES: VRMHumanBoneName[] = [
+  'spine', 'chest', 'upperChest', 'neck', 'head',
+  'leftUpperArm', 'leftLowerArm', 'rightUpperArm', 'rightLowerArm', 'leftHand', 'rightHand',
+  'leftUpperLeg', 'leftLowerLeg', 'rightUpperLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot',
+];
+
+const smoothstep = (a: number, b: number, x: number) => {
+  const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return u * u * (3 - 2 * u);
+};
+
+/**
+ * 소파 동작별 자세. f = 그 동작을 시작하고 지난 프레임 (반복 동작용).
+ * 앉은 자세들은 TV 를 보고(sit), 옆으로 눕기는 서쪽 팔걸이에 머리를 괴고 TV 쪽을 본다(lie)
+ */
+function sofaPose(act: string, f: number, r: RestPose): SofaPose {
+  const bones = new Map<VRMHumanBoneName, THREE.Quaternion>();
+  const P: SofaPose = { hx: r.sit.x, hy: r.seatY ?? 0.45, hz: r.sit.z, rx: 0, ry: r.sit.yaw, rz: 0, bones, phone: 0, blink: 0, aa: 0, happy: 0 };
+  const q = (x: number, y = 0, z = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'XYZ'));
+  const arm = (side: 'left' | 'right', sh: number, el: number, ar: number, tw = 0) => {
+    const hang = ARM_HANG - ar;
+    const L = side === 'left';
+    bones.set(L ? 'leftUpperArm' : 'rightUpperArm', q(sh, tw, L ? -hang : hang));
+    const ax = L ? new THREE.Vector3(Math.cos(hang), Math.sin(hang), 0) : new THREE.Vector3(Math.cos(hang), -Math.sin(hang), 0);
+    bones.set(L ? 'leftLowerArm' : 'rightLowerArm', new THREE.Quaternion().setFromAxisAngle(ax, el));
+  };
+  const leg = (side: 'left' | 'right', hip: number, knee: number, ab = 0.05, foot = 0) => {
+    const L = side === 'left';
+    bones.set(L ? 'leftUpperLeg' : 'rightUpperLeg', q(hip, 0, L ? ab : -ab));
+    bones.set(L ? 'leftLowerLeg' : 'rightLowerLeg', q(knee));
+    bones.set(L ? 'leftFoot' : 'rightFoot', q(foot));
+  };
+  const breathe = Math.sin(f * 0.06) * 0.03;
+  // 기본: 바르게 앉아 두 손은 무릎 위
+  for (const n of ['upperChest', 'neck', 'leftHand', 'rightHand'] as const) bones.set(n, q(0));
+  bones.set('spine', q(0.06));
+  bones.set('chest', q(breathe));
+  bones.set('head', q(0.05));
+  // 허벅지는 좌석 위에 수평, 종아리는 소파 앞으로 수직 (쿠션·몸통을 뚫지 않게)
+  leg('left', -1.55, 1.5);
+  leg('right', -1.55, 1.5);
+  arm('left', -0.5, -0.95, -0.05);
+  arm('right', -0.5, -0.95, -0.05);
+
+  switch (act) {
+    case 'relax': {
+      // 등받이에 푹 기대 두 팔을 등받이 위에 걸치고 다리를 쭉 뻗는다
+      P.rx = -0.32;
+      P.hz -= 0.06; // 엉덩이를 앞으로 빼고 기댄다 (등이 쿠션에 묻히지 않게)
+      bones.set('spine', q(-0.05));
+      bones.set('head', q(0.28 + breathe * 0.5));
+      leg('left', -1.22, 1.2, 0.16, 0.1);
+      leg('right', -1.28, 1.3, 0.12, 0.1);
+      arm('left', 0.85, -0.35, 0.72);
+      arm('right', 0.85, -0.35, 0.72);
+      break;
+    }
+    case 'phone': {
+      // 고개를 숙이고 두 손으로 휴대폰. 가끔 엄지로 넘기며 고개를 까딱
+      P.phone = 1;
+      bones.set('chest', q(0.12 + breathe));
+      bones.set('head', q(0.5 + Math.sin(f * 0.025) * 0.05, Math.sin(f * 0.011) * 0.1));
+      arm('left', -0.7, -1.95, -0.5);
+      arm('right', -0.75, -1.9 + Math.max(0, Math.sin(f * 0.2)) * 0.12, -0.5);
+      leg('left', -1.55, 1.45, 0.03);
+      leg('right', -1.62, 1.5, -0.1); // 다리를 살짝 꼰 듯이
+      break;
+    }
+    case 'doze': {
+      // 기대앉아 꾸벅꾸벅: 고개가 천천히 떨어졌다 퍼뜩 든다
+      P.rx = -0.22;
+      P.hz -= 0.03;
+      P.blink = 1;
+      const c = (f % 260) / 260;
+      const nod = c < 0.85 ? smoothstep(0, 0.85, c) : 1 - smoothstep(0.85, 0.9, c);
+      bones.set('head', q(0.15 + nod * 0.55, 0, nod * 0.18));
+      bones.set('chest', q(0.05 + breathe * 1.5));
+      leg('left', -1.35, 1.25, 0.1);
+      leg('right', -1.35, 1.25, 0.1);
+      arm('left', -0.15, -0.75, -0.3);
+      arm('right', -0.15, -0.75, -0.3);
+      break;
+    }
+    case 'cheer': {
+      // TV 보며 응원: 박수 치다가 두 팔 번쩍 "와!"
+      const c = f % 130;
+      const up = smoothstep(80, 90, c) * (1 - smoothstep(118, 130, c));
+      const clap = 0.5 + 0.5 * Math.sin(f * 0.55);
+      P.happy = 1;
+      P.aa = up * 0.8;
+      P.rx = 0.08;
+      P.hy += up * 0.04 + clap * 0.008;
+      bones.set('head', q(-0.05 - up * 0.2));
+      const sh = -1.15 + (-2.7 + 1.15) * up;
+      const ar = -0.32 + clap * 0.25 * (1 - up) + up * 0.55;
+      arm('left', sh, -0.55 + up * 0.3, ar);
+      arm('right', sh, -0.55 + up * 0.3, ar);
+      leg('left', -1.65, 1.6 - up * 0.3);
+      leg('right', -1.65, 1.6 - up * 0.3);
+      break;
+    }
+    case 'stretch': {
+      // 기지개: 두 팔을 머리 위로 쭉, 다리도 쭉 폈다가 돌아온다 (약 3초)
+      const u = smoothstep(0, 45, f) * (1 - smoothstep(130, 175, f));
+      P.rx = -0.12 * u;
+      P.blink = u > 0.6 ? 1 : 0;
+      P.aa = u * 0.5;
+      bones.set('chest', q(-0.18 * u + breathe));
+      bones.set('head', q(0.05 - 0.35 * u));
+      const lerp = (a: number, b: number) => a + (b - a) * u;
+      arm('left', lerp(-0.5, -2.95), lerp(-0.95, -0.12), lerp(-0.05, 0.12));
+      arm('right', lerp(-0.5, -2.95), lerp(-0.95, -0.12), lerp(-0.05, 0.12));
+      leg('left', lerp(-1.55, -1.45), lerp(1.5, 0.35), 0.05, 0.5 * u);
+      leg('right', lerp(-1.55, -1.45), lerp(1.5, 0.35), 0.05, 0.5 * u);
+      break;
+    }
+    case 'lounge': {
+      // 옆으로 누워 팔걸이에 팔을 괴고 TV 보기 (침대처럼 바로 눕지 않는다)
+      P.hx = r.lie.x;
+      P.hy = r.lie.y;
+      P.hz = r.lie.z;
+      P.ry = r.lie.yaw;
+      P.rz = -(Math.PI / 2 - 0.32);
+      bones.set('spine', q(0.12));
+      bones.set('chest', q(0.04 + breathe));
+      bones.set('head', q(0.1, 0, 0.3));
+      leg('left', -0.7, 1.25, 0.02, 0.3);
+      leg('right', -0.95, 1.05, -0.02, 0.3);
+      arm('left', -0.25, -2.3, 2.35);
+      arm('right', -0.15, -0.3, -0.2 + Math.sin(f * 0.02) * 0.03);
+      break;
+    }
+  }
+  return P;
+}
+
 /**
  * VRM 3D 모델 캐릭터. 기존 절차적 포즈(poseFor)를 VRM 표준 휴머노이드 뼈대에 옮겨서
  * 같은 기술 모션·판정을 그대로 쓴다. 로딩 중에는 절차적 모델(fallback)을 보여준다.
@@ -94,15 +264,30 @@ export class VrmCharacter implements CharacterView {
   readonly root = new THREE.Group();
   casual = false;
   rest: RestPose | null = null;
+  /** 두 손으로 낚싯대를 쥔 자세 (pitch = 대를 든 각도 rad). null = 안 쥠 */
+  hold: { pitch: number } | null = null;
+  private holdW = 0;
+  private holdPitch = 0.5;
   private fallback: Mannequin;
   /** 앉아서 휴대폰 보기·쳐다보기 섞는 정도 (부드럽게) */
   private phoneW = 0;
   private lookW = 0;
   private lookYaw = 0;
   private phoneMesh: THREE.Group | null = null;
+  /** 소파 동작 중 표정 (눈 감기·입 벌림·웃음) */
+  private sofaFace: { blink: number; aa: number; happy: number } | null = null;
   /** VRM 을 못 불러와서 상자 인형으로 대신하는 중 */
   private failed = false;
   private vrm: VRM | null = null;
+  /**
+   * VRM 0.x 모델 (VRoid 샘플 등): 모델 자체가 -Z 를 본다. 자세 계산은 1.0 기준(+Z)으로 하고,
+   * 모델에 넘기기 직전에만 0.x 방향으로 바꾼다 (뼈 회전 x·z 부호 반대, 몸 방향 180°).
+   */
+  private v0 = false;
+  /** 모델을 다 불러왔다 (실패해서 상자 인형을 쓰게 된 것도 포함) */
+  get loaded() {
+    return !!this.vrm || this.failed;
+  }
   private disposed = false;
   private spring = new PoseSpring();
   private heading = new Heading();
@@ -114,6 +299,9 @@ export class VrmCharacter implements CharacterView {
   private rims: MToonRim[] = [];
   private lastPos = new THREE.Vector3(1e9, 0, 0);
   private blinkSeed = Math.floor(Math.random() * 200);
+  /** 코디 (모델을 불러오기 전에 정해지면 기다렸다 입힌다) */
+  private dresser: OutfitDresser | null = null;
+  private outfit: string[] = [];
 
   // 모션캡처 클립 재생 상태
   private lib: ClipLibrary | null = null;
@@ -214,7 +402,13 @@ export class VrmCharacter implements CharacterView {
     this.applyClip(f, c, vrm);
     vrm.scene.rotation.order = 'YXZ';
     vrm.scene.rotation.x = 0;
-    if (this.rest && this.rest.t > 0) this.applyRest(vrm, this.rest, lp, yaw, t);
+    vrm.scene.rotation.z = 0;
+    this.sofaFace = null;
+    if (this.rest && this.rest.t > 0) {
+      if (this.rest.sofa) this.applySofa(vrm, this.rest, lp, yaw);
+      else this.applyRest(vrm, this.rest, lp, yaw, t);
+    }
+    this.applyHold(vrm, c.dt);
 
     // 표정
     const em = vrm.expressionManager;
@@ -222,10 +416,12 @@ export class VrmCharacter implements CharacterView {
       const hurt = f.state === 'hitstun' || f.state === 'launched';
       const down = f.state === 'knockdown' || f.state === 'ko';
       const blink = (t + this.blinkSeed) % 230 < 6;
-      const asleep = !!this.rest && this.rest.t > 0.85;
+      const sf = this.sofaFace as VrmCharacter['sofaFace']; // applySofa 가 바꿨을 수 있다
+      const asleep = sf ? sf.blink > 0.5 : !!this.rest && this.rest.t > 0.85;
       em.setValue('blink', hurt || down || blink || asleep ? 1 : 0);
       em.setValue('angry', f.state === 'attack' ? 0.7 : 0);
-      em.setValue('aa', f.state === 'attack' && f.isInActiveFrames() ? 0.6 : hurt ? 0.5 : 0);
+      em.setValue('aa', f.state === 'attack' && f.isInActiveFrames() ? 0.6 : hurt ? 0.5 : (sf?.aa ?? 0));
+      em.setValue('happy', sf?.happy ?? 0);
     }
 
     updateMToonRim(this.rims);
@@ -234,8 +430,74 @@ export class VrmCharacter implements CharacterView {
     const moved = vrm.scene.position.distanceTo(this.lastPos);
     this.lastPos.copy(vrm.scene.position);
     // 머리카락·옷 물리는 실제 흐른 시간으로 (탭 전환 등 큰 공백은 잘라냄)
+    if (this.v0) {
+      // 화면에 보이는 몸 방향: (rx, ry, rz) 다음에 모델을 180° 돌린 것과 같다
+      const r = vrm.scene.rotation;
+      r.set(-r.x, r.y + Math.PI, -r.z, 'YXZ');
+      this.flipV0(vrm);
+    }
     vrm.update(Math.min(c.dt, 1 / 20));
+    // 다음 프레임 계산은 다시 1.0 기준 값에서 이어간다
+    if (this.v0) this.flipV0(vrm);
     if (moved > 1) vrm.springBoneManager?.reset();
+  }
+
+  /** 1.0 기준 자세 ↔ 0.x 모델 자세 (두 번 하면 원래대로): 모든 정규화 뼈 회전의 x·z, 골반 위치의 x·z 부호를 뒤집는다 */
+  private flipV0(vrm: VRM) {
+    for (const b of Object.values(vrm.humanoid.normalizedHumanBones)) {
+      const n = b?.node;
+      if (!n) continue;
+      n.quaternion.x = -n.quaternion.x;
+      n.quaternion.z = -n.quaternion.z;
+    }
+    const hips = vrm.humanoid.getNormalizedBoneNode('hips');
+    if (hips) {
+      hips.position.x = -hips.position.x;
+      hips.position.z = -hips.position.z;
+    }
+  }
+
+  /**
+   * 소파: 서 있다가 앉고(r.t 0→1), 앉은 뒤엔 동작(기대앉기·옆으로 눕기·휴대폰·기지개·응원·졸기) 사이를 부드럽게 넘어간다.
+   * 골반을 중심으로 몸을 돌려서 눕거나 기대도 자연스럽게 이어진다.
+   */
+  private applySofa(vrm: VRM, r: RestPose, lp: { x: number; y: number; z: number }, yaw: number) {
+    const s = r.sofa!;
+    const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
+    const ease = (u: number) => u * u * (3 - 2 * u);
+    const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
+    const lerpAng = (a: number, b: number, u: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * u;
+    const A = sofaPose(s.prev, s.pt, r);
+    const B = sofaPose(s.act, s.at, r);
+    const k = ease(Math.min(1, Math.max(0, s.k)));
+    // 서 있는 자세 → 소파 자세 (몸 위치·방향), 뼈는 조금 먼저 따라간다
+    const u = ease(Math.min(1, r.t));
+    const wb = Math.min(1, r.t * 1.6);
+    const hips = bone('hips')!;
+    const standHy = hips.position.y;
+    const hx = lerp(lp.x, lerp(A.hx, B.hx, k), u);
+    const hy = lerp(lp.y + standHy, lerp(A.hy, B.hy, k), u);
+    const hz = lerp(lp.z, lerp(A.hz, B.hz, k), u);
+    const ry = lerpAng(yaw, lerpAng(A.ry, B.ry, k), Math.min(1, u * 1.4));
+    const rx = lerp(A.rx, B.rx, k) * u;
+    const rz = lerp(A.rz, B.rz, k) * u;
+    vrm.scene.rotation.set(rx, ry, rz, 'YXZ');
+    // 골반이 (hx,hy,hz) 에 오도록 장면 루트 위치를 거꾸로 계산
+    hips.position.y = lerp(standHy, this.rig.hipsY, wb);
+    hips.quaternion.slerp(this.tmpQ.identity(), wb);
+    const off = this.tmpV.set(hips.position.x, hips.position.y, hips.position.z).applyEuler(vrm.scene.rotation);
+    vrm.scene.position.set(hx - off.x, hy - off.y, hz - off.z);
+    const q = _q;
+    for (const n of SOFA_BONES) {
+      const a = A.bones.get(n);
+      const b = B.bones.get(n);
+      if (!a || !b) continue;
+      bone(n)?.quaternion.slerp(q.copy(a).slerp(b, k), wb);
+    }
+    this.phoneW = lerp(A.phone, B.phone, k) * u;
+    this.lookW = 0;
+    if (this.phoneMesh) this.phoneMesh.visible = this.phoneW > 0.5;
+    this.sofaFace = { blink: lerp(A.blink, B.blink, k) * u, aa: lerp(A.aa, B.aa, k) * u, happy: lerp(A.happy, B.happy, k) * u };
   }
 
   /**
@@ -324,6 +586,36 @@ export class VrmCharacter implements CharacterView {
     }
   }
 
+  /** 낚싯대 쥐기: 오른손은 손잡이 앞, 왼손은 그 아래 끝을 받친다. 대를 들수록 팔도 올라간다 */
+  private applyHold(vrm: VRM, dt: number) {
+    this.holdW += ((this.hold ? 1 : 0) - this.holdW) * smooth(0.15, dt);
+    if (this.hold) this.holdPitch = this.hold.pitch;
+    const k = this.holdW;
+    if (k < 0.002) return;
+    const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
+    const q = new THREE.Quaternion();
+    const e = _e;
+    const lift = Math.max(0, Math.min(1.5, this.holdPitch));
+    const arm = (side: 'left' | 'right', sh: number, el: number, ar: number) => {
+      const hang = ARM_HANG - ar;
+      bone(side === 'left' ? 'leftUpperArm' : 'rightUpperArm')?.quaternion.slerp(q.setFromEuler(e.set(sh, 0, side === 'left' ? -hang : hang, 'XYZ')), k);
+      const ax = side === 'left' ? _axL.set(Math.cos(hang), Math.sin(hang), 0) : _axR.set(Math.cos(hang), -Math.sin(hang), 0);
+      bone(side === 'left' ? 'leftLowerArm' : 'rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(ax, el), k);
+    };
+    arm('right', -0.55 - lift * 0.3, -1.15 + lift * 0.15, 0.05);
+    arm('left', -0.45 - lift * 0.2, -1.35, -0.45);
+    bone('chest')?.quaternion.slerp(q.setFromEuler(e.set(0.05, -0.12, 0)), k);
+    bone('head')?.quaternion.slerp(q.setFromEuler(e.set(0.18 - lift * 0.1, 0, 0)), k);
+  }
+
+  /** 오른손 위치 (월드). 모델이 아직 없으면 false */
+  handWorld(out: THREE.Vector3): boolean {
+    const h = this.vrm?.humanoid.getRawBoneNode('rightHand');
+    if (!h) return false;
+    h.getWorldPosition(out);
+    return true;
+  }
+
   /** 클립이 있는 상태면 절차적 포즈 위에 모션캡처 자세를 섞는다 */
   private applyClip(f: Fighter, c: FrameClock, vrm: VRM) {
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
@@ -382,8 +674,15 @@ export class VrmCharacter implements CharacterView {
     }
   }
 
+  /** 코디 옷 입히기 (data/fashion id 목록) */
+  setOutfit(ids: string[]) {
+    this.outfit = ids;
+    this.dresser?.apply(ids);
+  }
+
   dispose() {
     this.disposed = true;
+    this.dresser?.dispose();
     if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
   }
 
@@ -400,7 +699,13 @@ export class VrmCharacter implements CharacterView {
       hipX: Math.abs(pos('leftUpperLeg').x - pos('hips').x),
     };
     this.gait = null; // 새 다리 치수로 다시 잰다
+    this.v0 = vrm.meta?.metaVersion === '0';
     this.hipsRest.copy(vrm.humanoid.getNormalizedBoneNode('hips')!.position);
+    if (this.v0) {
+      // 골반 기본 위치도 1.0 기준으로
+      this.hipsRest.x = -this.hipsRest.x;
+      this.hipsRest.z = -this.hipsRest.z;
+    }
     // 휴대폰 (앉아서 볼 때만 보인다): 오른손에 쥔다
     const hand = vrm.humanoid.getNormalizedBoneNode('rightHand');
     if (hand) {
@@ -411,6 +716,11 @@ export class VrmCharacter implements CharacterView {
       screen.position.y = 0.007;
       ph.add(body, screen);
       ph.position.set(-0.07, 0.03, 0.02);
+      if (this.v0) {
+        // 0.x 모델은 손 뼈 기준 방향이 180° 돌아 있다
+        ph.position.set(0.07, 0.03, -0.02);
+        ph.rotation.y = Math.PI;
+      }
       ph.visible = false;
       hand.add(ph);
       this.phoneMesh = ph;
@@ -452,6 +762,8 @@ export class VrmCharacter implements CharacterView {
     // 애니메이션 같은 또렷한 외곽선 (VRM 좌표는 미터 단위)
     addOutline(vrm.scene, 0.0035);
     this.rims = setupMToonRim(vrm.scene);
+    this.dresser = new OutfitDresser(vrm);
+    if (this.outfit.length) this.dresser.apply(this.outfit);
     this.root.remove(this.fallback.root);
     this.root.add(vrm.scene);
     this.vrm = vrm;
@@ -459,7 +771,11 @@ export class VrmCharacter implements CharacterView {
 }
 
 /** 외형 정의로 캐릭터 표현을 만든다 */
-export function createCharacter(look: number | Appearance): CharacterView & { dispose?(): void } {
-  if (typeof look !== 'number' && look.kind === 'vrm') return new VrmCharacter(look.url, look.fallback, look.tint);
+export function createCharacter(look: number | Appearance): CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void; loaded?: boolean } {
+  if (typeof look !== 'number' && look.kind === 'vrm') {
+    const v = new VrmCharacter(look.url, look.fallback, look.tint);
+    if (look.outfit?.length) v.setOutfit(look.outfit);
+    return v;
+  }
   return new Mannequin(look);
 }

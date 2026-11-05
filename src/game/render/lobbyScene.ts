@@ -6,11 +6,12 @@ import { swingDoors, type DoorControl } from './signage';
 
 /**
  * 행복빌라 1층 로비: 남쪽 유리 현관, 북쪽 엘리베이터·계단, 동쪽 우편함, 서쪽 경비 데스크와 의자.
+ * 서쪽 벽 북쪽 문 너머에 박 반장의 반장실.
  */
 export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
   s.background = new THREE.Color(0x14161c);
   s.add(new THREE.HemisphereLight(0xf4f6ff, 0x3a3832, 0.7));
-  const { x0, x1, z0, z1 } = LOBBY.room;
+  const { x0, x1, z0, z1 } = LOBBY.hall;
   const W = x1 - x0;
   const D = z1 - z0;
   const H = 2.9;
@@ -67,7 +68,11 @@ export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
     box(sx0 - (elevX + 0.8), H, 0.15, wall, (elevX + 0.8 + sx0) / 2, H / 2, z0);
   }
   box(1.6, H - 2.2, 0.15, wall, elevX, 2.2 + (H - 2.2) / 2, z0); // 엘리베이터 위
-  box(0.15, H, D, wall, x0, H / 2, 0); // 서쪽
+  // 서쪽: 반장실 문 자리만 비운다 (문 위는 벽)
+  const of = LOBBY.office;
+  box(0.15, H, of.doorZ0 - z0, wall, x0, H / 2, (z0 + of.doorZ0) / 2);
+  box(0.15, H, z1 - of.doorZ1, wall, x0, H / 2, (of.doorZ1 + z1) / 2);
+  box(0.15, H - 2.15, of.doorZ1 - of.doorZ0, wall, x0, 2.15 + (H - 2.15) / 2, of.doorZ);
   box(0.15, H, D, wall, x1, H / 2, 0); // 동쪽
   // 남쪽: 낮은 벽 + 유리 현관 (카메라 쪽이라 허리 높이까지만)
   box(0.5 - 0.9 - x0, 1.0, 0.15, wall, (x0 + 0.5 - 0.9) / 2, 0.5, z1);
@@ -80,7 +85,8 @@ export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
   const door = swingDoors(s, 0.5, z1 + 0.04, 1.8, 2.2, doorFrame, glass, std(0xd3d6db, 0.2, 1));
   door.setOpen(0);
   // 아래쪽 걸레받이 (나무)
-  box(0.04, 0.9, D, wainscot, x0 + 0.09, 0.45, 0);
+  box(0.04, 0.9, z1 - of.doorZ1, wainscot, x0 + 0.09, 0.45, (of.doorZ1 + z1) / 2);
+  box(0.04, 0.9, of.doorZ0 - z0, wainscot, x0 + 0.09, 0.45, (z0 + of.doorZ0) / 2);
   box(0.04, 0.9, D, wainscot, x1 - 0.09, 0.45, 0);
 
   // 엘리베이터: 금속 문 두 짝 + 층 표시
@@ -241,6 +247,8 @@ export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
   s2.position.set(-1.6, 2.1, z0 + 0.09);
   s.add(s2);
 
+  buildOffice(s, box, std, canvasTex, H, wall);
+
   // 천장 조명
   for (const [lx, lz] of [[-2.5, 0], [2, -1.5], [0.5, 2.5]]) {
     const l = new THREE.PointLight(0xffffff, 7, 8, 1.6);
@@ -255,4 +263,186 @@ export function buildLobbyScene(s: THREE.Scene): { door: DoorControl } {
   key.castShadow = true;
   s.add(key);
   return { door };
+}
+
+type BoxFn = (w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number) => THREE.Mesh;
+type StdFn = (color: number, roughness?: number, metalness?: number) => THREE.MeshStandardMaterial;
+type TexFn = (w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) => THREE.CanvasTexture;
+
+/** 반장실: 나무 바닥, 책상(컴퓨터·서류·명패) 뒤 의자, 서류함, 믹스커피 탁자, 근무표·달력·액자, 문패 */
+function buildOffice(s: THREE.Scene, box: BoxFn, std: StdFn, canvasTex: TexFn, H: number, wall: THREE.Material) {
+  const o = LOBBY.office;
+  const W = o.x1 - o.x0;
+  const D = o.z1 - o.z0;
+  const cx = (o.x0 + o.x1) / 2;
+  const cz = (o.z0 + o.z1) / 2;
+  // 바닥: 나무 마루
+  const woodTex = canvasTex(256, 256, (g) => {
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle = i % 2 ? '#a07a52' : '#94704a';
+      g.fillRect(0, i * 32, 256, 32);
+      g.fillStyle = 'rgba(0,0,0,0.18)';
+      g.fillRect(0, i * 32, 256, 2);
+      g.fillRect(((i * 97) % 200) + 20, i * 32, 2, 32);
+    }
+  });
+  woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping;
+  woodTex.repeat.set(W / 2, D / 2);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.6 }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(cx, 0.002, cz);
+  floor.receiveShadow = true;
+  s.add(floor);
+  // 벽: 북쪽·서쪽은 천장까지, 남쪽은 카메라 쪽이라 허리 높이
+  const ow = std(0xe8e0cf, 0.95);
+  box(W + 0.15, H, 0.15, ow, cx, H / 2, o.z0);
+  box(0.15, H, D, ow, o.x0, H / 2, cz);
+  box(W + 0.15, 1.0, 0.15, wall, cx, 0.5, o.z1);
+  // 반장실 남쪽 바깥 (로비 서쪽 벽 뒤): 어두운 바닥으로 채워 빈 곳이 뚫려 보이지 않게
+  box(W, 0.04, LOBBY.hall.z1 - o.z1, std(0x2b2d33, 1), cx, 0.02, (o.z1 + LOBBY.hall.z1) / 2);
+  box(0.04, 0.9, D, std(0x8a6f58, 0.8), o.x0 + 0.09, 0.45, cz);
+
+  // 책상: 상판 + 앞판(남쪽, 로비에서 보이는 면) + 옆판
+  const dk = o.desk;
+  const dx = (dk.x0 + dk.x1) / 2;
+  const dz = (dk.z0 + dk.z1) / 2;
+  const top = 0.76;
+  const wood = std(0x6b4a33, 0.6);
+  box(dk.x1 - dk.x0, 0.05, dk.z1 - dk.z0, std(0xc9a77c, 0.5), dx, top - 0.025, dz);
+  box(dk.x1 - dk.x0, top - 0.05, 0.04, wood, dx, (top - 0.05) / 2, dk.z1 - 0.02);
+  for (const sx of [dk.x0 + 0.03, dk.x1 - 0.03]) box(0.05, top - 0.05, dk.z1 - dk.z0, wood, sx, (top - 0.05) / 2, dz);
+  // 모니터 (반장님 쪽을 본다) + 키보드
+  box(0.5, 0.32, 0.03, std(0x1b1b1b, 0.3), dx - 0.25, top + 0.26, dz + 0.12);
+  box(0.06, 0.12, 0.06, std(0x2a2a2a, 0.4), dx - 0.25, top + 0.06, dz + 0.14);
+  const scr = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.46, 0.28),
+    new THREE.MeshBasicMaterial({
+      map: canvasTex(128, 80, (g) => {
+        g.fillStyle = '#123';
+        g.fillRect(0, 0, 128, 80);
+        g.fillStyle = '#9fd3ff';
+        g.font = '11px monospace';
+        g.fillText('근무일지.hwp', 6, 14);
+        g.fillStyle = '#e8eef5';
+        for (let i = 0; i < 5; i++) g.fillRect(8, 24 + i * 10, 60 + ((i * 37) % 50), 3);
+      }),
+    }),
+  );
+  scr.position.set(dx - 0.25, top + 0.26, dz + 0.1);
+  scr.rotation.y = Math.PI;
+  s.add(scr);
+  box(0.42, 0.02, 0.14, std(0x2b2b2b, 0.5), dx - 0.25, top + 0.01, dz - 0.12);
+  // 서류 더미 + 찻잔
+  box(0.3, 0.06, 0.22, std(0xf2eee2, 0.9), dx + 0.45, top + 0.03, dz - 0.05);
+  box(0.28, 0.02, 0.2, std(0xd8e6f2, 0.9), dx + 0.47, top + 0.07, dz - 0.04);
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 12), std(0xffffff, 0.3));
+  cup.position.set(dx + 0.15, top + 0.045, dz - 0.18);
+  s.add(cup);
+  // 명패: 로비 쪽(남쪽)에서 읽힌다
+  const plate = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.5, 0.12),
+    new THREE.MeshBasicMaterial({
+      map: canvasTex(256, 64, (g) => {
+        g.fillStyle = '#2a2016';
+        g.fillRect(0, 0, 256, 64);
+        g.fillStyle = '#e8c87a';
+        g.font = 'bold 34px serif';
+        g.textAlign = 'center';
+        g.fillText('반장 박만수', 128, 45);
+      }),
+    }),
+  );
+  plate.position.set(dx + 0.2, top - 0.12, dk.z1 + 0.003);
+  s.add(plate);
+  // 의자 (남쪽을 본다)
+  void placeFurniture(s, 'chairDesk', { x: o.chair.x, z: o.chair.z - 0.08, w: 0.62, d: 0.62, h: 1.1, rotY: 0 });
+
+  // 서류함 (남서쪽 구석)
+  const cab = LOBBY.furniture.find((f) => f.id === 'officeCabinet')!.rect;
+  box(cab.x1 - cab.x0, 1.3, cab.z1 - cab.z0, std(0x8f969c, 0.45, 0.5), (cab.x0 + cab.x1) / 2, 0.65, (cab.z0 + cab.z1) / 2);
+  for (let r = 0; r < 4; r++) box(0.02, 0.26, (cab.z1 - cab.z0) * 0.8, std(0x6d747b, 0.4, 0.6), cab.x1 + 0.005, 0.2 + r * 0.31, (cab.z0 + cab.z1) / 2);
+  // 커피 탁자 + 전기 포트 + 믹스커피 상자 + 종이컵
+  const ct = LOBBY.furniture.find((f) => f.id === 'officeCoffee')!.rect;
+  const ctx = (ct.x0 + ct.x1) / 2;
+  const ctz = (ct.z0 + ct.z1) / 2;
+  box(ct.x1 - ct.x0, 0.75, ct.z1 - ct.z0, std(0x7a5a40, 0.6), ctx, 0.375, ctz);
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.22, 16), std(0xe9e9e9, 0.25, 0.3));
+  pot.position.set(ctx - 0.15, 0.86, ctz);
+  s.add(pot);
+  box(0.22, 0.1, 0.12, std(0xd8a43a, 0.6), ctx + 0.12, 0.8, ctz - 0.05);
+  for (const k of [0, 1]) {
+    const c2 = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.08, 10), std(0xf5f0e6, 0.3));
+    c2.position.set(ctx + 0.05 + k * 0.1, 0.79, ctz + 0.18);
+    s.add(c2);
+  }
+  // 벽에 붙인 종이: 근무표·달력 (북쪽 벽), 액자 (서쪽 벽)
+  const paper = (w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, x: number, y: number, z: number, ry = 0) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: canvasTex(Math.round(w * 400), Math.round(h * 400), draw) }));
+    m.position.set(x, y, z);
+    m.rotation.y = ry;
+    s.add(m);
+  };
+  paper(0.55, 0.7, (g) => {
+    g.fillStyle = '#fbfaf5';
+    g.fillRect(0, 0, 220, 280);
+    g.fillStyle = '#c0392b';
+    g.fillRect(0, 0, 220, 50);
+    g.fillStyle = '#fff';
+    g.font = 'bold 30px sans-serif';
+    g.textAlign = 'center';
+    g.fillText('근무표', 110, 36);
+    g.fillStyle = '#333';
+    g.font = '18px sans-serif';
+    ['주간  박만수', '야간  신입', '순찰  수시로', '비상  119'].forEach((t, i) => g.fillText(t, 110, 92 + i * 46));
+  }, o.x0 + 1.0, 1.65, o.z0 + 0.085);
+  paper(0.6, 0.45, (g) => {
+    g.fillStyle = '#fffdf8';
+    g.fillRect(0, 0, 240, 180);
+    g.fillStyle = '#222';
+    g.font = 'bold 22px sans-serif';
+    g.fillText('10월', 12, 28);
+    g.font = '13px monospace';
+    for (let i = 0; i < 31; i++) {
+      g.fillStyle = i % 7 === 0 ? '#c0392b' : '#444';
+      g.fillText(String(i + 1), 12 + (i % 7) * 32, 56 + Math.floor(i / 7) * 26);
+    }
+  }, o.x1 - 1.0, 1.7, o.z0 + 0.085);
+  paper(0.7, 0.5, (g) => {
+    g.fillStyle = '#5d4a2f';
+    g.fillRect(0, 0, 280, 200);
+    g.fillStyle = '#efe3c2';
+    g.fillRect(14, 14, 252, 172);
+    g.fillStyle = '#3b2e1c';
+    g.font = 'bold 44px serif';
+    g.textAlign = 'center';
+    g.fillText('一 日 一 善', 140, 116);
+  }, o.x0 + 0.085, 1.7, -2.6, Math.PI / 2);
+  // 문패: 로비 쪽 벽, 문 위
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 0.24),
+    new THREE.MeshBasicMaterial({
+      map: canvasTex(320, 86, (g) => {
+        g.fillStyle = '#23395d';
+        g.fillRect(0, 0, 320, 86);
+        g.fillStyle = '#ffffff';
+        g.font = 'bold 46px sans-serif';
+        g.textAlign = 'center';
+        g.fillText('반장실', 160, 60);
+      }),
+    }),
+  );
+  sign.position.set(o.x1 + 0.085, 2.5, o.doorZ);
+  sign.rotation.y = Math.PI / 2;
+  s.add(sign);
+  // 문틀
+  const frame = std(0x6b4a33, 0.6);
+  for (const fz of [o.doorZ0, o.doorZ1]) box(0.2, 2.15, 0.06, frame, o.x1, 1.075, fz);
+  box(0.2, 0.06, o.doorZ1 - o.doorZ0 + 0.06, frame, o.x1, 2.15, o.doorZ);
+  // 형광등
+  const l = new THREE.PointLight(0xfff4e0, 6, 6, 1.6);
+  l.position.set(cx, H - 0.2, cz);
+  s.add(l);
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.04, 0.18), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  lamp.position.set(cx, H - 0.02, cz);
+  s.add(lamp);
 }

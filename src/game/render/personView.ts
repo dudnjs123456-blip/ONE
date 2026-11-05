@@ -67,6 +67,19 @@ const UPPER_BODY: ClipBone[] = ['spine', 'chest', 'upperChest', 'neck', 'head', 
 const _p = new THREE.Quaternion();
 const _kick = new THREE.Quaternion();
 const _lean = new THREE.Quaternion();
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+
+/** 책상에 앉아 하는 일 (박 반장). glance = 쳐다보는 정도, look = 쳐다볼 곳 (월드) */
+export interface DeskActivity {
+  kind: 'coffee' | 'typing' | 'phone';
+  t: number;
+  glance: number;
+  lookX: number;
+  lookZ: number;
+}
 
 /** 이 거리(m)보다 멀면 외곽선을 끈다 (어차피 1픽셀도 안 되는 굵기라 티가 안 난다) */
 const OUTLINE_FAR = 25;
@@ -76,6 +89,13 @@ const SHADOW_FAR = 35;
 export class PersonView implements CharacterView {
   readonly root = new THREE.Group();
   casual = true;
+  /** 의자에 앉은 정도 (0 = 서 있음, 1 = 앉음): 허벅지를 앞으로 들고 종아리는 내린 채 골반을 낮춘다 */
+  sit = 0;
+  /** 앉아서 하는 일 (렌더러가 매 프레임 넣는다, null = 없음) */
+  desk: DeskActivity | null = null;
+  /** T포즈 뼈 위치 (모델 기준) */
+  private restPos = new Map<ClipBone, THREE.Vector3>();
+  private props: { phone: THREE.Group; mug: THREE.Group } | null = null;
   private model: THREE.Object3D | null = null;
   private bones = new Map<ClipBone, THREE.Bone>();
   /** T포즈 월드 회전 (모델 기준) */
@@ -145,6 +165,7 @@ export class PersonView implements CharacterView {
         if (!bone) continue;
         this.bones.set(b, bone);
         this.restWorld.set(b, rootInv.clone().multiply(bone.getWorldQuaternion(new THREE.Quaternion())));
+        this.restPos.set(b, bone.getWorldPosition(new THREE.Vector3()).applyQuaternion(rootInv));
         this.shown.set(b, new THREE.Quaternion());
         this.target.set(b, new THREE.Quaternion());
       }
@@ -231,6 +252,143 @@ export class PersonView implements CharacterView {
     this.hipsOff.y += low ? -0.12 * up : 0;
   }
 
+  /** 앉은 자세 덧입히기 (u 0~1) */
+  private seated(u: number) {
+    const thigh = _kick.setFromAxisAngle(X_AXIS, -1.45 * u);
+    const shin = _lean.setFromAxisAngle(X_AXIS, 1.45 * u);
+    for (const side of ['left', 'right'] as const) {
+      const leg = [`${side}UpperLeg`, `${side}LowerLeg`, `${side}Foot`, `${side}Toes`] as ClipBone[];
+      for (const b of leg) this.target.get(b)?.premultiply(thigh);
+      for (const b of leg.slice(1)) this.target.get(b)?.premultiply(shin);
+    }
+    // 책상 쪽으로 몸을 살짝 숙인다
+    const fwd = _p.setFromAxisAngle(X_AXIS, -0.12 * u);
+    for (const b of UPPER_BODY) this.target.get(b)?.premultiply(fwd);
+    this.hipsOff.y -= 0.43 * u;
+    this.hipsOff.z -= 0.12 * u;
+  }
+
+  /**
+   * 책상에 앉아 하는 일 (박 반장): 팔·고개 자세를 직접 만든다.
+   * 방향은 이 모델의 T포즈 뼈 위치로 잡은 몸 기준 축(L = 왼쪽, U = 위, F = 앞)으로 정한다.
+   */
+  private deskPose(d: DeskActivity, rootYaw: number) {
+    const P = (b: ClipBone) => this.restPos.get(b);
+    const lu = P('leftUpperArm');
+    const ru = P('rightUpperArm');
+    const hips = P('hips');
+    const head = P('head');
+    if (!lu || !ru || !hips || !head) return;
+    const L = _v1.copy(lu).sub(ru).normalize();
+    const U = _v2.copy(head).sub(hips);
+    U.addScaledVector(L, -U.dot(L)).normalize();
+    const F = _v3.crossVectors(L, U).normalize();
+    const dir = (a: number, b: number, c: number) => new THREE.Vector3().addScaledVector(L, a).addScaledVector(U, b).addScaledVector(F, c).normalize();
+    const mix = (a: THREE.Vector3, b: THREE.Vector3, k: number) => a.clone().lerp(b, k).normalize();
+    const arm = (side: 'left' | 'right', upper: THREE.Vector3, lower: THREE.Vector3) => {
+      const segs: [ClipBone, ClipBone, THREE.Vector3][] = [
+        [`${side}UpperArm`, `${side}LowerArm`, upper],
+        [`${side}LowerArm`, `${side}Hand`, lower],
+      ];
+      for (const [b, child, want] of segs) {
+        const a = P(b);
+        const c = P(child);
+        const q = this.target.get(b);
+        if (!a || !c || !q) continue;
+        q.setFromUnitVectors(_v4.copy(c).sub(a).normalize(), want);
+      }
+      const lo = this.target.get(`${side}LowerArm`);
+      if (lo) this.target.get(`${side}Hand`)?.copy(lo);
+    };
+    const t = d.t;
+    let pitch = 0;
+    if (d.kind === 'typing') {
+      // 키보드 위 두 손: 번갈아 톡톡, 가끔 멈칫
+      const on = Math.sin(t * 1.3) > -0.55 ? 1 : 0;
+      const tapL = 0.07 * Math.max(0, Math.sin(t * 13)) * on;
+      const tapR = 0.07 * Math.max(0, Math.sin(t * 13 + 1.9)) * on;
+      arm('left', dir(0.2, -0.72, 0.66), dir(-0.3, -0.16 + tapL, 0.94));
+      arm('right', dir(-0.2, -0.72, 0.66), dir(0.3, -0.16 + tapR, 0.94));
+      pitch = 0.06;
+    } else if (d.kind === 'phone') {
+      // 두 손으로 휴대폰을 가슴 앞에 들고 고개를 숙인다 (엄지로 스크롤)
+      const scroll = 0.05 * Math.sin(t * 3.2) * (Math.sin(t * 0.7) > 0 ? 1 : 0.2);
+      arm('right', dir(-0.2, -0.88, 0.42), dir(0.42, 0.55 + scroll, 0.72));
+      arm('left', dir(0.2, -0.88, 0.42), dir(-0.42, 0.5, 0.76));
+      pitch = 0.5;
+    } else {
+      // 커피: 오른손에 컵을 들고 있다가 8초마다 한 모금
+      const u = t % 8;
+      const s = u > 5 && u < 7.2 ? Math.sin((Math.PI * (u - 5)) / 2.2) : 0;
+      arm('right', mix(dir(-0.3, -0.85, 0.45), dir(-0.18, -0.4, 0.9), s), mix(dir(0.2, -0.05, 1), dir(0.4, 0.88, 0.25), s));
+      arm('left', dir(0.2, -0.74, 0.64), dir(-0.3, -0.2, 0.94));
+      pitch = 0.1 - 0.3 * s;
+    }
+    // 고개: 하던 일 쪽(아래) ↔ 플레이어 쪽 (쳐다보면 고개를 들고 돌린다)
+    const g = d.glance;
+    let yaw = 0;
+    if (g > 0.01) {
+      const dx = d.lookX - this.root.position.x;
+      const dz = d.lookZ - this.root.position.z;
+      yaw = Math.atan2(dx, dz) - rootYaw;
+      yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+      yaw = Math.max(-1.3, Math.min(1.3, yaw)) * g;
+    }
+    const p = pitch * (1 - g) - 0.05 * g;
+    const turn = (b: ClipBone, k: number) => {
+      const q = this.target.get(b);
+      if (!q) return;
+      _kick.setFromAxisAngle(U, yaw * k);
+      _lean.setFromAxisAngle(L, p * k);
+      q.premultiply(_lean).premultiply(_kick);
+    };
+    turn('neck', 0.35);
+    turn('head', 0.65);
+  }
+
+  /** 손에 든 소품 (휴대폰 · 커피잔) 을 손 위치에 둔다 */
+  private placeProps() {
+    const d = this.desk && this.sit > 0.5 ? this.desk : null;
+    if (!d && !this.props) return;
+    if (!this.props) {
+      const phone = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.01, 0.14), new THREE.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.3, metalness: 0.4 }));
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.12), new THREE.MeshBasicMaterial({ color: 0x9fd0ff }));
+      screen.rotation.x = -Math.PI / 2;
+      screen.position.y = 0.006;
+      phone.add(body, screen);
+      phone.rotation.x = -0.8;
+      const mug = new THREE.Group();
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.035, 0.09, 14), new THREE.MeshStandardMaterial({ color: 0xf4efe6, roughness: 0.5 }));
+      const coffee = new THREE.Mesh(new THREE.CircleGeometry(0.036, 14), new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.3 }));
+      coffee.rotation.x = -Math.PI / 2;
+      coffee.position.y = 0.04;
+      const handle = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.006, 6, 10), cup.material);
+      handle.position.x = 0.045;
+      mug.add(cup, coffee, handle);
+      this.props = { phone, mug };
+      this.root.add(phone, mug);
+    }
+    const { phone, mug } = this.props;
+    phone.visible = d?.kind === 'phone';
+    mug.visible = d?.kind === 'coffee';
+    if (!d || d.kind === 'typing') return;
+    const r = this.bones.get('rightHand');
+    const l = this.bones.get('leftHand');
+    if (!r) return;
+    r.updateWorldMatrix(true, false);
+    const hand = r.getWorldPosition(_v1);
+    if (d.kind === 'phone' && l) {
+      // 두 손 사이
+      l.updateWorldMatrix(true, false);
+      hand.add(l.getWorldPosition(_v2)).multiplyScalar(0.5);
+    }
+    this.root.updateWorldMatrix(true, false);
+    this.root.worldToLocal(hand);
+    const s = 1 / (this.root.scale.x || 1);
+    (d.kind === 'phone' ? phone : mug).position.set(hand.x, hand.y + (d.kind === 'phone' ? 0.03 : 0.0) * s, hand.z + 0.02 * s);
+  }
+
   /** 클립 라이브러리에 없는 상태 → 대체 클립 */
   private choose(f: Fighter, fr: number, t: number): ClipChoice | null {
     const lib = this.lib!;
@@ -299,6 +457,8 @@ export class PersonView implements CharacterView {
       const clip = ch ? this.lib.clips[ch.key] : undefined;
       if (ch && clip) sampleChoice(this.lib, ch, this.target, this.hipsOff);
     }
+    if (this.sit > 0) this.seated(this.sit);
+    if (this.desk && this.sit > 0.5) this.deskPose(this.desk, yaw);
     // 부드럽게 따라가기 (공격·피격은 빠르게)
     const quick = f.state === 'attack' || f.state === 'hitstun' || f.state === 'launched';
     const k = 1 - Math.pow(1 - (quick ? 0.5 : 0.22), Math.max(0.5, c.dt * 60));
@@ -308,6 +468,7 @@ export class PersonView implements CharacterView {
     }
     this.hipsShown.lerp(this.hipsOff, k);
     this.apply();
+    this.placeProps();
   }
 
   /** 변화량을 뼈에 입힌다: 새 월드 = D × T포즈 월드 → 부모 기준 로컬 */

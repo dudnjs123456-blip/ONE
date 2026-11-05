@@ -249,7 +249,7 @@ export class FacadeKit {
         for (let r = 0; r < 3; r++) add(new THREE.BoxGeometry(Math.min(1.1, w / 2 - 2.2), 0.015, 0.02), slab, -side, 1.12 + r * 0.22, d / 2 + 0.145);
         // 오른쪽: 로비 쪽 젖빛 창 (밤엔 은은하게)
         add(new THREE.BoxGeometry(Math.min(1.3, w / 2 - 2.1) + 0.1, 1.0, 0.06), dark, side, 1.75, d / 2 + 0.02);
-        add(new THREE.PlaneGeometry(Math.min(1.3, w / 2 - 2.1), 0.9), lamp, side, 1.75, d / 2 + 0.055);
+        add(new THREE.PlaneGeometry(Math.min(1.3, w / 2 - 2.1), 0.9), lamp, side, 1.75, d / 2 + 0.08);
       }
       return;
     }
@@ -285,7 +285,7 @@ export class FacadeKit {
     const floor = new THREE.PlaneGeometry(w - 0.1, open).rotateX(-Math.PI / 2);
     const uv = floor.attributes.uv as THREE.BufferAttribute;
     for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * Math.max(1, Math.round(w / 2.5)));
-    add(floor, lot, 0, 0.035, d / 2 - open / 2).castShadow = false;
+    add(floor, lot, 0, 0.07, d / 2 - open / 2).castShadow = false;
     // 천장 등 (밤에 켜진다)
     for (const x of cols.length === 3 ? [-w / 4, w / 4] : [0]) add(new THREE.BoxGeometry(0.9, 0.05, 0.14), lamp, x, gh - 0.3, d / 2 - open / 2);
     // 안쪽 벽: 계단실 철문 하나

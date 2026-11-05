@@ -83,6 +83,7 @@ function describe(c: NpcContext): string {
   const lines = [
     '[지금 상황]',
     `- ${c.day}일째 ${c.clock} (${c.partOfDay})`,
+    ...(c.doing ? [`- 너(박 반장)는 지금 ${String(c.doing).slice(0, 60)}`] : []),
     c.onShift && c.shift
       ? `- 후배는 근무 중. 남은 시간 ${c.shift.left}, 출입 확인 ${c.shift.checked}명, 순찰 ${c.shift.patrols}회, 강도 제압 ${c.shift.robbers}명, 지금까지 ${c.shift.pay}G${c.shift.alert ? `. 지금 경보: ${c.shift.alert}` : ''}`
       : '- 후배는 지금 근무 시간이 아니다 (쉬는 중에 들렀다).',

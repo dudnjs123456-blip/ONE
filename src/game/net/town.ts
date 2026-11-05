@@ -3,6 +3,9 @@ import type { CityWorld, NetHit, NetState } from '../city/cityWorld';
 import { saveProfile } from '../core/profile';
 import type { Account } from './auth';
 import { getSupabase } from './supabase';
+import { wornList } from '../data/fashion';
+import type { NetJobScene } from '../city/guardJob';
+import { tvApplyRemote, tvNet, tvState, type TvNet } from '../city/tvState';
 
 /** 움직이는 동안 내 모습을 보내는 간격 (초당 15번) */
 const SEND_MS = 66;
@@ -10,11 +13,19 @@ const SEND_MS = 66;
 const IDLE_MS = 1000;
 /** 친구와의 왕복 시간(핑)을 재는 간격 */
 const PING_MS = 3000;
+/** 근무 중: 같은 건물에 친구가 있으면 로비·복도 장면을 보내는 간격 (초당 10번) */
+const JOB_MS = 100;
+/** TV 를 켜 둔 집에 친구가 같이 있으면 이 간격으로 재생 위치를 맞춘다 */
+const TV_MS = 3000;
 
 interface Meta {
   name: string;
   unit: string;
   claimedAt: number;
+  /** 입은 코디 id (친구 화면에서도 같은 옷으로 보인다) */
+  outfit?: string[];
+  /** 고른 몸 (남자·여자) */
+  body?: string;
 }
 
 export type TownStatus = 'off' | 'connecting' | 'online' | 'error';
@@ -37,6 +48,10 @@ export class TownLink {
   private synced = false;
   private trackedUnit: string | null = null;
   private claimTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastJob = 0;
+  private lastTv = 0;
+  /** 내 방에 같이 있는 친구들 (새로 들어오면 TV 상태를 바로 보낸다) */
+  private roomMates = '';
 
   constructor(
     private world: CityWorld,
@@ -61,6 +76,16 @@ export class TownLink {
       .on('broadcast', { event: 'st' }, ({ payload }) => {
         const m = payload as { id: string; s: NetState };
         if (m.id !== me) this.world.applyRemoteState(m.id, m.s);
+      })
+      .on('broadcast', { event: 'job' }, ({ payload }) => {
+        const m = payload as { id: string; sc: NetJobScene };
+        if (m.id !== me && m.sc && Array.isArray(m.sc.p)) this.world.applyRemoteJob(m.id, { p: m.sc.p.slice(0, 8), sp: m.sc.sp ?? [], ev: m.sc.ev ?? [] });
+      })
+      .on('broadcast', { event: 'tv' }, ({ payload }) => {
+        const m = payload as { from: string; tv: TvNet };
+        if (m.from === me || !m.tv || m.tv.room !== this.world.roomKey || this.world.location !== 'home') return;
+        // 받기까지 걸린 시간: 왕복 시간의 절반쯤
+        tvApplyRemote(m.tv, (this.ping ?? 150) / 2000);
       })
       .on('broadcast', { event: 'hit' }, ({ payload }) => {
         const m = payload as { from: string; h: NetHit };
@@ -104,15 +129,22 @@ export class TownLink {
     if (now - this.lastSent >= SEND_MS) {
       const s = w.netState();
       // 동작 프레임(f)은 매번 바뀌므로 빼고 비교한다
-      const key = `${s.r}|${s.x}|${s.z}|${s.y}|${s.fx}|${s.fz}|${s.s}|${s.m}|${s.hp}|${s.mh}`;
+      // 낚시 시간(t)은 매 프레임 바뀌므로 빼고 비교한다 (받는 쪽이 알아서 흘려 보낸다)
+      const fsKey = s.fs ? JSON.stringify({ ...s.fs, t: 0 }) : '';
+      const key = `${s.r}|${s.x}|${s.z}|${s.y}|${s.fx}|${s.fz}|${s.s}|${s.m}|${s.hp}|${s.mh}|${s.jb}|${s.se}|${s.sa}|${s.sl}|${s.sb}|${fsKey}|${s.pt ? JSON.stringify(s.pt) : ''}`;
       if (key !== this.lastKey || now - this.lastSent >= IDLE_MS) {
         this.lastKey = key;
         this.lastSent = now;
         void ch.send({ type: 'broadcast', event: 'st', payload: { id: this.acc.userId, s } });
       }
     }
+    this.sendJob(now);
+    this.sendTv(now);
+    // 옷을 갈아입었거나 가게에서 입어 보는 중이면 접속 정보도 새로 (친구 화면의 내 옷)
+    if (this.trackedUnit && this.trackedUnit !== this.lookKey()) void this.claimHome();
     if (now - this.lastPing >= PING_MS) {
       this.lastPing = now;
+      // 코디를 갈아입었으면 접속 정보도 새로 (친구 화면의 내 옷)
       void ch.send({ type: 'broadcast', event: 'ping', payload: { from: this.acc.userId, t: now } });
     }
   }
@@ -132,6 +164,45 @@ export class TownLink {
 
   // ───────────────────────── 내부 ─────────────────────────
 
+  /** 친구에게 보이는 내 겉모습 (집 호수 · 입은 옷(입어 보는 옷 포함) · 몸) */
+  private lookKey() {
+    const w = this.world;
+    return `${w.profile.home?.unit}|${(w.outfitPreview ?? wornList(w.profile.wardrobe)).join(',')}|${w.profile.body ?? ''}`;
+  }
+
+  /** 근무 중이고 같은 건물(로비·복도)에 친구가 있으면 지금 장면을 보낸다 */
+  private sendJob(now: number) {
+    const job = this.world.job;
+    if (!job || now - this.lastJob < JOB_MS) return;
+    this.lastJob = now;
+    const sc = job.netScene();
+    const inBuilding = [...this.world.remotes.values()].some((r) => r.room === 'lobby' || /^cd/.test(r.room));
+    if (inBuilding) void this.ch?.send({ type: 'broadcast', event: 'job', payload: { id: this.acc.userId, sc } });
+  }
+
+  /** TV: 내가 바꿨거나, 새 친구가 방에 들어왔거나, 몇 초마다 (켜져 있을 때) 같은 방 친구에게 보낸다 */
+  private sendTv(now: number) {
+    const w = this.world;
+    if (w.location !== 'home') {
+      this.roomMates = '';
+      tvState.dirty = false;
+      return;
+    }
+    const room = w.roomKey;
+    const mates = [...w.remotes.values()].filter((r) => r.room === room).map((r) => r.id).sort().join(',');
+    const joined = mates !== this.roomMates && mates.length > 0 && mates.split(',').some((id) => !this.roomMates.split(',').includes(id));
+    this.roomMates = mates;
+    if (!mates) {
+      tvState.dirty = false;
+      return;
+    }
+    const due = tvState.dirty || (joined && (tvState.now || tvState.changeAt)) || (tvState.now && now - this.lastTv >= TV_MS);
+    if (!due) return;
+    tvState.dirty = false;
+    this.lastTv = now;
+    void this.ch?.send({ type: 'broadcast', event: 'tv', payload: { from: this.acc.userId, tv: tvNet(room) } });
+  }
+
   private onPresence() {
     const ch = this.ch;
     if (!ch) return;
@@ -142,8 +213,8 @@ export class TownLink {
       const m = metas[metas.length - 1];
       if (!m?.name) continue;
       seen.add(id);
-      this.others.set(id, { name: m.name, unit: m.unit, claimedAt: m.claimedAt });
-      this.world.upsertRemote(id, m.name, m.unit);
+      this.others.set(id, { name: m.name, unit: m.unit, claimedAt: m.claimedAt, outfit: m.outfit, body: m.body });
+      this.world.upsertRemote(id, m.name, m.unit, Array.isArray(m.outfit) ? m.outfit.filter((x) => typeof x === 'string').slice(0, 8) : [], typeof m.body === 'string' ? m.body : undefined);
     }
     for (const id of [...this.others.keys()]) {
       if (seen.has(id)) continue;
@@ -180,8 +251,10 @@ export class TownLink {
       saveProfile(pr);
       if (old) this.world.say(`🏠 ${old}호에 먼저 살던 친구가 있어서 내 집이 ${unit}호로 바뀌었어요`, 5);
     }
-    if (this.trackedUnit === home.unit) return;
-    this.trackedUnit = home.unit;
-    await ch.track({ name: this.acc.username, unit: home.unit, claimedAt: home.claimedAt });
+    const outfit = this.world.outfitPreview ?? wornList(pr.wardrobe);
+    const key = `${home.unit}|${outfit.join(',')}|${pr.body ?? ''}`;
+    if (this.trackedUnit === key) return;
+    this.trackedUnit = key;
+    await ch.track({ name: this.acc.username, unit: home.unit, claimedAt: home.claimedAt, outfit, body: pr.body });
   }
 }

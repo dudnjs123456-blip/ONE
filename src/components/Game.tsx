@@ -1,23 +1,51 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { MatchMode } from '@/game/core/match';
 import { loadLegacyProfile, loadProfile, loadStoredProfile, newProfile, saveProfile, setProfileAccount, type PlayerProfile } from '@/game/core/profile';
 import { currentAccount, signOut, type Account } from '@/game/net/auth';
 import LoginScreen from './LoginScreen';
 import KeySettings from './KeySettings';
+import TouchGuide from './TouchGuide';
+import { notationArrows } from '@/game/data/notation';
 import { bindLabel } from '@/game/core/keybinds';
-import { preloadVrm } from '@/game/render/vrmCharacter';
-import { PLAYER_LOOK } from '@/game/render/looks';
 import { BOSSES, type BossDef } from '@/game/data/bosses';
-import { PLAYER_MOVE_LIST } from '@/game/data/moves';
+import { PLAYER_MOVE_LIST, playerStartup } from '@/game/data/moves';
 import { cloudSave, type SyncState } from '@/game/net/cloudSave';
+import { sessionLock } from '@/game/net/sessionLock';
 import { expToNext } from '@/game/data/progression';
 import BossSelect from './BossSelect';
-import BossView from './BossView';
-import CityView from './CityView';
-import FieldView from './FieldView';
-import GameView from './GameView';
+
+// 게임 화면들은 들어갈 때 불러온다 (첫 화면·로그인을 빨리 띄우려고 — 3D·서울 코드가 크다)
+const loadingScreen = () => <div className="flex h-screen w-screen items-center justify-center bg-black text-sm text-white/60">불러오는 중…</div>;
+const BossView = dynamic(() => import('./BossView'), { ssr: false, loading: loadingScreen });
+const CityView = dynamic(() => import('./CityView'), { ssr: false, loading: loadingScreen });
+const FieldView = dynamic(() => import('./FieldView'), { ssr: false, loading: loadingScreen });
+const GameView = dynamic(() => import('./GameView'), { ssr: false, loading: loadingScreen });
+
+/**
+ * 메뉴가 뜬 뒤 브라우저가 한가할 때 게임 화면 코드를 미리 받아 둔다
+ * (첫 화면은 가볍게, 모드에 들어갈 땐 기다리지 않게). 실패해도 들어갈 때 다시 받으니 무시.
+ */
+function prefetchScreens() {
+  const run = () => {
+    for (const load of [() => import('./GameView'), () => import('./FieldView'), () => import('./BossView'), () => import('./CityView')]) {
+      load().catch(() => {});
+    }
+  };
+  const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+  if (w.requestIdleCallback) w.requestIdleCallback(run, { timeout: 4000 });
+  else window.setTimeout(run, 1500);
+}
+
+/** 캐릭터 모델 미리 받기 (3D 코드도 이때 같이 받아 둔다) */
+function preloadModel(pick: (looks: typeof import('@/game/render/looks')) => string | null) {
+  void Promise.all([import('@/game/render/vrmCharacter'), import('@/game/render/looks')]).then(([vrm, looks]) => {
+    const url = pick(looks);
+    if (url) vrm.preloadVrm(url);
+  });
+}
 
 type Screen =
   | { kind: 'menu' }
@@ -48,15 +76,31 @@ export default function Game() {
 
   const [sync, setSync] = useState<SyncState>(cloudSave.state);
   // 접속 흐름: 확인 중 → (서버가 있으면) 로그인 → 게임
-  const [gate, setGate] = useState<'checking' | 'login' | 'ready'>('checking');
+  // busy = 같은 아이디로 다른 창이 접속 중, kicked = 다른 창이 '여기서 접속하기' 로 이 창을 끊음
+  const [gate, setGate] = useState<'checking' | 'login' | 'ready' | 'busy' | 'kicked'>('checking');
   const [account, setAccount] = useState<Account | null>(null);
+  const [pending, setPending] = useState<Account | null>(null);
 
-  /** 로그인한 계정의 기록을 서버에서 받아 와 그대로 시작 */
-  const enter = async (acc: Account) => {
+  /**
+   * 로그인한 계정의 기록을 서버에서 받아 와 그대로 시작.
+   * 한 아이디는 한 창에서만: 다른 창이 접속 중이면 막는다 (force = 그 창을 끊고 여기서)
+   */
+  const enter = async (acc: Account, force = false) => {
     setGate('checking');
+    const lock = await sessionLock.claim(acc);
+    if (lock === 'busy') {
+      if (!force) {
+        setPending(acc);
+        setGate('busy');
+        return;
+      }
+      await sessionLock.takeOver();
+    }
     setProfileAccount(acc.userId);
     const p = await cloudSave.initAccount(acc, loadStoredProfile(), loadLegacyProfile());
     saveProfile(p);
+    // 고른 몸(남자·여자) 모델도 미리 받아 둔다
+    preloadModel((l) => l.bodyUrl(p.body));
     setProfile({ ...p });
     setAccount(acc);
     setGate('ready');
@@ -64,10 +108,20 @@ export default function Game() {
 
   useEffect(() => {
     // 주인공 모델은 메뉴에 있을 때 미리 받아 둔다
-    if (PLAYER_LOOK.kind === 'vrm') preloadVrm(PLAYER_LOOK.url);
+    preloadModel((l) => (l.PLAYER_LOOK.kind === 'vrm' ? l.PLAYER_LOOK.url : null));
+    prefetchScreens();
     const off = cloudSave.subscribe(setSync);
-    const flush = () => void cloudSave.flush();
+    const flush = () => {
+      void cloudSave.flush();
+      void sessionLock.release();
+    };
     window.addEventListener('pagehide', flush);
+    // 다른 창에서 같은 아이디로 '여기서 접속하기' 를 누르면: 기록을 저장하고 이 창은 멈춘다
+    sessionLock.onKicked = async () => {
+      await cloudSave.flush();
+      setScreen({ kind: 'menu' });
+      setGate('kicked');
+    };
     if (!cloudSave.enabled) {
       // 서버 설정이 없으면 (개발용) 로그인 없이 이 브라우저 기록으로
       setProfile(loadProfile());
@@ -79,12 +133,14 @@ export default function Game() {
     return () => {
       off();
       window.removeEventListener('pagehide', flush);
+      sessionLock.onKicked = null;
     };
   }, []);
 
   const logout = async () => {
     saveProfile(profile);
     await cloudSave.reset();
+    await sessionLock.release();
     await signOut();
     setProfileAccount(null);
     setAccount(null);
@@ -94,6 +150,37 @@ export default function Game() {
   };
 
   if (gate === 'login') return <LoginScreen onLogin={(acc) => void enter(acc)} />;
+  if (gate === 'busy' || gate === 'kicked') {
+    const acc = gate === 'busy' ? pending : account;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-black p-6 text-white">
+        <div className="max-w-md rounded-xl border border-white/15 bg-white/5 p-6 text-center">
+          <div className="mb-2 text-3xl">{gate === 'busy' ? '🔒' : '🔌'}</div>
+          <div className="mb-2 text-lg font-bold">{gate === 'busy' ? '이미 다른 창에서 접속 중이에요' : '다른 창에서 접속해서 여기는 끊겼어요'}</div>
+          <div className="mb-5 text-sm text-white/60">
+            한 아이디는 한 곳에서만 접속할 수 있어요{acc ? ` (${acc.username})` : ''}.
+            <br />
+            {gate === 'busy' ? '다른 창을 닫고 다시 시도하거나, 여기서 접속하면 다른 창은 끊겨요.' : '여기서 다시 접속하면 다른 창이 끊겨요.'}
+          </div>
+          <div className="flex flex-col gap-2">
+            {gate === 'busy' && acc && (
+              <button onClick={() => void enter(acc)} className="rounded-lg bg-white/10 py-2 text-sm hover:bg-white/20">
+                다시 시도
+              </button>
+            )}
+            {acc && (
+              <button onClick={() => void enter(acc, true)} className="rounded-lg bg-amber-500 py-2 text-sm font-bold text-black hover:bg-amber-400">
+                여기서 접속하기 (다른 창은 끊겨요)
+              </button>
+            )}
+            <button onClick={() => void logout()} className="rounded-lg py-2 text-xs text-white/50 hover:text-white">
+              로그아웃
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
   if (gate === 'checking')
     return <main className="flex min-h-screen items-center justify-center bg-black text-white/60">불러오는 중…</main>;
 
@@ -122,7 +209,7 @@ export default function Game() {
         />
       );
     case 'match':
-      return <GameView key={screen.mode} mode={screen.mode} onExit={menu} />;
+      return <GameView key={screen.mode} mode={screen.mode} onExit={menu} profile={profile} />;
   }
 
   const bossesCleared = BOSSES.filter((b) => profile.bossClears[b.id]).length;
@@ -135,13 +222,13 @@ export default function Game() {
         <p className="mt-2 text-center text-white/50">웹 3D 격투 RPG 프로토타입</p>
 
         {/* 내 캐릭터 */}
-        <div className="mx-auto mt-8 flex max-w-md items-center gap-4 rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+        <div className="mx-auto mt-8 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-white/10 bg-white/5 px-4 py-3">
           <div className="text-2xl font-black text-amber-300">Lv.{profile.level}</div>
-          <div className="flex-1">
+          <div className="min-w-[12rem] flex-1">
             <div className="h-1.5 overflow-hidden rounded bg-black/60">
               <div className="h-full bg-lime-400" style={{ width: `${(profile.exp / expToNext(profile.level)) * 100}%` }} />
             </div>
-            <div className="mt-1 flex justify-between text-xs text-white/60">
+            <div className="mt-1 flex justify-between gap-3 whitespace-nowrap text-xs text-white/60">
               <span>{profile.gold.toLocaleString()} G</span>
               <span>처치 {profile.kills}</span>
               <span>
@@ -177,7 +264,7 @@ export default function Game() {
             <span className="text-2xl font-bold">서울 · 내 집</span>
             <span className="rounded bg-black/40 px-2 py-0.5 text-xs font-bold text-sky-300">NEW</span>
           </div>
-          <div className="mt-1 text-sm text-white/60">한강이 보이는 동네를 걷고, 내 원룸에서 쉬기 · 주변 이벤트는 곧 추가</div>
+          <div className="mt-1 text-sm text-white/60">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 친구와 같은 동네에서 만나기</div>
         </button>
 
         <h2 className="mb-3 mt-8 text-sm font-bold tracking-widest text-white/50">RPG</h2>
@@ -219,6 +306,7 @@ export default function Game() {
                 ⌨️ 키 설정
               </button>
             </div>
+            <TouchGuide />
             <table className="w-full">
               <thead className="text-white/50">
                 <tr><th className="text-left font-normal"></th><th className="text-left font-normal">P1</th><th className="text-left font-normal">P2</th></tr>
@@ -233,10 +321,11 @@ export default function Game() {
             <ul className="mt-4 space-y-1 text-white/70">
               <li>· 뒤로 / 가만히 있기 = 상·중단 가드, 앉기(아래·아래뒤) = 하단 가드</li>
               <li>· 앞앞 대시, 뒤뒤 백대시</li>
-              <li>· 위 톡 = 화면 안쪽 횡이동, 아래 톡 = 바깥쪽 횡이동</li>
+              <li>· 위 톡 = 화면 안쪽 횡이동, 아래 톡 = 바깥쪽 횡이동 (누르고 있으면 계속 옆으로 걷는 횡보)</li>
               <li>· 점프 — 하단 공격을 뛰어넘는다</li>
               <li>· Ctrl+휠 줌 (Ctrl+0 원래대로)</li>
               <li>· Esc 일시정지, ` 판정 표시</li>
+              <li>· 🎮 게임패드: 방향 패드·왼쪽 스틱 이동, X=1 · Y=2 · A=3 · B=4, RB 점프, Start 일시정지 · 필드: LB 앉기, Back 자동사냥 (2P 대전은 두 번째 패드)</li>
             </ul>
           </section>
 
@@ -246,10 +335,10 @@ export default function Game() {
               <tbody>
                 {PLAYER_MOVE_LIST.map((m) => (
                   <tr key={m.id} className="border-t border-white/5">
-                    <td className="py-1 pr-2 font-mono text-amber-300">{m.notation}</td>
+                    <td className="whitespace-nowrap py-1 pr-2 font-mono text-amber-300">{notationArrows(m.notation)}</td>
                     <td className="py-1 pr-2">{m.name}</td>
-                    <td className="py-1 pr-2 text-white/60">{LEVEL_LABEL[m.level]}</td>
-                    <td className="py-1 font-mono text-white/60">i{m.startup}</td>
+                    <td className="whitespace-nowrap py-1 pr-2 text-white/60">{LEVEL_LABEL[m.level]}</td>
+                    <td className="py-1 font-mono text-white/60">i{playerStartup(m)}</td>
                   </tr>
                 ))}
               </tbody>

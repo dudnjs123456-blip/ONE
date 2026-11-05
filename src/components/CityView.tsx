@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { FRAME_MS } from '@/game/core/constants';
 import type { PlayerProfile } from '@/game/core/profile';
-import { CityWorld, type CityInput } from '@/game/city/cityWorld';
+import { CityWorld, SOFA_ACTS, type CityInput } from '@/game/city/cityWorld';
 import { P1_KEYS } from '@/game/core/input';
 import { bindCodes, bindLabel, type BindAction } from '@/game/core/keybinds';
+import CityTouchControls from './CityTouchControls';
+import { useIsTouch } from './TouchControls';
 import KeySettings from './KeySettings';
 import type { Buttons } from '@/game/core/types';
 import { makeClock } from '@/game/render/clock';
@@ -17,21 +19,33 @@ import CityMapOverlay from './CityMapOverlay';
 import JobPanel from './JobPanel';
 import CalendarPanel from './CalendarPanel';
 import GearPanel from './GearPanel';
+import WardrobeView from './WardrobeView';
 import CasinoPanel from './CasinoPanel';
+import PetPanel from './PetPanel';
+import FishingPanel, { type FishTab } from './FishingPanel';
+import FishingShopPanel, { type FishShopTab } from './FishingShopPanel';
+import FishingHud from './FishingHud';
+import ClothesShopPanel from './ClothesShopPanel';
+import type { ClothesCorner } from '@/game/city/store';
+import type { CosmeticSlot } from '@/game/data/fashion';
 import { shortDay } from '@/game/city/calendar';
+import { WEATHER_LABEL, type WeatherKind } from '@/game/city/weather';
 import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
+import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
+import { tvPlay as tvPlayShared, tvPos, tvReset, tvState, type TvVideo } from '@/game/city/tvState';
 import { PerfProbe } from '@/game/render/perfProbe';
 import { TownLink } from '@/game/net/town';
 import type { Account } from '@/game/net/auth';
 import { attachZoomControls } from './zoomControls';
 
 interface CityHud {
-  location: 'city' | 'home' | 'lobby' | 'corridor';
+  location: 'city' | 'home' | 'lobby' | 'corridor' | 'store';
   floor: number;
   clock: string;
   day: number;
   daylight: number;
+  weather: WeatherKind;
   prompt: string | null;
   toast: string | null;
   police: string | null;
@@ -54,6 +68,10 @@ interface CityHud {
   elevator: { top: number; here: number; mine: number } | null;
   /** 창밖 내다보는 중 */
   lookOut: boolean;
+  /** 소파에 있으면 지금 동작 */
+  sofa: string | null;
+  /** 1인칭 (마우스로 보는 중이면 mouse) */
+  fp: { mouse: boolean } | null;
   /** 지금 장소 이름 (내 집 호수·친구 집 포함) */
   place: string;
   /** 마을 접속 상태 (로그인 안 했으면 null) */
@@ -78,16 +96,27 @@ function moveOf(code: string): [number, number] | null {
   return null;
 }
 
+/** 글자 입력칸에 치는 중인가 */
+function typingIn(e: KeyboardEvent) {
+  const t = e.target as HTMLElement | null;
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+}
+
 /** 키보드 → 도시 입력. 카메라가 북쪽을 보고 있으므로 화면 위 = -z */
 class CityKeyboard {
   private down = new Set<string>();
   private pressed = false;
+  /** 점프 키(Space)를 새로 눌렀다 (낚시 연타: 짧게 톡 쳐도 놓치지 않게) */
+  private tapped = false;
   /** 대각선에서 키 하나를 먼저 뗐을 때 잠깐 대각선을 유지 (멈출 때 방향이 꺾이지 않게) */
   private lastDiag: { x: number; z: number } | null = null;
   private diagGrace = 0;
   private onDown = (e: KeyboardEvent) => {
+    // 이름 입력칸 등에 글자를 칠 땐 게임 키로 쓰지 않는다
+    if (typingIn(e)) return;
     if (moveOf(e.code) || has('interact', e.code) || has('jump', e.code)) e.preventDefault();
     if (has('interact', e.code) && !e.repeat) this.pressed = true;
+    if (has('jump', e.code) && !e.repeat) this.tapped = true;
     this.down.add(e.code);
   };
   private onUp = (e: KeyboardEvent) => {
@@ -118,6 +147,8 @@ class CityKeyboard {
       }
     }
     const interact = this.pressed;
+    const jumpTap = this.tapped;
+    this.tapped = false;
     this.pressed = false;
     // 대각선 → 한 방향: 두 키를 정확히 동시에 떼기는 어렵다. 6프레임 동안은 대각선으로 본다
     if (x && z) {
@@ -139,6 +170,7 @@ class CityKeyboard {
       jump: bindCodes('jump').some((k) => this.down.has(k)),
       down: bindCodes('down').some((k) => this.down.has(k)),
       interact,
+      jumpTap,
     };
   }
 }
@@ -148,14 +180,25 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<CityWorld | null>(null);
   const perfRef = useRef<HTMLDivElement>(null);
+  const touch = useIsTouch();
   const [hud, setHud] = useState<CityHud | null>(null);
   const [menu, setMenu] = useState(false);
   const [inventory, setInventory] = useState(false);
   const [bigMap, setBigMap] = useState(false);
   const [jobs, setJobs] = useState(false);
   const [calendar, setCalendar] = useState(false);
+  /** 거실 TV: 틀고 있는 영상 · 리모컨(검색) 창 · 재생 상태 */
+  const [tv, setTv] = useState<TvVideo | null>(null);
+  const [tvPanel, setTvPanel] = useState(false);
+  const [tvPlay, setTvPlay] = useState<{ playing: boolean; error: number | null }>({ playing: false, error: null });
+  const tvBoxRef = useRef<HTMLDivElement>(null);
+  const tvFrameRef = useRef<HTMLIFrameElement>(null);
+  const tvPanelRef = useRef(tvPanel);
+  tvPanelRef.current = tvPanel;
   const [gear, setGear] = useState(false);
   const [casino, setCasino] = useState(false);
+  const [pets, setPets] = useState<null | 'shop' | 'care'>(null);
+  const [adoptPick, setAdoptPick] = useState<string | null>(null);
   const [keys, setKeys] = useState(false);
   /** 로딩 화면 (모델 받기 → 그래픽 준비). 끝나면 null */
   const [loading, setLoading] = useState<{ stage: 'models' | 'shaders'; done: number; total: number } | null>({ stage: 'models', done: 0, total: 0 });
@@ -171,15 +214,49 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   gearRef.current = gear;
   const casinoRef = useRef(casino);
   casinoRef.current = casino;
+  const petsRef = useRef(pets);
+  petsRef.current = pets;
+  // 낚시 도감 (F) · 낚시마트 계산대
+  const [fishDex, setFishDex] = useState<FishTab | null>(null);
+  const fishDexRef = useRef(fishDex);
+  fishDexRef.current = fishDex;
+  const [fishShop, setFishShop] = useState<FishShopTab | null>(null);
+  const fishShopRef = useRef(fishShop);
+  fishShopRef.current = fishShop;
+  const [clothes, setClothes] = useState<ClothesCorner | 'all' | null>(null);
+  const clothesRef = useRef(clothes);
+  clothesRef.current = clothes;
+  // 코디 창 (O · 탈의실): 캐릭터를 돌려 보며 옷 입기
+  const [wardrobe, setWardrobe] = useState<{ shop: boolean; slot?: CosmeticSlot; tryIds?: string[] } | null>(null);
+  const wardrobeRef = useRef(wardrobe);
+  wardrobeRef.current = wardrobe;
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const kb = new CityKeyboard();
     kb.attach();
-    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
+    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
+    // 새로고침해도 마지막에 있던 곳에서 이어서 (이 브라우저에 계정별로 기억)
+    const placeKey = `ironfist:place:${account?.userId ?? 'guest'}`;
+    try {
+      world.restorePlace(JSON.parse(localStorage.getItem(placeKey) ?? 'null'));
+    } catch {
+      /* 저장된 값이 깨졌으면 평소처럼 집 앞에서 */
+    }
+    const savePlace = () => {
+      const s = world.placeSnapshot();
+      if (!s) return;
+      try {
+        localStorage.setItem(placeKey, JSON.stringify(s));
+      } catch {
+        /* 저장 공간을 못 쓰면 그냥 넘어간다 */
+      }
+    };
+    const placeTimer = window.setInterval(savePlace, 2000);
+    window.addEventListener('pagehide', savePlace);
     const renderer = new CityRenderer(canvas, world);
     if (process.env.NODE_ENV === 'development') (window as unknown as { __cr?: CityRenderer }).__cr = renderer;
     const resize = () => renderer.resize(canvas.clientWidth, canvas.clientHeight);
@@ -191,6 +268,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
     const link = account ? new TownLink(world, account) : null;
     link?.start();
     const onKey = (e: KeyboardEvent) => {
+      if (typingIn(e)) return;
       // NPC 와 대화 중엔 글자를 입력하므로 게임 단축키를 막는다 (Esc 로만 닫기)
       if (world.npcChat) {
         if (e.code === 'Escape') world.closeNpcChat();
@@ -209,15 +287,29 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         else if (e.code === 'KeyC' && !e.repeat) world.stopLookOut(true);
         return;
       }
+      // 소파: 숫자 키 1~6 으로 동작 바꾸기
+      if (world.seat?.spot === 'sofa' && !e.repeat) {
+        const n = /^(Digit|Numpad)([1-6])$/.exec(e.code);
+        if (n) {
+          world.sofaAction(SOFA_ACTS[Number(n[2]) - 1].id);
+          return;
+        }
+      }
       if (e.code === 'KeyM' && !e.repeat && !world.dialog) setBigMap((v) => !v);
       if (e.code === 'Escape') {
         // 대화·지도부터 닫는다
         if (world.dialog) world.closeDialog();
+        else if (wardrobeRef.current) setWardrobe(null);
         else if (bigMapRef.current) setBigMap(false);
         else if (jobsRef.current) setJobs(false);
         else if (calRef.current) setCalendar(false);
+        else if (tvPanelRef.current) setTvPanel(false);
         else if (gearRef.current) setGear(false);
         else if (casinoRef.current) setCasino(false);
+        else if (petsRef.current) setPets(null);
+        else if (clothesRef.current) setClothes(null);
+        else if (fishDexRef.current) setFishDex(null);
+        else if (fishShopRef.current) setFishShop(null);
         else setMenu((m) => !m);
       }
       if (e.code === 'KeyI' && !e.repeat) setInventory((v) => !v);
@@ -225,6 +317,18 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       if (e.code === 'KeyG' && !e.repeat && world.job) world.job.toggleAuto();
       if (e.code === 'KeyP' && !e.repeat && world.job) world.job.toggleAutoPatrol();
       if (e.code === 'KeyT' && !e.repeat && !world.dialog) setGear((v) => !v);
+      if (e.code === 'KeyO' && !e.repeat && !world.dialog) setWardrobe((v) => (v ? null : { shop: false }));
+      if (e.code === 'KeyK' && !e.repeat && !world.dialog) setPets((v) => (v ? null : 'care'));
+      // F: 낚시 도감 · 확률표 · 낚시 방법
+      if (e.code === 'KeyF' && !e.repeat && !world.dialog) {
+        setFishShop(null);
+        setFishDex((v) => (v ? null : 'dex'));
+      }
+      // V: 1인칭 ↔ 3인칭
+      if (e.code === 'KeyV' && !e.repeat) {
+        world.toggleFirstPerson();
+        if (!world.firstPerson && document.pointerLockElement) document.exitPointerLock();
+      }
       // F3: 성능 표시기 (FPS·그리기 횟수·메모리)
       if (e.code === 'F3') {
         e.preventDefault();
@@ -234,10 +338,26 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       }
     };
     window.addEventListener('keydown', onKey);
+    // 1인칭: 화면을 누르면 마우스를 잡아 둘러보기 (Esc 로 풀린다)
+    const onCanvasDown = () => {
+      if (world.firstPerson && !document.pointerLockElement) void canvas.requestPointerLock?.();
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (document.pointerLockElement === canvas) world.fpLook(e.movementX, e.movementY);
+    };
+    const onLockChange = () => {
+      world.fpMouse = document.pointerLockElement === canvas;
+    };
+    canvas.addEventListener('mousedown', onCanvasDown);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('pointerlockchange', onLockChange);
 
     let raf = 0;
     let last = performance.now();
     let acc = 0;
+    /** TV 상태 버전: 바뀌면 (내가 틀었든 친구가 틀었든) 화면을 따라 바꾼다 */
+    let tvRev = tvState.rev;
+    let tvShownId: string | null = null;
     let lastKey = '';
     let lastHud = -Infinity;
     let perfOn = false;
@@ -278,7 +398,30 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       }
       if (steps === 5) acc = 0;
       const t1 = performance.now();
+      // 집을 나가면 TV 도 끈다
+      if ((tvState.now || tvState.changeAt) && world.location !== 'home') {
+        tvReset();
+        tvRev = tvState.rev;
+        tvShownId = null;
+        setTv(null);
+        setTvPanel(false);
+      }
+      if (tvRev !== tvState.rev) {
+        tvRev = tvState.rev;
+        const v = tvState.now;
+        if ((v?.id ?? null) !== tvShownId) {
+          // 다른 영상: 새로 띄운다 (시작 위치는 TvScreen 이 주소에 넣는다)
+          tvShownId = v?.id ?? null;
+          setTv(v);
+          setTvPlay({ playing: false, error: null });
+        } else if (v) {
+          // 같은 영상: 위치와 멈춤만 맞춘다
+          tvCommand(tvFrameRef.current, 'seekTo', [tvPos(), true]);
+          tvCommand(tvFrameRef.current, tvState.pausedAt !== null ? 'pauseVideo' : 'playVideo');
+        }
+      }
       renderer.sync(world, makeClock(world.frame, acc / FRAME_MS, world.hitstop > 0, dt));
+      placeTvBox(tvBoxRef.current, renderer.tvCorners());
       const t2 = performance.now();
       link?.tick(now);
       const st = renderer.stats();
@@ -297,13 +440,14 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       }
 
       // 화면 위 글자(HUD)는 0.08초마다만 새로 만든다 (매 프레임 비교하던 것을 줄여서 가볍게)
-      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.casinoRequest;
+      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
       const h: CityHud | null = !hudDue ? null : {
         location: world.location,
         floor: world.floor,
         clock: world.clock,
         day: world.day,
         daylight: Math.round(world.daylight * 10) / 10,
+        weather: world.weather.kind,
         prompt: world.promptLabel,
         job: world.job
           ? {
@@ -338,6 +482,8 @@ export default function CityView({ profile, account, onExit }: { profile: Player
           ? { top: world.villaFloors, here: world.location === 'lobby' ? 1 : world.floor, mine: Number(world.homeUnit.slice(0, -2)) || 0 }
           : null,
         lookOut: world.lookingOut,
+        sofa: world.seat?.spot === 'sofa' && world.seat.phase !== 'stand' ? world.sofa.id : null,
+        fp: world.firstPerson ? { mouse: world.fpMouse } : null,
         place: world.placeLabel,
         online: link ? { status: link.status, friends: link.friends, ping: link.ping === null ? null : Math.round(link.ping) } : null,
         sleep: world.sleepView?.phase ?? null,
@@ -347,6 +493,10 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         world.jobPanelRequest = false;
         setJobs(true);
       }
+      if (world.tvRequest) {
+        world.tvRequest = false;
+        setTvPanel(true);
+      }
       if (world.calendarRequest) {
         world.calendarRequest = false;
         setCalendar(true);
@@ -354,6 +504,38 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       if (world.casinoRequest) {
         world.casinoRequest = false;
         setCasino(true);
+      }
+      // 옷가게 창은 띄운 채로 걸어 다닐 수 있다 (입어본 옷을 입고 둘러보기). 가게를 벗어나면 닫는다
+      if (clothesRef.current && world.location !== 'store') setClothes(null);
+      if (world.clothesShopRequest) {
+        setClothes(world.clothesShopRequest);
+        world.clothesShopRequest = null;
+      }
+      if (world.wardrobeRequest) {
+        world.wardrobeRequest = false;
+        setClothes(null);
+        // 옷가게 탈의실이면 안 산 옷도 입어 보고 살 수 있게
+        setWardrobe({ shop: world.store?.kind === 'clothes' });
+      }
+      if (world.fishingShopRequest) {
+        setFishShop(world.fishingShopRequest);
+        world.fishingShopRequest = null;
+      }
+      if (world.fishDexRequest) {
+        setFishDex(world.fishDexRequest);
+        world.fishDexRequest = null;
+      }
+      if (fishShopRef.current && world.location !== 'store') setFishShop(null);
+      if (world.petShopRequest) {
+        world.petShopRequest = false;
+        setAdoptPick(null);
+        setPets('shop');
+      }
+      // 놀이터의 아이에게 다가가 E: 그 아이 분양 창
+      if (world.petAdoptRequest) {
+        setAdoptPick(world.petAdoptRequest.id);
+        world.petAdoptRequest = null;
+        setPets('shop');
       }
       if (h) {
         lastHud = now;
@@ -372,10 +554,17 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       kb.detach();
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
+      canvas.removeEventListener('mousedown', onCanvasDown);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('pointerlockchange', onLockChange);
+      if (document.pointerLockElement) document.exitPointerLock();
       detachZoom();
       link?.stop();
       probe.dispose();
       renderer.dispose();
+      savePlace();
+      window.clearInterval(placeTimer);
+      window.removeEventListener('pagehide', savePlace);
       worldRef.current = null;
     };
   }, [profile, account]);
@@ -383,23 +572,29 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   const night = hud ? hud.daylight < 0.5 : false;
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+    <div className="relative isolate h-screen w-screen overflow-hidden bg-black text-white">
+      <TvScreen video={tv} boxRef={tvBoxRef} frameRef={tvFrameRef} onState={(s) => setTvPlay((p) => ({ playing: s.playing ?? p.playing, error: s.error ?? p.error }))} />
       <canvas ref={canvasRef} className="block h-full w-full" />
       {loading && <LoadingScreen {...loading} />}
+      {/* 폰·태블릿: 화면 조작 버튼 (뒤에 그려지는 창들이 이 위를 덮는다) */}
+      {touch && !loading && <CityTouchControls />}
       <div
         ref={perfRef}
         style={{ display: 'none' }}
         className="pointer-events-none absolute bottom-2 right-2 z-50 whitespace-pre rounded bg-black/70 px-2 py-1 font-mono text-[11px] leading-tight text-lime-300"
       />
 
-      {hud && (
+      {hud && !wardrobe && (
         <div className="pointer-events-none absolute inset-0 select-none">
           {/* 위치 · 시간 · 돈 */}
           <div className="absolute left-4 top-4 rounded-lg border border-white/15 bg-black/45 px-4 py-3 backdrop-blur-sm">
             <div className="text-xs text-white/60">{hud.place}</div>
             <div className="mt-0.5 flex items-baseline gap-2">
               <span className="text-3xl font-black tabular-nums">{hud.clock}</span>
-              <span className="text-sm">{night ? '🌙' : '☀️'}</span>
+              <span className="text-sm" title={WEATHER_LABEL[hud.weather].name}>
+                {hud.weather === 'clear' ? (night ? '🌙' : '☀️') : WEATHER_LABEL[hud.weather].icon}
+                <span className="ml-1 text-xs text-white/70">{hud.weather === 'clear' && night ? '맑은 밤' : WEATHER_LABEL[hud.weather].name}</span>
+              </span>
               <span className="text-xs text-white/60">{shortDay(hud.day)}</span>
             </div>
             <div className="mt-1 text-sm">
@@ -484,13 +679,22 @@ export default function CityView({ profile, account, onExit }: { profile: Player
               {hud.payslip}
             </div>
           )}
+          {hud.fp && !hud.lookOut && (
+            <>
+              {/* 조준점 */}
+              <div className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80 shadow-[0_0_4px_rgba(0,0,0,0.8)]" />
+              <div className="absolute bottom-16 right-4 rounded-lg bg-black/55 px-3 py-1.5 text-xs text-white/85">
+                👀 1인칭 · ↑↓ 걷기 · {hud.fp.mouse ? '←→ 옆걸음 · 마우스 둘러보기 (Esc 풀기)' : '←→ 돌기 · 화면 클릭 = 마우스로 보기'} · V 되돌리기
+              </div>
+            </>
+          )}
           {hud.toast && (
             <div className="absolute left-1/2 top-24 -translate-x-1/2 rounded-lg bg-black/70 px-5 py-2.5 text-base font-bold shadow-lg">
               {hud.toast}
             </div>
           )}
 
-          <div className="absolute bottom-4 left-4 rounded bg-black/45 px-3 py-2 text-xs leading-5 text-white/80">
+          <div className={`absolute bottom-4 left-4 rounded bg-black/45 px-3 py-2 text-xs leading-5 text-white/80 ${touch ? 'hidden' : ''}`}>
             <div>
               방향키 걷기 (두 번 톡 = 대시, 대시 중 {bindLabel('b2')}/{bindLabel('b4')} = 대시기) · {bindLabel('run')} 달리기 · {bindLabel('jump')} 점프 · {bindLabel('interact')} 상호작용
             </div>
@@ -498,14 +702,73 @@ export default function CityView({ profile, account, onExit }: { profile: Player
               {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리 ({bindLabel('run')} = 아래) · Esc 메뉴에서 키 설정
             </div>
             <div>싸울 때 ↓ 숙이기 (상단 공격 피하기)</div>
-            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · I 인벤토리 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
+            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · V 1인칭 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
           </div>
         </div>
       )}
 
       {bigMap && worldRef.current && <CityMapOverlay world={worldRef.current} onClose={() => setBigMap(false)} />}
+      {hud && worldRef.current && <FishingHud world={worldRef.current} />}
+      {fishShop && worldRef.current && (
+        <FishingShopPanel
+          world={worldRef.current}
+          start={fishShop}
+          onClose={() => setFishShop(null)}
+          onGuide={() => {
+            setFishShop(null);
+            setFishDex('odds');
+          }}
+        />
+      )}
+      {fishDex && worldRef.current && <FishingPanel key={fishDex} world={worldRef.current} start={fishDex} onClose={() => setFishDex(null)} />}
+      {pets && worldRef.current && <PetPanel key={`${pets}:${adoptPick ?? ''}`} world={worldRef.current} mode={pets} pick={adoptPick} onClose={() => setPets(null)} />}
       {casino && worldRef.current && <CasinoPanel world={worldRef.current} onClose={() => setCasino(false)} />}
-      {gear && worldRef.current && <GearPanel world={worldRef.current} onClose={() => setGear(false)} />}
+      {gear && worldRef.current && (
+        <GearPanel
+          world={worldRef.current}
+          onClose={() => setGear(false)}
+          onWardrobe={() => {
+            setGear(false);
+            setWardrobe({ shop: false });
+          }}
+        />
+      )}
+      {wardrobe && worldRef.current && (
+        <WardrobeView world={worldRef.current} shop={wardrobe.shop} startSlot={wardrobe.slot ?? null} startTry={wardrobe.tryIds} onClose={() => setWardrobe(null)} />
+      )}
+      {clothes && worldRef.current && (
+        <ClothesShopPanel
+          key={clothes}
+          world={worldRef.current}
+          start={clothes}
+          onClose={() => setClothes(null)}
+          onWardrobe={() => {
+            setClothes(null);
+            setWardrobe({ shop: true });
+          }}
+        />
+      )}
+      {tv && hud?.location === 'home' && (
+        <TvRemote
+          video={tv}
+          playing={tvPlay.playing}
+          error={tvPlay.error}
+          frameRef={tvFrameRef}
+          onSearch={() => setTvPanel(true)}
+          onOff={() => {
+            tvPlayShared(null);
+          }}
+        />
+      )}
+      {tvPanel && (
+        <TvPanel
+          now={tv}
+          onPlay={(v) => {
+            tvPlayShared(v);
+          }}
+          onClose={() => setTvPanel(false)}
+        />
+      )}
       {calendar && worldRef.current && <CalendarPanel profile={profile} today={worldRef.current.day} onClose={() => setCalendar(false)} />}
       {jobs && worldRef.current && <JobPanel world={worldRef.current} onClose={() => setJobs(false)} />}
       {inventory && <InventoryPanel profile={profile} onClose={() => setInventory(false)} />}
@@ -520,6 +783,26 @@ export default function CityView({ profile, account, onExit }: { profile: Player
           </button>
           <button onClick={() => worldRef.current?.stopLookOut(true)} className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600">
             창문 닫기 (C)
+          </button>
+        </div>
+      )}
+      {hud?.sofa && (
+        <div className="pointer-events-auto absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-zinc-500/50 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 shadow-xl">
+          {SOFA_ACTS.map((a, i) => (
+            <button
+              key={a.id}
+              onClick={() => worldRef.current?.sofaAction(a.id)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold ${hud.sofa === a.id ? 'bg-amber-500 text-black' : 'bg-zinc-700/80 hover:bg-zinc-600'}`}
+            >
+              <span className="mr-1 opacity-60">{i + 1}</span>
+              {a.icon} {a.label}
+            </button>
+          ))}
+          <button onClick={() => setTvPanel(true)} className="rounded-xl bg-rose-600/80 px-3 py-1.5 text-xs font-bold hover:bg-rose-500">
+            📺 TV
+          </button>
+          <button onClick={() => worldRef.current?.standUp()} className="rounded-xl px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700">
+            일어나기 (E)
           </button>
         </div>
       )}

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Building, CityMap, Sign } from '../city/cityMap';
 import { CITY_CONST } from '../city/cityMap';
-import { HOME, LOBBY, type CityLocation, type CityWorld } from '../city/cityWorld';
+import { CORRIDOR, HOME, LOBBY, type CityLocation, type CityWorld } from '../city/cityWorld';
 import { buildLobbyScene } from './lobbyScene';
 import { glassMaterial, initGlassEnv } from './glassKit';
 import { UnitWindow, coverPlate } from './unitWindows';
@@ -9,8 +9,9 @@ import { LookFx, SkyDome, toonify } from './lookFx';
 import { PersonView, ROBBER_SKIN } from './personView';
 import { makeKitBuilding } from './cityKit';
 import { allLoaded } from './loadTracker';
-import { placeFurniture } from './furnitureKit';
-import { apartmentSigns, buildVillaEntrance, decorateFacade, type DoorControl } from './signage';
+import { buildSofa } from './sofaModel';
+import { furnishHome, sleepDuvet } from './homeFurniture';
+import { apartmentSigns, buildVillaEntrance, decorateFacade, swingDoors, type DoorControl } from './signage';
 import { instanceProp } from './propsKit';
 import { CarKit, type CarView } from './carKit';
 import { TreeKit } from './treeKit';
@@ -20,7 +21,8 @@ import { buildCorridorScene, type CorridorView } from './corridorScene';
 import { WEEKDAYS, dateOfDay, dayOfDate, daysInMonth } from '../city/calendar';
 import { smooth, type FrameClock } from './clock';
 import { FloatingTexts, Nameplate, SparkSystem } from './effects';
-import { PLAYER_LOOK } from './looks';
+import { bodyUrl, playerLook } from './looks';
+import { wornList } from '../data/fashion';
 import { HEROINE, type CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { GroundKit, type GroundKind } from './groundKit';
@@ -28,6 +30,13 @@ import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { FacadeKit, villaSet, type FacadeSet } from './facadeKit';
 import { buildVacantShop } from './vacantShop';
 import { TrafficProps } from './trafficProps';
+import { animatePet, buildPet, disposePet, type PetModel } from './petKit';
+import { PET_BY_ID } from '../data/pets';
+import { buildStoreScene, type StoreScene } from './storeScene';
+import { FishingView, buildFishDecks } from './fishingView';
+import { WeatherFx } from './weatherFx';
+import { weatherAt, type WeatherState } from '../city/weather';
+import { tvState } from '../city/tvState';
 
 // ───────────────────────── 텍스처 (캔버스로 그림) ─────────────────────────
 
@@ -155,6 +164,8 @@ function drawSkyline(g: CanvasRenderingContext2D, daylight: number) {
 
 const CAM_CITY = new THREE.Vector3(0, 8.5, 10.5);
 const CAM_HOME = new THREE.Vector3(0, 6.2, 7.4);
+/** 낚시할 때: 뒤(북쪽)에서 어깨 너머로 강을 본다 (보는 곳은 플레이어보다 3.2m 앞) */
+const FISH_CAM = new THREE.Vector3(-3.2, 4.0, -5.6);
 const SKY_DAY = new THREE.Color(0x9cc9ec);
 
 interface BuildingView {
@@ -172,6 +183,19 @@ export class CityRenderer {
   private home = new THREE.Scene();
   private lobby = new THREE.Scene();
   private corridor = new THREE.Scene();
+  /** 가게 안 (들어간 가게가 바뀌면 storeRoot 를 새로 만든다) */
+  private store = new THREE.Scene();
+  private storeRoot: THREE.Group | null = null;
+  private storeScn: StoreScene | null = null;
+  /** 1인칭일 때만 보이는 실내 위쪽 벽·천장 (3인칭에선 카메라 쪽 벽이 낮아야 안이 보인다) */
+  private fpOnly: THREE.Object3D[] = [];
+  private storeFp: THREE.Object3D[] = [];
+  private storeSign: string | null = null;
+  private keeperView: PersonView | null = null;
+  /** 펫샵 놀이터 아이들 (입고 id → 모델) */
+  private penViews = new Map<string, { model: PetModel; phase: number }>();
+  private storeSparks!: SparkSystem;
+  private storeTexts!: FloatingTexts;
   private corridorView!: CorridorView;
   private corridorSparks!: SparkSystem;
   private corridorTexts!: FloatingTexts;
@@ -188,11 +212,19 @@ export class CityRenderer {
   /** 접속한 친구들의 캐릭터와 이름표 */
   /** 내 머리 위 레벨·아이디·체력바 */
   private myPlate = new Nameplate(false);
-  private remoteViews = new Map<string, { view: CharacterView & { dispose?(): void }; plate: Nameplate; lift: THREE.Group }>();
+  private remoteViews = new Map<string, { view: CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void }; plate: Nameplate; lift: THREE.Group; outfit?: string; url: string; fish?: FishingView }>();
+  /** 친구 곁의 펫 (친구 id:펫 id) */
+  private remotePetViews = new Map<string, { model: ReturnType<typeof buildPet>; species: string; phase: number }>();
+  /** 내 코디 (바뀌면 다시 입힌다) */
+  private outfitKey = '';
   private lobbyTexts!: FloatingTexts;
   private sun = new THREE.DirectionalLight(0xffffff, 2);
   private hemi = new THREE.HemisphereLight(0xdff1ff, 0x5a5a50, 1);
-  private player: CharacterView & { dispose?(): void };
+  private player: CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void };
+  /** 지금 내 캐릭터 모델 파일 (코디 창에서 남자·여자를 바꾸면 달라진다) */
+  private playerUrl: string;
+  /** 바꾼 몸을 불러오는 중: 다 불러오면 그때 갈아 끼운다 (바꾸는 동안 캐릭터가 사라지지 않게) */
+  private nextPlayer: { view: CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void; loaded?: boolean }; url: string } | null = null;
   /** 내 캐릭터를 감싸는 그룹: 계단 위에서 높이만 바꾼다 */
   private playerLift = new THREE.Group();
   private npcViews: PersonView[] = [];
@@ -209,6 +241,12 @@ export class CityRenderer {
   /** 행복빌라 현관 양문 · 로비 안쪽 양문 */
   private villaDoor: DoorControl | null = null;
   private lobbyDoor!: DoorControl;
+  /** 집 현관문 · 가게 안쪽 유리문 · 거리의 가게 문 (POI id → 문) · 반장실 문 */
+  private homeDoor: THREE.Group | null = null;
+  private storeDoor: DoorControl | null = null;
+  private shopDoors = new Map<string, DoorControl>();
+  private officeDoor: THREE.Group | null = null;
+  private officeOpen = 0;
   /** 행복빌라 내 집 창: 바깥에서 실제 방이 보인다 (포털) */
   private portal: RoomPortal | null = null;
   /** 행복빌라 다른 집들의 베란다 창 (호수 → 창). 내 집 자리 창은 포털이 대신한다 */
@@ -228,6 +266,8 @@ export class CityRenderer {
   private treeKit = new TreeKit();
   /** 횡단보도·펜스·신호등 */
   private traffic: TrafficProps | null = null;
+  /** 내 애완동물 모델 (펫 id → 모델) */
+  private petViews = new Map<string, { model: PetModel; species: string; phase: number }>();
   private buildings: BuildingView[] = [];
   private windowMats: (THREE.MeshStandardMaterial | THREE.MeshToonMaterial)[] = [];
   /** 도시 키트 건물 재질 (밤에 은은하게) */
@@ -239,6 +279,10 @@ export class CityRenderer {
   /** 화면 분위기 (블룸·색감·톤 매핑) 와 그라데이션 하늘 */
   private fx!: LookFx;
   private sky = new SkyDome();
+  /** 비 · 눈 · 번개 */
+  private weatherFx!: WeatherFx;
+  private weather: WeatherState = weatherAt(1, 0);
+  private _rainAt = new THREE.Vector3();
   private fxNight = 0;
   private fxDusk = 0;
   private nightGlow: THREE.Material[] = [];
@@ -261,12 +305,20 @@ export class CityRenderer {
   private facadeKit!: FacadeKit;
   private camPos = new THREE.Vector3();
   private camInit = false;
+  /** 한강 낚시: 낚싯대 · 줄 · 찌 · 물고기 */
+  private fishingView: FishingView | null = null;
+  /** 낚시 카메라로 넘어간 정도 (0~1) */
+  private fishCam = 0;
+  private _hand = new THREE.Vector3();
+  /** 코디 창 카메라 (부드럽게 따라가는 값). 코디 창이 닫혀 있으면 null */
+  private mirrorSm: { yaw: number; pitch: number; dist: number; y: number; shift: number } | null = null;
   private shownLocation: CityLocation = 'city';
   /** 마우스 휠 줌 (작을수록 가까이) */
   zoom = 1.6;
 
   constructor(canvasEl: HTMLCanvasElement, world: CityWorld) {
-    this.renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
+    // alpha: 거실 TV 화면 자리만 투명하게 뚫어서 뒤에 깔린 유튜브 플레이어가 비치게 한다
+    this.renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
     // 고해상도 화면도 1.25배까지만 (후처리·계단 방지까지 하면 그 이상은 무겁다). 느리면 자동으로 단계를 낮춘다
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.shadowMap.enabled = true;
@@ -298,7 +350,8 @@ export class CityRenderer {
     this.sparks = new SparkSystem(this.city);
     this.texts = new FloatingTexts(this.city);
 
-    this.player = createCharacter(PLAYER_LOOK);
+    this.playerUrl = bodyUrl(world.profile.body);
+    this.player = createCharacter(playerLook([], world.profile.body));
     this.player.casual = true;
     this.playerLift.add(this.player.root);
     this.city.add(this.playerLift);
@@ -317,12 +370,34 @@ export class CityRenderer {
     }
     this.buildPolice();
     this.lobbyDoor = buildLobbyScene(this.lobby).door;
+    {
+      // 반장실 문 (로비 서쪽 벽): 북쪽 끝 경첩, 반장실 쪽(-x)으로 열린다
+      const o = LOBBY.office;
+      const leaf = new THREE.Group();
+      leaf.position.set(LOBBY.hall.x0, 0, o.doorZ1);
+      leaf.rotation.y = Math.PI / 2;
+      const wood = new THREE.Mesh(new THREE.BoxGeometry(o.doorZ1 - o.doorZ0 - 0.04, 2.1, 0.05), new THREE.MeshStandardMaterial({ color: 0x7a5a3f, roughness: 0.6 }));
+      wood.position.set((o.doorZ1 - o.doorZ0) / 2, 1.05, 0);
+      wood.castShadow = true;
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.3, metalness: 0.8 }));
+      knob.position.set(o.doorZ1 - o.doorZ0 - 0.15, 1.0, 0.05);
+      leaf.add(wood, knob);
+      this.lobby.add(leaf);
+      this.officeDoor = leaf;
+    }
     this.corridorView = buildCorridorScene(this.corridor);
+    // 1인칭용 남쪽 위쪽 벽 + 천장
+    this.fpOnly.push(...fpShell(this.home, HOME.room, 0.5, 2.7, 0xf1ebe1));
+    this.fpOnly.push(...fpShell(this.lobby, LOBBY.hall, 1.0, 2.9, 0xece6da, [[-0.45, 1.45, 2.32]], LOBBY.room));
+    this.fpOnly.push(...fpShell(this.corridor, CORRIDOR.room, 0.9, 2.6, 0xe9e4da));
     this.corridorSparks = new SparkSystem(this.corridor);
     this.corridorTexts = new FloatingTexts(this.corridor);
     this.lobbySparks = new SparkSystem(this.lobby);
     this.homeSparks = new SparkSystem(this.home);
     this.homeTexts = new FloatingTexts(this.home);
+    this.storeSparks = new SparkSystem(this.store);
+    this.storeTexts = new FloatingTexts(this.store);
+    this.store.background = new THREE.Color(0x14161c);
     this.lobbyTexts = new FloatingTexts(this.lobby);
     const lobbyColors = [0x2b3a55, 0x8a2c2c, 0x3f6b4a, 0xc7a14a, 0x7a5c99, 0x5a5a5a];
     for (const c of lobbyColors) {
@@ -348,6 +423,8 @@ export class CityRenderer {
     for (const v of this.buildings) v.mats = v.mats.map(remap);
     this.windowMats = this.windowMats.map(remap);
     this.city.add(this.sky.mesh);
+    // 비·눈은 툰 재질로 바꾸지 않는다 (위에서 바꾼 뒤에 붙인다)
+    this.weatherFx = new WeatherFx(this.city);
     this.fx = new LookFx(this.renderer);
     // 지난번에 이 컴퓨터에서 쓰던 화질로 시작한다 (매번 최고 화질에서 한 단계씩 내려가며 버벅이지 않게)
     const saved = loadQuality();
@@ -379,6 +456,13 @@ export class CityRenderer {
   private raisedTo = -1;
   /** 성능 표시용: 직전 프레임의 그리기 횟수·삼각형 수 */
   private lastCalls = 0;
+  /** 거실 TV 화면 (모델 televisionModern 의 화면 안쪽 면, 집 좌표) */
+  private static TV = { x: 3.5, y: 1.155, z: 0.272, w: 1.56, h: 0.85 };
+  private tvPunch = new THREE.Scene();
+  private tvDepth = new THREE.MeshBasicMaterial({ colorWrite: false });
+  private tvCam: THREE.Camera | null = null;
+  private tvClear = new THREE.Color();
+  private _tvV = new THREE.Vector3();
   private lastTris = 0;
 
   private autoQuality(dt: number) {
@@ -461,6 +545,72 @@ export class CityRenderer {
     this.camInit = false;
   }
 
+  /**
+   * 후처리 뒤 마무리: 화면 전체를 불투명하게 하고, TV 를 켰으면 TV 화면 중 앞에 가린 것이 없는 곳만 투명하게 뚫는다.
+   * (집 장면을 깊이만 한 번 더 그린 뒤 화면 판을 깊이 비교해서 그리므로 사람·가구가 TV 앞을 지나가면 그대로 가린다)
+   */
+  private drawTvHole(on: boolean, cam: THREE.Camera) {
+    const r = this.renderer;
+    const gl = r.getContext();
+    r.setRenderTarget(null);
+    const prevAlpha = r.getClearAlpha();
+    r.getClearColor(this.tvClear);
+    r.setClearColor(0x000000, 1);
+    gl.colorMask(false, false, false, true);
+    r.clear(true, false, false);
+    gl.colorMask(true, true, true, true);
+    r.setClearColor(this.tvClear, prevAlpha);
+    this.tvCam = on ? cam : null;
+    if (!on) return;
+    if (this.tvPunch.children.length === 0) {
+      const T = CityRenderer.TV;
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(T.w, T.h),
+        new THREE.ShaderMaterial({
+          vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+          fragmentShader: 'void main() { gl_FragColor = vec4(0.0); }',
+          blending: THREE.NoBlending,
+          toneMapped: false,
+        }),
+      );
+      m.position.set(T.x, T.y, T.z);
+      this.tvPunch.add(m);
+    }
+    const auto = r.autoClear;
+    const shadows = r.shadowMap.enabled;
+    r.autoClear = false;
+    r.shadowMap.enabled = false;
+    r.clearDepth();
+    // 배경색이 있으면 three 가 화면을 지우므로 잠깐 뗀다
+    const bg = this.home.background;
+    this.home.background = null;
+    this.home.overrideMaterial = this.tvDepth;
+    r.render(this.home, cam);
+    this.home.overrideMaterial = null;
+    this.home.background = bg;
+    r.render(this.tvPunch, cam);
+    r.autoClear = auto;
+    r.shadowMap.enabled = shadows;
+  }
+
+  /** TV 화면 네 모서리의 화면 좌표 (CSS 픽셀, 왼위·오위·오아래·왼아래). TV 가 꺼져 있거나 카메라 뒤면 null */
+  tvCorners(): [number, number][] | null {
+    const cam = this.tvCam;
+    if (!cam) return null;
+    const T = CityRenderer.TV;
+    const el = this.renderer.domElement;
+    const W = el.clientWidth;
+    const H = el.clientHeight;
+    const out: [number, number][] = [];
+    for (const [sx, sy] of [[-1, 1], [1, 1], [1, -1], [-1, -1]]) {
+      const v = this._tvV.set(T.x + (sx * T.w) / 2, T.y + (sy * T.h) / 2, T.z).applyMatrix4(cam.matrixWorldInverse);
+      if (v.z > -0.05) return null;
+      v.applyMatrix4(cam.projectionMatrix);
+      out.push([((v.x + 1) / 2) * W, ((1 - v.y) / 2) * H]);
+    }
+    return out;
+  }
+
   stats() {
     const info = this.renderer.info;
     return {
@@ -500,27 +650,54 @@ export class CityRenderer {
       // 장소가 바뀐 첫 프레임엔 그림자도 바로 새로
       this.shadowTick = 0;
     }
+    this.syncBody(world);
     const sv = world.sleepView;
     const seat = world.seatAmount;
     this.player.rest =
       sv && sv.rest > 0
         ? { t: sv.rest, sit: HOME.bed.sit, lie: HOME.bed.lie }
-        : seat > 0
+        : seat > 0 && world.seat?.spot === 'sofa'
+          ? { t: seat, sit: HOME.sofa.sit, lie: HOME.sofa.lie, seatY: 0.52, sofa: world.sofaView }
+          : seat > 0
           ? { t: 0.35 * seat, sit: LOBBY.chair, lie: HOME.bed.lie, seatY: 0.52, sitLeg: 1.45, ...this.deskAttention(world) }
           : null;
+    {
+      const holder = this.player as CharacterView & { hold?: { pitch: number } | null };
+      if ('hold' in holder) holder.hold = world.fishing && world.location === 'city' ? { pitch: this.fishingView?.armPitch ?? 0.5 } : null;
+    }
     this.player.update(world.player, clock);
+    if (world.fishing || this.fishingView?.group.visible) {
+      this.fishingView ??= new FishingView(this.city);
+      const h = this.player as CharacterView & { handWorld?(out: THREE.Vector3): boolean };
+      this.fishingView.update(world.fishScene(), clock, h.handWorld?.(this._hand) ? this._hand : null);
+    }
+    // 1인칭: 내 몸은 감추고 눈높이 카메라로 (창밖 보기·잠자기 중엔 그쪽 카메라)
+    const fp = world.firstPerson && !look && !world.mirror && !(sv && sv.rest > 0) && world.seat?.spot !== 'sofa';
+    this.playerLift.visible = !fp;
+    const worn = world.outfitPreview ?? wornList(world.profile.wardrobe);
+    if (worn.join(',') !== this.outfitKey) {
+      this.outfitKey = worn.join(',');
+      this.player.setOutfit?.(worn);
+    }
+    for (const m of this.fpOnly) m.visible = fp;
+    for (const m of this.storeFp) m.visible = fp;
     {
       // 자는 동안·의자에 앉아 있는 동안은 감춘다
       const p = world.player;
       const lp = p.lerped(clock.alpha);
       const down = world.downedAt !== null;
-      this.myPlate.sprite.visible = !(sv && sv.rest > 0) && seat <= 0;
+      this.myPlate.sprite.visible = !(sv && sv.rest > 0) && seat <= 0 && !fp && !world.mirror && !world.fishing;
       this.myPlate.draw(`Lv.${world.profile.level} ${world.netName ?? '나'}${down ? ' (기절)' : ''}`, Math.max(0, p.hp), p.maxHp);
       const lift = world.stairLift(lp.x, lp.z);
       this.playerLift.position.y = lift;
       this.myPlate.sprite.position.set(lp.x, lift + lp.y + (down ? 0.9 : 2.1), lp.z);
     }
-    this.syncSleep(sv, clock.dt);
+    {
+      // 이불: 내가 자거나, 같은 집(친구 집)에서 친구가 자고 있으면
+      let rb = 0;
+      for (const r of world.remotes.values()) if (r.room === world.roomKey && r.sleep) rb = Math.max(rb, r.sleep.blanket);
+      this.syncSleep(sv, clock.dt, rb);
+    }
 
     if (view === 'city') {
       world.npcs.forEach((n, i) => {
@@ -551,17 +728,16 @@ export class CityRenderer {
           for (const w of v.wheels) w.rotation.x = a;
         }
       });
+      this.weather = world.weather;
       this.updateDayNight(world.daylight, world.minutes);
       for (const e of world.drainEvents()) {
         this.sparks.spawn(e);
         if (e.damage > 0) this.texts.spawn(String(e.damage), e.x, e.y + 0.4, e.z, e.kind === 'counter' ? '#ffb020' : '#ffffff');
       }
       for (const s of world.drainSpeech()) this.texts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
-    } else if (loc === 'lobby') {
-      this.seniorView.update(world.senior, clock);
-      const sp = world.senior.lerped(clock.alpha);
-      this.seniorPlate.draw(world.npcChat ? '💬 박 반장' : '👴 박 반장', 1, 1);
-      this.seniorPlate.sprite.position.set(sp.x, sp.y + 2.05, sp.z);
+    }
+    this.syncSenior(world, clock, loc);
+    if (loc === 'lobby') {
       this.syncPeople(world, clock, 1, this.lobbySparks, this.lobbyTexts);
     } else if (loc === 'corridor') {
       {
@@ -578,7 +754,9 @@ export class CityRenderer {
       const left = world.job?.patrol?.get(world.floor) ?? new Set<string>();
       this.corridorView.setPending(left, clock.t);
       this.syncPeople(world, clock, world.floor, this.corridorSparks, this.corridorTexts);
-    } else {
+    } else if (loc === 'store') {
+      this.syncStore(world, clock);
+    } else if (loc === 'home' && view !== 'city') {
       this.updateHomeLight(world.daylight, world.minutes);
       this.updateWallCalendar(world);
       for (const e of world.drainEvents()) {
@@ -588,6 +766,7 @@ export class CityRenderer {
       for (const s of world.drainSpeech()) this.homeTexts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
     }
     this.syncRemotes(world, clock);
+    this.syncPets(world, clock, loc);
 
     this.sparks.update(clock.dt);
     this.texts.update(clock.dt);
@@ -597,25 +776,71 @@ export class CityRenderer {
     this.lobbyTexts.update(clock.dt);
     this.corridorSparks.update(clock.dt);
     this.corridorTexts.update(clock.dt);
+    this.storeSparks.update(clock.dt);
+    this.storeTexts.update(clock.dt);
     this.updateCamera(world, clock);
+    this.updateMirrorCam(world, clock, look);
     if (look) this.updateLookCam(world);
-    const cam = look ? this.lookCam : this.camera;
-    if (loc === 'city') this.fadeOccluders(world, clock.dt);
+    else if (fp) this.updateFpCam(world, clock);
+    const cam = look || fp ? this.lookCam : this.camera;
+    if (loc === 'city') this.fadeOccluders(world, clock.dt, fp);
     if (view === 'city') {
       this.treeKit.update(clock.t);
       this.traffic?.update(world.signalSeconds);
     }
     this.sky.follow(cam);
+    if (view === 'city') {
+      // 비·눈 상자는 카메라와 플레이어 사이에 둔다 (위에서 내려다봐도 발밑까지 내린다)
+      const pp = world.player.lerped(clock.alpha);
+      this._rainAt.set((cam.position.x + pp.x) / 2, 0, (cam.position.z + pp.z) / 2);
+      this.weatherFx.update(this.weather, this._rainAt, clock.dt, this.fxNight);
+    }
     this.renderer.shadowMap.needsUpdate = this.shadowTick++ % 2 === 0;
     this.syncPortal(world, clock.dt);
     // 현관 문 · 장소가 바뀔 때 화면 암전
     this.villaDoor?.setOpen(world.villaDoorOpen);
     this.lobbyDoor.setOpen(world.lobbyDoorOpen);
+    this.syncDoors(world, clock.dt);
     this.fx.fade = world.screenFade;
     this.renderer.info.reset();
     this.fx.render(this.sceneOf(view), cam, view === 'city' ? this.fxNight : 0, view === 'city' ? this.fxDusk : 0, view !== 'city');
+    this.drawTvHole(view === 'home' && !!tvState.now, cam);
     this.lastCalls = this.renderer.info.render.calls;
     this.lastTris = this.renderer.info.render.triangles;
+  }
+
+  /** 애완동물: 지금 장소에 보이는 아이들만 그 장면에 붙여서 움직인다 */
+  private syncPets(world: CityWorld, clock: FrameClock, loc: CityLocation) {
+    const scene = this.sceneOf(loc);
+    const seen = new Set<string>();
+    for (const ps of world.pets.poses) {
+      let v = this.petViews.get(ps.pet.id);
+      if (v && v.species !== ps.pet.species) {
+        disposePet(v.model);
+        v = undefined;
+      }
+      if (!v) {
+        const sp = PET_BY_ID[ps.pet.species];
+        if (!sp) continue;
+        v = { model: buildPet(sp), species: sp.id, phase: Math.random() * 6 };
+        this.petViews.set(ps.pet.id, v);
+      }
+      const root = v.model.root;
+      if (root.parent !== scene) scene.add(root);
+      root.visible = true;
+      root.position.set(ps.x, ps.y + world.stairLift(ps.x, ps.z), ps.z);
+      root.rotation.y = ps.yaw;
+      animatePet(v.model, clock.t, ps.moving, v.phase, ps.pet.joy / 100);
+      seen.add(ps.pet.id);
+    }
+    for (const [id, v] of this.petViews) {
+      if (seen.has(id)) continue;
+      // 입양 보낸 아이는 치우고, 집에 두고 나온 아이는 감춘다
+      if (!world.pets.list.some((p) => p.id === id)) {
+        disposePet(v.model);
+        this.petViews.delete(id);
+      } else v.model.root.visible = false;
+    }
   }
 
   /** 데스크에 앉아 있을 때: 다가오는 사람이 있으면 그쪽을 보고, 없으면 휴대폰을 본다 */
@@ -637,18 +862,51 @@ export class CityRenderer {
     return { phone: look ? 0 : 1, look };
   }
 
+  /** 코디 창에서 몸(남자·여자)을 바꿨으면 새 모델을 불러와서, 다 불러온 뒤 갈아 끼운다 */
+  private syncBody(world: CityWorld) {
+    const want = bodyUrl(world.profile.body);
+    if (this.nextPlayer && this.nextPlayer.url !== want) {
+      this.nextPlayer.view.dispose?.();
+      this.nextPlayer = null;
+    }
+    if (want === this.playerUrl) return;
+    if (!this.nextPlayer) {
+      const view = createCharacter(playerLook([], world.profile.body));
+      view.casual = true;
+      this.nextPlayer = { view, url: want };
+    }
+    if (!this.nextPlayer.view.loaded) return;
+    this.playerLift.remove(this.player.root);
+    this.player.dispose?.();
+    this.player = this.nextPlayer.view;
+    this.playerUrl = want;
+    this.nextPlayer = null;
+    this.playerLift.add(this.player.root);
+    this.outfitKey = ''; // 새 몸에 코디를 다시 입힌다
+  }
+
   /** 친구 캐릭터: 같은 곳에 있는 친구만 보인다. 나간 친구는 치운다 */
   private syncRemotes(world: CityWorld, clock: FrameClock) {
     const room = world.roomKey;
     const sc = this.sceneOf(world.location);
     for (const r of world.remotes.values()) {
       let v = this.remoteViews.get(r.id);
+      const url = bodyUrl(r.body);
+      // 친구가 몸(남자·여자)을 바꿨으면 새로 만든다
+      if (v && v.url !== url) {
+        v.lift.remove(v.view.root);
+        v.view.dispose?.();
+        const view = createCharacter({ kind: 'vrm', url, fallback: HEROINE.azure, tint: remoteTint(r.id) });
+        view.casual = true;
+        v.lift.add(view.root);
+        Object.assign(v, { view, url, outfit: undefined });
+      }
       if (!v) {
-        const view = createCharacter({ kind: 'vrm', url: '/models/heroine.vrm', fallback: HEROINE.azure, tint: remoteTint(r.id) });
+        const view = createCharacter({ kind: 'vrm', url, fallback: HEROINE.azure, tint: remoteTint(r.id) });
         view.casual = true;
         const lift = new THREE.Group();
         lift.add(view.root);
-        v = { view, plate: new Nameplate(false), lift };
+        v = { view, plate: new Nameplate(false), lift, url };
         this.remoteViews.set(r.id, v);
       }
       if (v.lift.parent !== sc) sc.add(v.lift);
@@ -656,11 +914,38 @@ export class CityRenderer {
       const show = r.room === room;
       v.view.root.visible = show;
       v.plate.sprite.visible = show;
-      if (!show) continue;
+      const fishScene = show ? world.remoteFishScene(r) : null;
+      if (!show) {
+        if (v.fish?.group.visible) v.fish.update(null, clock, null);
+        continue;
+      }
+      const ok = (r.outfit ?? []).join(',');
+      if (v.outfit !== ok) {
+        v.outfit = ok;
+        v.view.setOutfit?.(r.outfit ?? []);
+      }
       const f = r.fighter;
+      // 친구가 경비 데스크에 앉아 있거나 소파에 누워 있으면 그 자세로
+      const sv = world.remoteSeatView(r);
+      v.view.rest = r.sleep
+        ? { t: r.sleep.rest, sit: HOME.bed.sit, lie: HOME.bed.lie }
+        : !sv
+        ? null
+        : sv.spot === 'sofa'
+          ? { t: sv.amt, sit: HOME.sofa.sit, lie: HOME.sofa.lie, seatY: 0.52, sofa: sv.sofa }
+          : { t: 0.35 * sv.amt, sit: LOBBY.chair, lie: HOME.bed.lie, seatY: 0.52, sitLeg: 1.45, phone: 1, look: null };
+      // 낚시: 낚싯대를 든 자세 + 낚싯대·줄·찌·물고기 (내 낚시와 같은 그림)
+      const holder = v.view as CharacterView & { hold?: { pitch: number } | null; handWorld?(out: THREE.Vector3): boolean };
+      if ('hold' in holder) holder.hold = fishScene ? { pitch: v.fish?.armPitch ?? 0.5 } : null;
       v.view.update(f, clock);
+      if (fishScene || v.fish?.group.visible) {
+        v.fish ??= new FishingView(this.city);
+        v.fish.update(fishScene, clock, holder.handWorld?.(this._hand) ? this._hand : null);
+      }
       const lp = f.lerped(clock.alpha);
       v.lift.position.y = world.stairLift(lp.x, lp.z);
+      // 자는 동안은 이름표를 감춘다 (내 이름표와 같이)
+      if (r.sleep && r.sleep.rest > 0) v.plate.sprite.visible = false;
       const down = f.hp <= 0;
       v.plate.draw(`Lv.${r.level} ${r.name}${down ? ' (기절)' : ''}`, Math.max(0, f.hp), f.maxHp);
       v.plate.sprite.position.set(lp.x, v.lift.position.y + lp.y + (down ? 0.9 : 2.1), lp.z);
@@ -671,17 +956,186 @@ export class CityRenderer {
       v.view.dispose?.();
       v.plate.sprite.removeFromParent();
       v.plate.dispose();
+      v.fish?.dispose();
       this.remoteViews.delete(id);
+    }
+    this.syncRemotePets(world, clock);
+  }
+
+  /** 친구 곁의 펫: 친구 화면에 보이는 그대로 (같은 곳에 있을 때만) */
+  private syncRemotePets(world: CityWorld, clock: FrameClock) {
+    const room = world.roomKey;
+    const sc = this.sceneOf(world.location);
+    const seen = new Set<string>();
+    for (const r of world.remotes.values()) {
+      if (r.room !== room) continue;
+      for (const p of r.pets) {
+        const key = `${r.id}:${p.i}`;
+        let v = this.remotePetViews.get(key);
+        if (v && v.species !== p.sp) {
+          disposePet(v.model);
+          this.remotePetViews.delete(key);
+          v = undefined;
+        }
+        if (!v) {
+          const sp = PET_BY_ID[p.sp];
+          if (!sp) continue;
+          v = { model: buildPet(sp), species: sp.id, phase: Math.random() * 6 };
+          this.remotePetViews.set(key, v);
+        }
+        const root = v.model.root;
+        if (root.parent !== sc) sc.add(root);
+        root.visible = true;
+        root.position.set(p.x, p.y + world.stairLift(p.x, p.z), p.z);
+        root.rotation.y = p.yaw;
+        animatePet(v.model, clock.t, p.mv, v.phase, p.j / 100);
+        seen.add(key);
+      }
+    }
+    for (const [key, v] of this.remotePetViews) {
+      if (seen.has(key)) continue;
+      disposePet(v.model);
+      this.remotePetViews.delete(key);
     }
   }
 
+  /** 박 반장: 나와 같은 곳(로비·이 층 복도)에 있을 때만 그 장면에 그린다 */
+  private syncSenior(world: CityWorld, clock: FrameClock, loc: CityLocation) {
+    const ai = world.seniorAI;
+    const show = (loc === 'lobby' || loc === 'corridor') && ai.visibleTo();
+    this.seniorView.root.visible = show;
+    this.seniorPlate.sprite.visible = show;
+    if (!show) return;
+    const sc = this.sceneOf(loc);
+    if (this.seniorView.root.parent !== sc) {
+      sc.add(this.seniorView.root);
+      sc.add(this.seniorPlate.sprite);
+    }
+    this.seniorView.sit = ai.sit;
+    // 책상 일 (커피 · 컴퓨터 · 휴대폰) + 들어온 나를 쳐다보기
+    this.seniorView.desk = ai.seated ? { kind: ai.activity, t: ai.activityTime, glance: ai.glance, lookX: world.player.x, lookZ: world.player.z } : null;
+    this.seniorView.update(world.senior, clock);
+    const sp = world.senior.lerped(clock.alpha);
+    const label = world.npcChat?.npc === 'senior' ? '💬 박 반장' : ai.patrolling ? '🔦 박 반장 (순찰 중)' : '👴 박 반장';
+    this.seniorPlate.draw(label, 1, 1);
+    this.seniorPlate.sprite.position.set(sp.x, sp.y + (ai.sit > 0.5 ? 1.7 : 2.05), sp.z);
+  }
+
   private sceneOf(loc: CityLocation) {
-    return loc === 'home' ? this.home : loc === 'lobby' ? this.lobby : loc === 'corridor' ? this.corridor : this.city;
+    return loc === 'home' ? this.home : loc === 'lobby' ? this.lobby : loc === 'corridor' ? this.corridor : loc === 'store' ? this.store : this.city;
+  }
+
+  /** 거리의 가게 문: 먹거리 가게 · 펫샵 앞면에 유리 양문 (들어갈 때·나올 때 열린다) */
+  private buildShopDoors(m: CityMap) {
+    const frame = new THREE.MeshStandardMaterial({ color: 0x3a3e44, roughness: 0.3, metalness: 0.7 });
+    const handle = new THREE.MeshStandardMaterial({ color: 0xd3d6db, roughness: 0.2, metalness: 1 });
+    const glass = glassMaterial();
+    for (const poi of m.pois) {
+      if (poi.kind !== 'shop') continue;
+      // 펫샵·옷가게는 기둥 안쪽으로 들어간 유리면에 문이 있다
+      const inset = poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop';
+      const z = poi.z - 1.2 + (inset ? -0.35 : 0.08);
+      const w = inset ? 1.36 : 1.5;
+      const g = new THREE.Group();
+      this.city.add(g);
+      if (!inset) {
+        const fr = (bw: number, bh: number, x: number, y: number) => {
+          const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.1), frame);
+          b.position.set(x, y, z - 0.02);
+          g.add(b);
+        };
+        fr(0.08, 2.3, poi.x - w / 2 - 0.04, 1.15);
+        fr(0.08, 2.3, poi.x + w / 2 + 0.04, 1.15);
+        fr(w + 0.16, 0.1, poi.x, 2.3);
+        const dark = new THREE.Mesh(new THREE.PlaneGeometry(w, 2.25), new THREE.MeshBasicMaterial({ color: 0x1a1612 }));
+        dark.position.set(poi.x, 1.125, z - 0.04);
+        g.add(dark);
+      }
+      this.shopDoors.set(poi.id, swingDoors(g, poi.x, z, w, 2.25, frame, glass, handle));
+    }
+  }
+
+  /** 문들: 지나갈 때 열렸다 닫힌다. 반장실 문은 누가 가까이 오면 저절로 */
+  private syncDoors(world: CityWorld, dt: number) {
+    const ease = (t: number) => t * t * (3 - 2 * t);
+    if (this.homeDoor) this.homeDoor.rotation.y = Math.PI / 2 - 1.4 * ease(world.doorOpen('home'));
+    for (let i = 0; i < 3; i++) this.corridorView.setDoor(i, world.doorOpen(`unit:${i}`));
+    this.storeDoor?.setOpen(world.doorOpen('storeIn'));
+    for (const [id, d] of this.shopDoors) d.setOpen(world.doorOpen(`shop:${id}`));
+    if (this.officeDoor) {
+      const o = LOBBY.office;
+      const near = (x: number, z: number) => Math.hypot(x - LOBBY.hall.x0, z - o.doorZ) < 1.4;
+      const want = world.location === 'lobby' && (near(world.player.x, world.player.z) || (world.seniorAI.visibleTo() && near(world.senior.x, world.senior.z))) ? 1 : 0;
+      this.officeOpen += (want - this.officeOpen) * Math.min(1, dt * 6);
+      this.officeDoor.rotation.y = Math.PI / 2 + 1.45 * ease(this.officeOpen);
+    }
+  }
+
+  /** 가게 안: 처음 들어간 가게면 장면을 새로 짓고, 주인·놀이터 아이들을 움직인다 */
+  private syncStore(world: CityWorld, clock: FrameClock) {
+    const L = world.store;
+    if (!L) return;
+    // 펫샵은 날마다 아이들이 바뀌니 날짜도 같이 본다
+    const key = L.kind === 'pet' ? `${L.sign}|${world.day}` : L.sign;
+    if (this.storeSign !== key) {
+      if (this.storeRoot) disposeObject(this.storeRoot);
+      this.storeRoot?.removeFromParent();
+      for (const v of this.penViews.values()) disposePet(v.model);
+      this.penViews.clear();
+      this.storeScn = buildStoreScene(L, world.pen?.animals.map((a) => a.stock) ?? []);
+      this.storeRoot = this.storeScn.group;
+      this.storeFp = fpShell(this.storeRoot, L.room, 1.0, 3.0, L.theme.wall, [[-0.78, 0.78, 2.34]]);
+      this.storeDoor = this.storeScn.door;
+      this.store.add(this.storeRoot);
+      this.storeSign = key;
+      if (!this.keeperView) {
+        this.keeperView = new PersonView(5, { tint: 0xf0f0f0 });
+        this.store.add(this.keeperView.root);
+      }
+    }
+    this.keeperView?.update(world.keeper, clock);
+    this.storeScn?.tick?.(clock.t, L.kind === 'fishing' ? world.fishingState.dex : undefined);
+    // 펫샵: 진열대엔 남은 개수만큼, 분양된 아이의 이름표는 치운다
+    if (this.storeScn && L.kind === 'pet') {
+      for (const [id, list] of this.storeScn.goods) {
+        const left = world.goodsLeft(id);
+        list.forEach((o, i) => (o.visible = i < left));
+      }
+      for (const [id, card] of this.storeScn.cards) card.visible = !!world.pen?.animals.some((a) => a.stock.id === id);
+    }
+    // 놀이터 아이들 (분양된 아이는 치운다)
+    const seen = new Set<string>();
+    for (const a of world.pen?.animals ?? []) {
+      let v = this.penViews.get(a.stock.id);
+      if (!v) {
+        const sp = PET_BY_ID[a.stock.species];
+        if (!sp) continue;
+        v = { model: buildPet(sp, a.stock.coat), phase: Math.random() * 6 };
+        // 분양 아이들은 아직 아기 (부스에 맞게 작게)
+        v.model.root.scale.setScalar(Math.min(0.8, 0.85 / sp.size) * sp.size);
+        this.store.add(v.model.root);
+        this.penViews.set(a.stock.id, v);
+      }
+      v.model.root.position.set(a.x, a.y + 0.015, a.z);
+      v.model.root.rotation.y = a.yaw;
+      animatePet(v.model, clock.t, a.moving, v.phase, 0.8);
+      seen.add(a.stock.id);
+    }
+    for (const [id, v] of this.penViews) {
+      if (seen.has(id)) continue;
+      disposePet(v.model);
+      this.penViews.delete(id);
+    }
+    for (const e of world.drainEvents()) {
+      this.storeSparks.spawn(e);
+      if (e.damage > 0) this.storeTexts.spawn(String(e.damage), e.x, e.y + 0.4, e.z, e.kind === 'counter' ? '#ffb020' : '#ffffff');
+    }
+    for (const s of world.drainSpeech()) this.storeTexts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
   }
 
   /** 로비: 지나가는 주민·강도 모델과 이름표, 타격 이펙트 */
   private syncPeople(world: CityWorld, clock: FrameClock, place: number, sparks: SparkSystem, texts: FloatingTexts) {
-    const people = (world.job?.people ?? []).filter((p) => p.where === place);
+    const people = world.shownPeople.filter((p) => p.where === place);
     this.lobbyViews.forEach((v, i) => {
       const person = people.find((p) => p.slot === i);
       v.root.visible = !!person;
@@ -719,13 +1173,18 @@ export class CityRenderer {
 
   dispose() {
     this.fx.dispose();
+    this.weatherFx.dispose();
     this.groundKit.dispose();
     this.facadeKit.dispose();
     this.carKit.dispose();
     this.treeKit.dispose();
     this.traffic?.dispose();
+    for (const v of this.petViews.values()) disposePet(v.model);
+    this.petViews.clear();
     this.portal?.dispose();
+    this.fishingView?.dispose();
     this.player.dispose?.();
+    this.nextPlayer?.view.dispose?.();
     this.sparks.dispose();
     this.texts.dispose();
     this.lobbySparks.dispose();
@@ -735,12 +1194,18 @@ export class CityRenderer {
     for (const v of this.remoteViews.values()) {
       v.view.dispose?.();
       v.plate.dispose();
+      v.fish?.dispose();
     }
+    for (const v of this.remotePetViews.values()) disposePet(v.model);
+    this.remotePetViews.clear();
     this.corridorSparks.dispose();
+    this.storeSparks.dispose();
+    this.storeTexts.dispose();
+    for (const v of this.penViews.values()) disposePet(v.model);
     this.corridorTexts.dispose();
     this.lobbyTexts.dispose();
     for (const p of [...this.npcPlates, ...this.lobbyPlates, this.seniorPlate]) p.dispose();
-    for (const s of [this.city, this.home, this.lobby, this.corridor]) disposeObject(s);
+    for (const s of [this.city, this.home, this.lobby, this.corridor, this.store]) disposeObject(s);
     // 그림자 지도도 GPU 그림이다
     this.sun.shadow.map?.dispose();
     checkLeaks(this.renderer, '도시');
@@ -751,6 +1216,46 @@ export class CityRenderer {
   private untrack = trackRenderer('도시');
 
   // ───────────────────────── 카메라 · 낮밤 ─────────────────────────
+
+  /**
+   * 코디 창: 게임 속 내 캐릭터를 그대로 빙 둘러본다 (따로 그리지 않아서 보이는 모습이 똑같다).
+   * 화면 오른쪽은 옷장 창이 가리므로 시야를 옆으로 밀어 캐릭터를 왼쪽 가운데에 둔다.
+   */
+  private updateMirrorCam(world: CityWorld, clock: FrameClock, look: boolean) {
+    const m = world.mirror;
+    if (!m || look) {
+      if (this.mirrorSm) {
+        this.mirrorSm = null;
+        this.camera.clearViewOffset();
+      }
+      return;
+    }
+    const s = (this.mirrorSm ??= { ...m });
+    const k = smooth(0.15, clock.dt);
+    s.yaw += (m.yaw - s.yaw) * k;
+    s.pitch += (m.pitch - s.pitch) * k;
+    s.dist += (m.dist - s.dist) * k;
+    s.y += (m.y - s.y) * k;
+    s.shift += (m.shift - s.shift) * k;
+    const p = world.player.lerped(clock.alpha);
+    const ty = world.stairLift(p.x, p.z) + s.y;
+    const a = Math.atan2(p.fx, p.fz) + s.yaw;
+    const cp = Math.cos(s.pitch);
+    let cx = p.x + Math.sin(a) * cp * s.dist;
+    let cz = p.z + Math.cos(a) * cp * s.dist;
+    // 실내: 벽 밖으로 나가면 벽에 가려서 안쪽에 붙잡는다
+    const b = world.indoorBounds();
+    if (b) {
+      cx = Math.max(b.x0 + 0.15, Math.min(b.x1 - 0.15, cx));
+      cz = Math.max(b.z0 + 0.15, Math.min(b.z1 - 0.15, cz));
+    }
+    this.camera.position.set(cx, ty + Math.sin(s.pitch) * s.dist, cz);
+    this.camera.lookAt(p.x, ty, p.z);
+    this.camera.near = 0.05;
+    const size = this.renderer.getSize(this._mirrorSize);
+    this.camera.setViewOffset(size.x, size.y, size.x * s.shift, 0, size.x, size.y);
+  }
+  private _mirrorSize = new THREE.Vector2();
 
   private updateCamera(world: CityWorld, clock: FrameClock) {
     const p = world.player.lerped(clock.alpha);
@@ -771,6 +1276,12 @@ export class CityRenderer {
       // 옆 위에서 내려다보는 각도로 (발치의 TV 가 가리지 않게)
       off.lerp(new THREE.Vector3(-3.0, 4.4, 2.4), k);
     }
+    this.fishCam += ((world.fishing && !home ? 1 : 0) - this.fishCam) * smooth(0.05, clock.dt);
+    const fk = this.fishCam * this.fishCam * (3 - 2 * this.fishCam);
+    if (fk > 0.001) {
+      off.lerp(FISH_CAM, fk);
+      fz += 2.6 * fk;
+    }
     const want = new THREE.Vector3(fx, 0, fz).add(off);
     if (!this.camInit) {
       this.camPos.copy(want);
@@ -785,6 +1296,12 @@ export class CityRenderer {
       const a = 0.025 * Math.min(5, world.hitstop);
       this.camera.position.x += (Math.random() - 0.5) * a;
       this.camera.position.y += (Math.random() - 0.5) * a;
+    }
+    // 깊이 정밀도는 near 에 비례한다: 카메라가 멀 땐 near 를 키워 먼 벽·바닥이 깜박이며 깨지는 현상(z-fighting)을 막는다
+    const near = home ? 0.1 : Math.min(0.6, Math.max(0.1, off.length() * 0.03));
+    if (Math.abs(near - this.camera.near) > 0.01) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
     }
 
     if (!home) this.placeSun(p.x, p.z);
@@ -830,18 +1347,27 @@ export class CityRenderer {
     }
     const dusk = Math.max(0, 1 - Math.abs(h - 18.5) / 1.5) + Math.max(0, 1 - Math.abs(h - 6.3) / 1.2) * 0.6;
     // 그라데이션 하늘, 안개는 지평선 색에 맞춘다
-    const horizon = this.sky.update(daylight, Math.min(1, dusk), this.sunDir.clone().normalize());
+    const w = this.weather;
+    const flash = this.weatherFx?.flash ?? 0;
+    const horizon = this.sky.update(daylight, Math.min(1, dusk), this.sunDir.clone().normalize(), w.cloud, flash);
     (this.city.background as THREE.Color).copy(horizon);
-    this.city.fog!.color.copy(horizon);
+    const fog = this.city.fog as THREE.Fog;
+    fog.color.copy(horizon);
+    // 비·눈·안개: 멀리가 뿌옇게 (맑은 날 120~650m → 짙은 안개 날 8~110m)
+    const haze = Math.min(1, w.fog + w.rain * 0.25 + w.snow * 0.3);
+    fog.near = 120 - haze * 112;
+    fog.far = 650 - haze * 540;
     this.fxNight = 1 - daylight;
-    this.fxDusk = Math.min(1, dusk);
+    this.fxDusk = Math.min(1, dusk) * (1 - w.cloud * 0.7);
     // 밤엔 해 대신 푸른 달빛 + 은은한 하늘빛 (길이 새까맣지 않게)
     const moon = 1 - daylight;
-    this.sun.intensity = 0.45 * moon + daylight * 2.2;
-    this.sun.color.set(0xffffff).lerp(new THREE.Color(0xffa060), Math.min(1, dusk)).lerp(new THREE.Color(0x9fb4ff), moon);
+    // 구름이 끼면 햇빛(그림자)이 약해지고 하늘빛이 그만큼 고르게 퍼진다
+    const shade = 1 - w.cloud * 0.75;
+    this.sun.intensity = (0.45 * moon + daylight * 2.2) * shade;
+    this.sun.color.set(0xffffff).lerp(new THREE.Color(0xffa060), this.fxDusk).lerp(new THREE.Color(0x9fb4ff), moon);
     // 밤에도 나무·건물이 새까만 덩어리로 보이지 않게 하늘빛을 넉넉히
-    this.hemi.intensity = 0.95 + daylight * 0.25;
-    this.hemi.color.set(0xdff1ff).lerp(new THREE.Color(0x6f7fb8), moon);
+    this.hemi.intensity = 0.95 + daylight * 0.25 - w.cloud * daylight * 0.1 + flash * 2.2;
+    this.hemi.color.set(0xdff1ff).lerp(new THREE.Color(0x6f7fb8), moon).lerp(new THREE.Color(0xc9ced6), w.cloud * daylight * 0.6);
     const night = 1 - daylight;
     // 툰 재질은 발광이 그대로 더해져서 예전보다 낮게
     for (const m of this.windowMats) m.emissiveIntensity = night * 0.55;
@@ -917,9 +1443,9 @@ export class CityRenderer {
   }
 
   /** 잠자기 연출: 이불을 발끝부터 덮고, 불이 꺼진다 */
-  private syncSleep(sv: CityWorld['sleepView'], dt: number) {
+  private syncSleep(sv: CityWorld['sleepView'], dt: number, friendBlanket = 0) {
     this.sleepDark += ((sv?.dark ?? 0) - this.sleepDark) * smooth(0.15, dt);
-    const b = sv?.blanket ?? 0;
+    const b = Math.max(sv?.blanket ?? 0, friendBlanket);
     this.duvet.visible = b > 0.01;
     // 발끝(z 큰 쪽)에서 가슴까지 당겨 덮는다
     const D = 1.8;
@@ -929,14 +1455,14 @@ export class CityRenderer {
   }
 
   /** 카메라와 플레이어 사이를 가리는 건물은 반투명하게 */
-  private fadeOccluders(world: CityWorld, dt: number) {
+  private fadeOccluders(world: CityWorld, dt: number, off = false) {
     const p = world.player;
     const cam = this.camera.position;
     for (const v of this.buildings) {
       const b = v.b;
       // 카메라→플레이어 선분이 건물 상자(높이 포함)를 지나는지 대략 판정
       let hit = false;
-      for (let k = 1; k < 10 && !hit; k++) {
+      for (let k = 1; k < 10 && !hit && !off; k++) {
         const u = k / 10;
         const x = cam.x + (p.x - cam.x) * u;
         const y = cam.y + (1 - cam.y) * u;
@@ -973,7 +1499,7 @@ export class CityRenderer {
       const seg = new THREE.Mesh(new THREE.PlaneGeometry(2.4, len + 0.6), track);
       seg.rotation.x = -Math.PI / 2;
       seg.rotation.z = -Math.atan2(b.x - a.x, b.z - a.z);
-      seg.position.set((a.x + b.x) / 2, 0.05, (a.z + b.z) / 2);
+      seg.position.set((a.x + b.x) / 2, 0.07, (a.z + b.z) / 2);
       seg.receiveShadow = true;
       s.add(seg);
     }
@@ -1147,11 +1673,12 @@ export class CityRenderer {
     };
 
     // 바닥: 도시(잔디) · 블록 둘레(보도블록) · 블록 안쪽 (공원·아파트는 잔디, 나머지는 광장 보도블록)
-    ground('grass', 1600, 1600, 0, 0, -0.02, 0xb8bcae);
+    // 한강(강둑 남쪽)은 비워 둔다: 덮으면 1.2m 아래 강물이 가려진다
+    ground('grass', 1600, 800 + m.riverZ, 0, (m.riverZ - 800) / 2, -0.02, 0xb8bcae);
     for (const b of m.blocks) {
       ground('sidewalk', b.x1 - b.x0, b.z1 - b.z0, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 0.02);
       const green = b.kind === 'park' || b.kind === 'apartment' || b.kind === 'trail';
-      ground(green ? 'grass' : 'sidewalk', b.x1 - b.x0 - 6, b.z1 - b.z0 - 6, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 0.03, green ? 0xffffff : 0xd9d6d0);
+      ground(green ? 'grass' : 'sidewalk', b.x1 - b.x0 - 6, b.z1 - b.z0 - 6, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2, 0.045, green ? 0xffffff : 0xd9d6d0);
     }
 
     // 도로 + 차선
@@ -1183,6 +1710,7 @@ export class CityRenderer {
     }
     // 횡단보도 · 정지선 · 길가 펜스 · 신호등 (사람은 횡단보도로만 건넌다)
     this.traffic = new TrafficProps(m);
+    this.buildShopDoors(m);
     s.add(this.traffic.group);
     const inst = (geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[], shadow = false) => {
       const im = new THREE.InstancedMesh(geo, mat, list.length);
@@ -1229,6 +1757,8 @@ export class CityRenderer {
       arch.rotation.y = Math.PI / 2;
       s.add(arch);
     }
+    // 한강 강둑 석축 · 낚시 데크
+    buildFishDecks(s, m);
     // 강변북로 방음벽
     const wall = new THREE.Mesh(new THREE.BoxGeometry(1600, 1.2, 0.3), new THREE.MeshStandardMaterial({ color: 0x9fb7a8 }));
     wall.position.set(0, 0.6, EXPRESSWAY_Z + 7.3);
@@ -1449,7 +1979,7 @@ export class CityRenderer {
     // 레드 카펫 + 입구 양옆 금색 기둥 조명
     const carpet = new THREE.Mesh(new THREE.PlaneGeometry(3, 3.2), new THREE.MeshStandardMaterial({ color: 0x9e1b2f, roughness: 0.9 }));
     carpet.rotation.x = -Math.PI / 2;
-    carpet.position.set(b.x, 0.03, front + 1.6);
+    carpet.position.set(b.x, 0.065, front + 1.6);
     carpet.receiveShadow = true;
     this.city.add(carpet);
     for (const dx of [-1.9, 1.9]) {
@@ -1517,7 +2047,28 @@ export class CityRenderer {
   }
 
   /** 창밖 내다보기 카메라: 창문 바로 앞에서 바깥(창의 정면)을 본다. 방향키로 좌우·위아래 */
+  /** 1인칭 카메라: 눈높이, 보는 방향 = fpYaw·fpPitch */
+  private updateFpCam(world: CityWorld, clock: FrameClock) {
+    const p = world.player.lerped(clock.alpha);
+    const fx = Math.sin(world.fpYaw);
+    const fz = Math.cos(world.fpYaw);
+    const seat = world.seatAmount;
+    const down = world.downedAt !== null ? 1.1 : 0;
+    this.lookCam.position.set(p.x + fx * 0.12, world.stairLift(p.x, p.z) + p.y + 1.58 - seat * 0.45 - down, p.z + fz * 0.12);
+    const cp = Math.cos(world.fpPitch);
+    const d = this._lookDir.set(fx * cp, Math.sin(world.fpPitch), fz * cp);
+    this.lookCam.lookAt(this.lookCam.position.clone().add(d));
+    this.lookCam.fov = 72;
+    this.lookCam.aspect = this.camera.aspect;
+    this.lookCam.far = this.camera.far;
+    this.lookCam.near = 0.08;
+    this.lookCam.updateProjectionMatrix();
+    this.lookCam.updateMatrixWorld();
+    if (world.location === 'city') this.placeSun(p.x + fx * 15, p.z + fz * 15);
+  }
+
   private updateLookCam(world: CityWorld) {
+    this.lookCam.fov = 62;
     const g = this.portal!.group;
     g.updateWorldMatrix(true, false);
     this.lookCam.position.copy(g.localToWorld(new THREE.Vector3(0, -0.05, 0.35)));
@@ -1527,6 +2078,7 @@ export class CityRenderer {
     this.lookCam.lookAt(this.lookCam.position.clone().add(d));
     this.lookCam.aspect = this.camera.aspect;
     this.lookCam.far = this.camera.far;
+    this.lookCam.near = 0.2;
     this.lookCam.updateProjectionMatrix();
     this.lookCam.updateMatrixWorld();
     this.placeSun(this.lookCam.position.x + d.x * 20, this.lookCam.position.z + d.z * 20);
@@ -1710,12 +2262,6 @@ export class CityRenderer {
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     s.add(floor);
-    const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.2), std(0xd9c7e8, 1));
-    rug.rotation.x = -Math.PI / 2;
-    rug.position.set(0.3, 0.01, 1.2);
-    rug.receiveShadow = true;
-    s.add(rug);
-    void placeFurniture(s, 'rugRectangle', { x: 0.3, z: 1.2, w: 3.2, d: 2.2, h: 0.03 }, rug);
 
     // 벽: 북·서·동. 남쪽(카메라 쪽)은 허리 높이만 남겨 안이 들여다보이게
     const wall = std(0xf1ebe1, 0.95);
@@ -1776,35 +2322,34 @@ export class CityRenderer {
     winLight.position.set((winX0 + winX1) / 2, 2.2, z0 - 2);
     winLight.target.position.set(0, 0, 1);
     winLight.castShadow = true;
+    // 비스듬히 들어오는 빛이라 그림자 줄무늬가 생기지 않게
+    winLight.shadow.normalBias = 0.03;
     s.add(winLight, winLight.target);
     this.homeWindow = { g: winG, tex: winTex, light: winLight };
-    // 커튼
-    for (const cx of [winX0 - 0.25, winX1 + 0.25]) box(0.45, H - 0.15, 0.08, std(0x9bb3c9, 1), cx, (H - 0.15) / 2 + 0.02, z0 + 0.15);
 
     // 현관문
-    box(0.08, 2.1, 0.95, std(0x5a3b28, 0.6), x0 + 0.06, 1.05, 2.5);
+    {
+      // 남쪽 끝 경첩에 매달려 방 안쪽(+x)으로 열린다
+      const leaf = new THREE.Group();
+      leaf.position.set(x0 + 0.06, 0, 2.5 + 0.475);
+      leaf.rotation.y = Math.PI / 2;
+      s.add(leaf);
+      box(0.95, 2.1, 0.08, std(0x5a3b28, 0.6), 0.475, 1.05, 0, leaf);
+      box(0.05, 0.05, 0.1, std(0xd4af37, 0.3, 0.8), 0.82, 1.0, 0.06, leaf);
+      this.homeDoor = leaf;
+    }
     const exitRing = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.6, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffc04d, transparent: true, opacity: 0.7 }));
     exitRing.position.set(-4.3, 0.02, 2.5);
     s.add(exitRing);
 
-    // 침대 (동북쪽)
-    // 상자로 먼저 그려 두고, 가구 모델이 불러와지면 바꿔 낀다
-    const bed = new THREE.Group();
-    s.add(bed);
-    void placeFurniture(s, 'bedDouble', { x: 3.6, z: -2.4, w: 2.6, d: 3.0, h: 1.05 }, bed);
-    box(2.6, 0.35, 3.0, std(0x8a6a4a), 3.6, 0.175, -2.4, bed);
-    box(2.45, 0.25, 2.85, std(0xf5f5f0, 1), 3.6, 0.47, -2.4, bed);
-    box(2.47, 0.12, 1.9, std(0x7fa6d6, 1), 3.6, 0.6, -1.9, bed); // 이불
-    box(0.9, 0.15, 0.5, std(0xffffff, 1), 3.1, 0.66, -3.5, bed);
-    box(0.9, 0.15, 0.5, std(0xffffff, 1), 4.1, 0.66, -3.5, bed);
-    box(2.6, 1.1, 0.12, std(0x6b4f38), 3.6, 0.55, -3.92, bed); // 헤드보드
-    const stand = new THREE.Group();
-    s.add(stand);
-    box(0.5, 0.5, 0.45, std(0x8a6a4a), 2.0, 0.25, -3.6, stand); // 협탁
-    void placeFurniture(s, 'cabinetBedDrawerTable', { x: 2.0, z: -3.6, w: 0.5, d: 0.45, h: 0.5 }, stand);
+    // 가구 (직접 만든 모델 — 침대·책상·주방·냉장고·TV·테이블·신발장·화분·러그·커튼·액자)
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe2a8 });
     this.bedLamp = lampMat;
-    box(0.25, 0.3, 0.25, lampMat, 2.0, 0.65, -3.6);
+    furnishHome(s, { lampMat, win: { x0: winX0, x1: winX1, z: z0 }, H, eastX: x1 - 0.075 });
+    // 소파는 TV 쪽(북쪽 = -z)을 본다. 직접 만든 모델이라 앉고 눕는 자세와 쿠션이 딱 맞는다
+    const sofa = buildSofa();
+    sofa.position.set(3.4, 0, 3.4);
+    s.add(sofa);
     // 북쪽 벽 달력
     {
       const cv = document.createElement('canvas');
@@ -1822,71 +2367,10 @@ export class CityRenderer {
       this.wallCal = { g, tex: t, key: '' };
     }
     // 자는 동안 덮는 두툼한 이불 (평소엔 숨김)
-    this.duvet = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.2, 1.8), std(0x8fb4e0, 1));
+    this.duvet = sleepDuvet();
     this.duvet.position.set(3.55, 0.86, -1.85);
-    this.duvet.castShadow = this.duvet.receiveShadow = true;
     this.duvet.visible = false;
     s.add(this.duvet);
-
-    // 책상 + 모니터 + 키보드 + 의자 (창 아래)
-    const deskBox = new THREE.Group();
-    s.add(deskBox);
-    box(2.6, 0.06, 0.75, std(0xe8e2d6), -0.9, 0.74, -3.57, deskBox);
-    for (const lx of [-2.1, 0.3]) box(0.06, 0.74, 0.7, std(0x333333), lx, 0.37, -3.57, deskBox);
-    box(0.9, 0.5, 0.04, std(0x111111, 0.3), -0.9, 1.1, -3.75, deskBox);
-    box(0.5, 0.02, 0.18, std(0x2a2a2a), -0.9, 0.78, -3.4, deskBox);
-    void placeFurniture(s, 'desk', { x: -0.9, z: -3.57, w: 2.4, d: 0.75, h: 0.76 }, deskBox).then(() => {
-      void placeFurniture(s, 'computerScreen', { x: -0.9, z: -3.72, y: 0.76, w: 0.95, d: 0.2 });
-      void placeFurniture(s, 'computerKeyboard', { x: -0.9, z: -3.4, y: 0.76, w: 0.5, d: 0.16, h: 0.03 });
-    });
-    const chairBox = new THREE.Group();
-    s.add(chairBox);
-    box(0.5, 0.08, 0.5, std(0x2b2b2b), -0.9, 0.48, -2.85, chairBox);
-    box(0.5, 0.6, 0.06, std(0x2b2b2b), -0.9, 0.82, -2.6, chairBox);
-    // 의자는 책상 쪽(북쪽)을 본다
-    void placeFurniture(s, 'chairDesk', { x: -0.9, z: -2.8, w: 0.6, d: 0.6, h: 1.1, rotY: Math.PI }, chairBox);
-
-    // 주방 (서쪽 벽) + 냉장고
-    const kitchen = new THREE.Group();
-    s.add(kitchen);
-    box(0.75, 0.9, 3.3, std(0xf7f7f7), -4.58, 0.45, -2.25, kitchen);
-    box(0.8, 0.05, 3.35, std(0x6d6d6d, 0.4), -4.58, 0.92, -2.25, kitchen);
-    // 조리대 모듈 4칸: 가스레인지 · 수납장 · 수납장 · 싱크 (방 안쪽 = +x 를 본다)
-    const modules: [string, number][] = [['kitchenStove', -3.5], ['kitchenCabinet', -2.68], ['kitchenCabinet', -1.86], ['kitchenSink', -1.04]];
-    void Promise.all(modules.map(([n, z]) => placeFurniture(s, n, { x: -4.58, z, w: 0.75, d: 0.82, h: 0.92, rotY: Math.PI / 2 }))).then(() => kitchen.removeFromParent());
-    box(0.4, 0.7, 3.3, std(0xf7f7f7), -4.75, 2.05, -2.25); // 상부장
-    const fridge = new THREE.Group();
-    s.add(fridge);
-    box(0.8, 1.85, 0.85, std(0xc8ccd0, 0.3, 0.6), -4.55, 0.925, -0.05, fridge);
-    void placeFurniture(s, 'kitchenFridgeLarge', { x: -4.55, z: -0.05, w: 0.8, d: 0.85, h: 1.9, rotY: Math.PI / 2 }, fridge);
-
-    // TV + 소파 + 테이블
-    const tvBox = new THREE.Group();
-    s.add(tvBox);
-    box(2.1, 0.45, 0.42, std(0x3a2c22), 3.5, 0.225, 0.22, tvBox);
-    box(1.7, 0.95, 0.06, std(0x101010, 0.3), 3.5, 1.0, 0.25, tvBox);
-    // TV 장 + TV (소파 쪽 = +z 를 본다)
-    void placeFurniture(s, 'cabinetTelevision', { x: 3.5, z: 0.22, w: 2.1, d: 0.45, h: 0.55 }, tvBox).then(() =>
-      placeFurniture(s, 'televisionModern', { x: 3.5, z: 0.22, y: 0.55, w: 1.6, d: 0.3, h: 1.05 }),
-    );
-    const sofaBox = new THREE.Group();
-    s.add(sofaBox);
-    box(2.9, 0.42, 1.0, std(0x7d8590, 1), 3.4, 0.21, 3.4, sofaBox);
-    box(2.9, 0.75, 0.25, std(0x737b86, 1), 3.4, 0.6, 3.85, sofaBox);
-    // 소파는 TV 쪽(북쪽)을 본다
-    void placeFurniture(s, 'loungeSofaLong', { x: 3.4, z: 3.4, w: 2.9, d: 1.1, h: 0.95, rotY: Math.PI }, sofaBox);
-    const tableBox = new THREE.Group();
-    s.add(tableBox);
-    box(1.2, 0.05, 0.7, std(0xe8e2d6), 3.4, 0.42, 1.75, tableBox);
-    void placeFurniture(s, 'tableCoffee', { x: 3.4, z: 1.75, w: 1.3, d: 0.75, h: 0.45 }, tableBox);
-
-    // 신발장 (카메라 쪽이라 낮게) · 화분 · 액자
-    box(1.4, 0.8, 0.4, std(0xd8c3a5), -2.9, 0.4, 3.75);
-    void placeFurniture(s, 'pottedPlant', { x: 1.6, z: -3.55, w: 0.5, d: 0.5, h: 1.3 });
-    const art = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.8), new THREE.MeshBasicMaterial({ color: 0xe8a87c }));
-    art.position.set(x1 - 0.09, 1.7, 2.0);
-    art.rotation.y = -Math.PI / 2;
-    s.add(art);
 
     // 천장 조명 (실내는 작아서 점광원 2개)
     for (const [lx, lz] of [[-1.5, -1], [2.5, 1]]) {
@@ -1931,4 +2415,38 @@ function remoteTint(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return REMOTE_TINTS[h % REMOTE_TINTS.length];
+}
+
+/**
+ * 1인칭용 실내 껍데기: 남쪽(3인칭 카메라 쪽) 벽 위쪽과 천장. 처음엔 감춰 두고 1인칭일 때만 보인다.
+ * @param low 원래 남쪽 벽 높이 · H 천장 높이 · gaps 문 자리 [x0, x1, 문 위 높이]
+ * @param ceil 천장을 덮을 범위 (없으면 r)
+ */
+function fpShell(parent: THREE.Object3D, r: { x0: number; x1: number; z0: number; z1: number }, low: number, H: number, color: number, gaps: [number, number, number][] = [], ceil = r): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95 });
+  const add = (w: number, y0: number, x: number) => {
+    if (w <= 0.01 || H - y0 <= 0.01) return;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, H - y0, 0.14), mat);
+    m.position.set(x, (y0 + H) / 2, r.z1 + 0.01);
+    m.visible = false;
+    m.userData.keepMaterial = true;
+    parent.add(m);
+    out.push(m);
+  };
+  let x = r.x0;
+  for (const [g0, g1, top] of [...gaps].sort((a, b) => a[0] - b[0])) {
+    add(g0 - x, low, (x + g0) / 2);
+    add(g1 - g0, top, (g0 + g1) / 2);
+    x = g1;
+  }
+  add(r.x1 - x, low, (x + r.x1) / 2);
+  const c = new THREE.Mesh(new THREE.PlaneGeometry(ceil.x1 - ceil.x0, ceil.z1 - ceil.z0), new THREE.MeshStandardMaterial({ color: 0xf6f4f0, roughness: 1 }));
+  c.rotation.x = Math.PI / 2;
+  c.position.set((ceil.x0 + ceil.x1) / 2, H + 0.005, (ceil.z0 + ceil.z1) / 2);
+  c.visible = false;
+  c.userData.keepMaterial = true;
+  parent.add(c);
+  out.push(c);
+  return out;
 }

@@ -57,6 +57,7 @@ export function buildContext(world: CityWorld, npcId: string): NpcContext {
       maxHp: world.player.maxHp,
     },
     pastShifts: pr.jobs?.aptGuard?.shifts ?? 0,
+    doing: npcId === 'senior' ? world.seniorAI.status : undefined,
     affinity: bond.affinity,
     canGift: bond.lastGiftDay !== world.day,
     memories: bond.memories.map((m) => `${m.day}일째: ${m.text}`),
