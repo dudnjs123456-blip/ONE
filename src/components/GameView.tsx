@@ -44,6 +44,26 @@ function loadRecord(): CpuRecord {
   } catch {}
   return EMPTY_RECORD;
 }
+const STREAK_KEY = 'ironfist.cpuStreak';
+type Streak = { cur: number; best: number };
+/** VS CPU 연승 (난이도 상관없이 이어진다, 이 브라우저에만) */
+function loadStreak(): Streak {
+  try {
+    const v = JSON.parse(localStorage.getItem(STREAK_KEY) ?? 'null');
+    if (v && typeof v.cur === 'number' && typeof v.best === 'number') return v;
+  } catch {}
+  return { cur: 0, best: 0 };
+}
+function addStreak(won: boolean): Streak {
+  const s = loadStreak();
+  const cur = won ? s.cur + 1 : 0;
+  const next = { cur, best: Math.max(s.best, cur) };
+  try {
+    localStorage.setItem(STREAK_KEY, JSON.stringify(next));
+  } catch {}
+  return next;
+}
+
 function addResult(level: CpuLevel, won: boolean): CpuRecord {
   const r = loadRecord();
   const cur = r[level] ?? { w: 0, l: 0 };
@@ -84,6 +104,8 @@ function setup(mode: MatchMode, kb: Keyboard, level: CpuLevel, dummy: TrainingDu
 
 export default function GameView({ mode, onExit, profile }: { mode: MatchMode; onExit: () => void; profile?: PlayerProfile }) {
   const [reward, setReward] = useState(0);
+  const [streak, setStreak] = useState<Streak>({ cur: 0, best: 0 });
+  useEffect(() => setStreak(loadStreak()), []);
   // 경기 중 프로필이 새로 바뀌어도(클라우드 동기화 등) 경기를 다시 시작하지 않도록 ref 로 최신 값만 읽는다
   const profileRef = useRef(profile);
   profileRef.current = profile;
@@ -185,7 +207,10 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
             playCue(lost ? 'lose' : 'win');
             // 무승부(같은 승수)는 기록하지 않는다
             const firstWin = loadRecord()[level].w === 0;
-            if (mode === 'cpu' && h.fighters[0].wins !== h.fighters[1].wins) setRecord(addResult(level, !lost));
+            if (mode === 'cpu' && h.fighters[0].wins !== h.fighters[1].wins) {
+              setRecord(addResult(level, !lost));
+              setStreak(addStreak(!lost));
+            }
             // 이기면 골드 (필드·보스처럼 프로필에 더하고 저장 → 로그인했으면 클라우드에도)
             const prof = profileRef.current;
             if (mode === 'cpu' && !lost && h.fighters[0].wins > h.fighters[1].wins && prof) {
@@ -321,6 +346,11 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-4">
           <div className="w-full max-w-xl rounded-lg border border-white/20 bg-zinc-900/95 p-6 text-white">
             <div className="mb-1 text-center text-xl font-bold">VS CPU 난이도</div>
+            {streak.best > 0 && (
+              <div className="mb-1 text-center text-xs text-amber-200/80">
+                🔥 지금 {streak.cur}연승 · 최고 {streak.best}연승
+              </div>
+            )}
             <div className="mb-5 text-center text-xs text-white/60">{touch ? '눌러서 고르기' : '← → 로 고르고 Enter · Esc 는 메인 메뉴'}</div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {(Object.keys(CPU_LEVELS) as CpuLevel[]).map((lv) => (
@@ -376,6 +406,11 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
                 {reward > 0 && (
                   <div className="mb-1 text-center font-bold text-amber-300">
                     승리 보상 +{reward} G{level && reward > CPU_REWARD[level] && ' (첫 승리 ×' + FIRST_WIN_MULT + ')'}
+                  </div>
+                )}
+                {mode === 'cpu' && (
+                  <div className="mb-1 text-center text-amber-200/90">
+                    {streak.cur > 0 ? `🔥 ${streak.cur}연승` : '연승이 끊겼어요'} · 최고 {streak.best}연승
                   </div>
                 )}
                 <div className="mb-0.5 text-white/50">최대 콤보</div>
