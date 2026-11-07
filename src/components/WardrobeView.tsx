@@ -293,7 +293,7 @@ export default function WardrobeView({
         )}
 
         <div className="mb-1 text-xs text-white/50">캐릭터</div>
-        <div className="mb-3 grid grid-cols-3 gap-1 rounded-lg bg-black/30 p-1 text-sm font-bold">
+        <div className="mb-3 grid grid-cols-4 gap-1 rounded-lg bg-black/30 p-1 text-sm font-bold">
           {BODY_TYPES.map((b) => {
             const on = (pr.body ?? BODY_TYPES[0].id) === b.id;
             return (
