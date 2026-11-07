@@ -1,3 +1,4 @@
+import { OPTICAL_GLASSES } from './fashion';
 /** 음식점 메뉴 하나. hunger/fatigue 는 줄여주는 양 (0~100 수치 기준) */
 export interface MenuItem {
   id: string;
@@ -10,6 +11,8 @@ export interface MenuItem {
   hp?: number;
   /** 먹지 않고 가방에 넣는 물건 (아이템 id, 꽃집) */
   keep?: string;
+  /** 사면 옷장에 들어가는 코디 아이템 id (안경원) */
+  cosmetic?: string;
   desc: string;
 }
 
@@ -154,6 +157,15 @@ export const SHOPS: Record<string, ShopDef> = Object.fromEntries(
         { id: 'buy-rose', name: '장미 한 송이', icon: '🌹', price: 30, hunger: 0, keep: 'rose', desc: '가방에 넣기. 선물하면 호감도 +4.' },
         { id: 'buy-bouquet', name: '꽃다발', icon: '💐', price: 90, hunger: 0, keep: 'bouquet', desc: '가방에 넣기. 선물하면 호감도 +10.' },
       ],
+    }),
+    shop({
+      // 안경원: 안경원에서만 파는 안경 → 옷장에 들어가고 코디(O)에서 쓴다
+      sign: '안경원', keeper: '안경사 선생님', face: '🧑‍🔬',
+      greetings: ['어서 오세요~ 시력 검사부터 해 드릴까요?', '안녕하세요! 새로 들어온 테 보고 가세요.'],
+      recommend: '얼굴이 동그라시면 각진 테가, 각지시면 동그란 테가 잘 어울려요. 여름엔 미러 선글라스가 인기예요.',
+      gossip: ['요즘은 다들 휴대폰을 오래 봐서 눈이 많이 나빠져요.', '옷가게 사장님이 우리 선글라스 따라 들여놨더라고요. 그래도 테 종류는 우리가 더 많죠.'],
+      thanks: ['잘 어울리세요! 코디(O)에서 써 보세요.', '다음에 렌즈 닦으러 오세요~'],
+      menu: OPTICAL_GLASSES.map((c) => ({ id: `buy-${c.id}`, name: c.name, icon: c.icon, price: c.price, hunger: 0, cosmetic: c.id, desc: c.desc })),
     }),
   ].map((s) => [s.sign, s]),
 );

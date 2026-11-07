@@ -1492,6 +1492,11 @@ export class CityWorld {
     const pr = this.profile;
     if (pr.gold < item.price) return { ok: false, message: `아이고… ${item.price - pr.gold}G 가 모자라네요.` };
     if (item.hunger > 0 && pr.life.hunger < 5 && !item.fatigue) return { ok: false, message: '배불러서 더는 못 먹겠다…' };
+    // 안경원 안경처럼 옷장에 들어가는 코디 아이템
+    if (item.cosmetic) {
+      const r = this.buyCosmetic(item.cosmetic);
+      return r.ok ? { ok: true, message: `${r.message} — 옷장에 넣었어요 · 코디(O)에서 써 보세요` } : r;
+    }
     // 꽃집 꽃처럼 가방에 넣는 물건
     if (item.keep) {
       if (pr.gold < item.price) return { ok: false, message: `${item.price - pr.gold}G 가 모자라요.` };

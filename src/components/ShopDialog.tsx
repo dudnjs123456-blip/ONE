@@ -41,7 +41,7 @@ export default function ShopDialog({ world, onClose }: { world: CityWorld; onClo
 
         {page === 'talk' ? (
           <div className="grid grid-cols-2 gap-2 p-4 text-sm">
-            <Choice onClick={() => setPage('menu')}>{shop.sign === '약국' ? '💊 약 보여주세요' : shop.sign === '꽃집' ? '💐 꽃 보여주세요' : '🍽️ 메뉴 보여주세요'}</Choice>
+            <Choice onClick={() => setPage('menu')}>{shop.sign === '약국' ? '💊 약 보여주세요' : shop.sign === '꽃집' ? '💐 꽃 보여주세요' : shop.sign === '안경원' ? '👓 안경 보여주세요' : '🍽️ 메뉴 보여주세요'}</Choice>
             <Choice onClick={() => setLine(shop.recommend)}>👍 추천 메뉴는요?</Choice>
             <Choice onClick={() => setLine(world.gossip())}>💬 요즘 동네 어때요?</Choice>
             <Choice

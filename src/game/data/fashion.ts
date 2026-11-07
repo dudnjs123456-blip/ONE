@@ -169,7 +169,16 @@ export function shopCosmetics(now = new Date()): CosmeticDef[] {
   return [...fresh, ...COSMETICS];
 }
 
-const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries(COSMETICS.map((c) => [c.id, c]));
+/** 안경원에서만 파는 안경 (옷가게 진열엔 없다) */
+export const OPTICAL_GLASSES: CosmeticDef[] = [
+  C({ id: 'round-black', name: '블랙 뿔테 안경', icon: '👓', slot: 'glasses', price: 140, color: 0x1b1b1f, style: 'round', desc: '공부 잘하게 생긴 뿔테.' }),
+  C({ id: 'round-silver', name: '실버 동그란 안경', icon: '👓', slot: 'glasses', price: 170, color: 0xc0c4c9, style: 'round', desc: '가볍고 깔끔한 메탈 테.' }),
+  C({ id: 'sun-pink', name: '핑크 틴트 선글라스', icon: '🕶️', slot: 'glasses', price: 230, color: 0xe86a9a, style: 'sunglasses', desc: '한강 피크닉 감성.' }),
+  C({ id: 'sun-blue', name: '블루 미러 선글라스', icon: '🕶️', slot: 'glasses', price: 260, color: 0x2f7fd6, style: 'sunglasses', desc: '햇빛을 그대로 튕겨 낸다.' }),
+  C({ id: 'sun-gold', name: '골드 보잉 선글라스', icon: '🕶️', slot: 'glasses', price: 300, color: 0xb8963e, style: 'sunglasses', desc: '영화 주인공처럼.' }),
+];
+
+const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries([...COSMETICS, ...OPTICAL_GLASSES].map((c) => [c.id, c]));
 const dailyCache = new Map<string, CosmeticDef | undefined>();
 
 /** 옷 id → 옷 (기본 옷 + 지난 신상까지 id 로 다시 만들어 찾는다) */

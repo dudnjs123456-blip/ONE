@@ -1,6 +1,7 @@
 // 도시 로직 헤드리스 검증: npx tsx scripts/city-sim.ts
 import { BUS_FARE, COIN_TOSS, PC_ROOM_FEE, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import { CHAT_MAX, wrapChat } from '../src/game/city/chat';
+import { COSMETICS, COSMETIC_BY_ID } from '../src/game/data/fashion';
 import { bondOf, giftFlower } from '../src/game/city/npcChat';
 import { ITEM_IDS } from '../src/game/data/items';
 import { LifeTracker } from '../src/game/core/life';
@@ -1528,4 +1529,15 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('pc room: E opens game picker', pw.pcRoomRequest);
   pw.profile.gold = 25;
   check('pc room: fee', pw.spendGold(PC_ROOM_FEE) && pw.profile.gold === 5 && !pw.spendGold(PC_ROOM_FEE));
+}
+
+// 안경원: 안경원 전용 안경을 사면 옷장에, 이미 있으면 못 삼, 옷가게 진열엔 없음
+{
+  const ow = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  ow.profile.gold = 1000;
+  const r = ow.buyFood('buy-sun-blue', '안경원');
+  check('optical: glasses go to wardrobe', r.ok && (ow.profile.wardrobe?.owned ?? []).includes('sun-blue') && ow.profile.gold === 740, r.message);
+  check('optical: no double buy', !ow.buyFood('buy-sun-blue', '안경원').ok);
+  check('optical: not on clothes shop racks', !COSMETICS.some((c) => c.id === 'sun-blue') && COSMETIC_BY_ID['sun-blue']?.slot === 'glasses');
+  check('optical shop on the map', ow.map.pois.some((p) => p.label === '안경원'));
 }
