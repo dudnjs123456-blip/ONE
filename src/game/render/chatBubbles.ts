@@ -8,8 +8,8 @@ interface Bubble {
   tex: THREE.CanvasTexture;
 }
 
-/** 캔버스 글자 크기 → 월드 높이 (작을수록 말풍선이 작다) */
-const WORLD_PER_PX = 0.0058;
+/** 캔버스 글자 크기 → 월드 높이 (작을수록 말풍선이 작다). 0.0058 은 캐릭터에 비해 커서 약 28% 줄임 */
+const WORLD_PER_PX = 0.0042;
 
 function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   g.beginPath();
