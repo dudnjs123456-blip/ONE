@@ -31,11 +31,12 @@ const DEFAULT_BINDS: Record<BindAction, string[]> = {
   b4: ['KeyS'],
   jump: ['Space'],
   run: ['ShiftLeft', 'ShiftRight'],
-  interact: ['KeyE', 'Enter'],
+  // Enter 는 서울 채팅 열기 키라 상호작용에서 뺐다
+  interact: ['KeyE'],
 };
 
-/** 다른 기능 단축키라 바꿀 수 없는 키 (지도 M, 가방 I, 일자리 J, 자동근무 G·P, 장비 T, 낚시 도감 F, 메뉴 Esc, 판정 표시 `) */
-const RESERVED = new Set(['Escape', 'KeyM', 'KeyI', 'KeyJ', 'KeyG', 'KeyP', 'KeyT', 'KeyV', 'KeyK', 'KeyF', 'Backquote', 'Tab', 'MetaLeft', 'MetaRight']);
+/** 다른 기능 단축키라 바꿀 수 없는 키 (지도 M, 가방 I, 일자리 J, 자동근무 G·P, 장비 T, 낚시 도감 F, 메뉴 Esc, 판정 표시 `, 채팅 Enter·/) */
+const RESERVED = new Set(['Enter', 'NumpadEnter', 'Slash', 'Escape', 'KeyM', 'KeyI', 'KeyJ', 'KeyG', 'KeyP', 'KeyT', 'KeyV', 'KeyK', 'KeyF', 'Backquote', 'Tab', 'MetaLeft', 'MetaRight']);
 
 const STORAGE_KEY = 'ironfist.keybinds';
 let binds: Record<BindAction, string[]> = clone(DEFAULT_BINDS);
@@ -69,7 +70,9 @@ if (typeof window !== 'undefined') {
       const saved = JSON.parse(raw) as Partial<Record<BindAction, string[]>>;
       for (const { id } of BIND_ACTIONS) {
         const v = saved[id];
-        if (Array.isArray(v) && v.length && v.every((c) => typeof c === 'string')) binds[id] = [...v];
+        // 예전에 저장한 설정의 Enter·/ 는 뺀다 (지금은 채팅 키). 다 빠지면 기본값
+        const keep = Array.isArray(v) ? v.filter((c) => typeof c === 'string' && !RESERVED.has(c)) : [];
+        if (keep.length) binds[id] = keep;
       }
     }
   } catch {

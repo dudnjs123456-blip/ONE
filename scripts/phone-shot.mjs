@@ -1,6 +1,6 @@
 // 폰 화면 스크린샷 (Chrome 개발자 도구 프로토콜로 폰 크기·터치를 흉내 낸다)
 // node --experimental-websocket scripts/phone-shot.mjs <url> <out.png> [steps.json]
-// steps.json: [{ "eval": "자바스크립트" } | { "wait": ms } | { "click": "버튼 글자" } | { "shot": "파일.png" }]
+// steps.json: [{ "eval": "자바스크립트" } | { "wait": ms } | { "click": "버튼 글자" } | { "key": "Enter" } | { "type": "글자" } | { "shot": "파일.png" }]
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -81,6 +81,17 @@ for (const s of steps) {
     const ok = await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(b => b.innerText.includes(${JSON.stringify(s.click)})); if (b) b.click(); return !!b; })()`);
     console.log(`클릭 "${s.click}" →`, ok);
     await sleep(s.after ?? 1500);
+  }
+  // 실제 키 입력 (사람이 누른 것과 같다): { "key": "Enter" } · { "type": "글자" }
+  if (s.key) {
+    const vk = { Enter: 13, Escape: 27, Slash: 191, KeyE: 69 }[s.key] ?? 0;
+    const key = { Enter: 'Enter', Escape: 'Escape', Slash: '/', KeyE: 'e' }[s.key] ?? s.key;
+    for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, code: s.key, key, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, ...(type === 'keyDown' && s.key === 'Enter' ? { text: String.fromCharCode(13) } : {}) });
+    await sleep(s.after ?? 400);
+  }
+  if (s.type) {
+    await send('Input.insertText', { text: s.type });
+    await sleep(300);
   }
   if (s.shot) await shot(s.shot);
 }

@@ -24,6 +24,7 @@ import CasinoPanel from './CasinoPanel';
 import KaraokePanel from './KaraokePanel';
 import BusPanel from './BusPanel';
 import ChatBox from './ChatBox';
+import PcRoomPanel, { type PcGame } from './PcRoomPanel';
 import PetPanel from './PetPanel';
 import FishingPanel, { type FishTab } from './FishingPanel';
 import FishingShopPanel, { type FishShopTab } from './FishingShopPanel';
@@ -181,7 +182,7 @@ class CityKeyboard {
 }
 
 /** 서울 라이프: 도시 + 내 집 (일상 모드) */
-export default function CityView({ profile, account, onExit }: { profile: PlayerProfile; account: Account | null; onExit: () => void }) {
+export default function CityView({ profile, account, onExit, onPlay }: { profile: PlayerProfile; account: Account | null; onExit: () => void; /** PC방에서 고른 게임 하러 가기 (끝나면 서울로 돌아온다) */ onPlay?: (g: PcGame) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<CityWorld | null>(null);
   const perfRef = useRef<HTMLDivElement>(null);
@@ -204,6 +205,9 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   const [casino, setCasino] = useState(false);
   const [karaoke, setKaraoke] = useState(false);
   const [bus, setBus] = useState(false);
+  const [pcRoom, setPcRoom] = useState(false);
+  const onPlayRef = useRef(onPlay);
+  onPlayRef.current = onPlay;
   const [pets, setPets] = useState<null | 'shop' | 'care'>(null);
   const [adoptPick, setAdoptPick] = useState<string | null>(null);
   const [keys, setKeys] = useState(false);
@@ -225,6 +229,8 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   karaokeRef.current = karaoke;
   const busRef = useRef(bus);
   busRef.current = bus;
+  const pcRoomRef = useRef(pcRoom);
+  pcRoomRef.current = pcRoom;
   const petsRef = useRef(pets);
   petsRef.current = pets;
   // 낚시 도감 (F) · 낚시마트 계산대
@@ -246,7 +252,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
     const canvas = canvasRef.current!;
     const kb = new CityKeyboard();
     kb.attach();
-    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || busRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
+    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || busRef.current || pcRoomRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
@@ -325,6 +331,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         else if (casinoRef.current) setCasino(false);
         else if (karaokeRef.current) setKaraoke(false);
         else if (busRef.current) setBus(false);
+        else if (pcRoomRef.current) setPcRoom(false);
         else if (petsRef.current) setPets(null);
         else if (clothesRef.current) setClothes(null);
         else if (fishDexRef.current) setFishDex(null);
@@ -459,7 +466,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       }
 
       // 화면 위 글자(HUD)는 0.08초마다만 새로 만든다 (매 프레임 비교하던 것을 줄여서 가볍게)
-      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.busRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
+      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.busRequest || world.pcRoomRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
       const h: CityHud | null = !hudDue ? null : {
         location: world.location,
         floor: world.floor,
@@ -532,6 +539,11 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       if (world.busRequest) {
         world.busRequest = false;
         setBus(true);
+      }
+      if (world.pcRoomRequest) {
+        world.pcRoomRequest = false;
+        if (onPlayRef.current) setPcRoom(true);
+        else world.say('🖥️ PC방 — 지금은 이용할 수 없어요');
       }
       // 옷가게 창은 띄운 채로 걸어 다닐 수 있다 (입어본 옷을 입고 둘러보기). 가게를 벗어나면 닫는다
       if (clothesRef.current && world.location !== 'store') setClothes(null);
@@ -755,6 +767,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       {casino && worldRef.current && <CasinoPanel world={worldRef.current} onClose={() => setCasino(false)} />}
       {karaoke && worldRef.current && <KaraokePanel world={worldRef.current} onClose={() => setKaraoke(false)} />}
       {bus && worldRef.current && <BusPanel world={worldRef.current} onClose={() => setBus(false)} />}
+      {pcRoom && worldRef.current && onPlay && <PcRoomPanel world={worldRef.current} onPlay={onPlay} onClose={() => setPcRoom(false)} />}
       {gear && worldRef.current && (
         <GearPanel
           world={worldRef.current}
@@ -933,7 +946,8 @@ function Minimap({ worldRef }: { worldRef: React.RefObject<CityWorld | null> }) 
         g.fillStyle = '#ffd27a';
         g.font = 'bold 13px sans-serif';
         g.textAlign = 'center';
-        g.fillText(w.location === 'home' ? '집 안' : w.location === 'lobby' ? '행복빌라 1층' : `행복빌라 ${w.floor}층`, W / 2, H / 2 + 4);
+        // 가게 안이면 가게 이름 (예전엔 '행복빌라 N층'으로 잘못 나왔다)
+        g.fillText(w.location === 'home' ? '집 안' : w.location === 'store' ? `${w.store?.sign ?? '가게'} 안` : w.location === 'lobby' ? '행복빌라 1층' : `행복빌라 ${w.floor}층`, W / 2, H / 2 + 4);
         return;
       }
       const p = w.player;

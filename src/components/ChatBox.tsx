@@ -8,7 +8,7 @@ import { CHAT_MAX, type ChatLine } from '@/game/city/chat';
 const FADE_MS = 30_000;
 
 /**
- * 동네 채팅창: "/" 키나 💬 버튼으로 입력, Enter 로 보내기, Esc 로 닫기.
+ * 동네 채팅창: Enter(또는 "/")·💬 버튼으로 열고, Enter 로 보내기 (빈 칸이면 닫기), Esc 로 닫기.
  * 같은 마을에 접속한 사람에게 전달되고 말한 사람 머리 위에 말풍선이 뜬다.
  */
 export default function ChatBox({ world, touch = false }: { world: CityWorld; touch?: boolean }) {
@@ -25,19 +25,19 @@ export default function ChatBox({ world, touch = false }: { world: CityWorld; to
     const id = window.setInterval(() => {
       if (world.chatVersion !== seen.current) {
         seen.current = world.chatVersion;
-        setLines(world.chatLog.slice(-12));
+        setLines(world.chatLog.slice(-20));
       }
       setNow(Date.now());
     }, 200);
     return () => window.clearInterval(id);
   }, [world]);
 
-  // "/" 로 입력창 열기 (다른 글자 입력 중이면 무시)
+  // Enter 나 "/" 로 입력창 열기 (다른 글자 입력 중이면 무시)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      if (e.code === 'Slash' && !e.repeat) {
+      if ((e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Slash') && !e.repeat) {
         e.preventDefault();
         setOpen(true);
       }
@@ -51,6 +51,12 @@ export default function ChatBox({ world, touch = false }: { world: CityWorld; to
   }, [open]);
 
   const send = () => {
+    // 빈 칸에서 Enter = 그냥 닫기 (게임으로 돌아가기)
+    if (!text.trim()) {
+      setOpen(false);
+      inputRef.current?.blur();
+      return;
+    }
     const why = world.postChat(text);
     if (why) {
       setErr(why);
@@ -62,13 +68,13 @@ export default function ChatBox({ world, touch = false }: { world: CityWorld; to
     inputRef.current?.blur();
   };
 
-  const shown = open ? lines : lines.slice(touch ? -3 : -6).filter((l) => now - l.at < FADE_MS);
+  const shown = open ? lines : lines.slice(touch ? -4 : -8).filter((l) => now - l.at < FADE_MS);
   const online = world.remotes.size + 1;
 
   return (
-    <div className={`absolute z-20 text-xs text-white ${touch ? 'right-4 top-48 w-64' : 'bottom-40 left-4 w-80'}`}>
+    <div className={`absolute z-20 text-white ${touch ? 'right-4 top-48 w-72 text-xs' : 'bottom-40 left-4 w-[28rem] text-sm'}`}>
       {shown.length > 0 && (
-        <div className={`mb-1 space-y-0.5 rounded-lg px-2 py-1.5 ${open ? 'max-h-52 overflow-y-auto bg-black/65' : 'bg-black/45'}`}>
+        <div className={`mb-1.5 space-y-1 rounded-xl border border-white/10 px-3 py-2 backdrop-blur-sm ${open ? 'max-h-72 overflow-y-auto bg-black/70' : 'bg-black/45'}`}>
           {shown.map((l, i) => (
             <div key={`${l.at}-${i}`} className="break-words leading-snug" style={{ opacity: open ? 1 : Math.max(0.35, 1 - (now - l.at) / FADE_MS) }}>
               <span className={`font-bold ${l.me ? 'text-amber-300' : 'text-sky-300'}`}>{l.name}</span>
@@ -98,14 +104,14 @@ export default function ChatBox({ world, touch = false }: { world: CityWorld; to
               }
             }}
             onBlur={() => !text && setOpen(false)}
-            placeholder={`동네 사람들에게 (${online}명 접속)`}
-            className="min-w-0 flex-1 rounded border border-white/25 bg-black/70 px-2 py-1.5 outline-none focus:border-amber-300"
+            placeholder={`동네 사람들에게 · ${online}명 접속 (Enter 보내기 · Esc 닫기)`}
+            className="min-w-0 flex-1 rounded-lg border border-white/25 bg-black/75 px-3 py-2 outline-none placeholder:text-white/40 focus:border-amber-300"
           />
-          <button className="rounded bg-amber-500 px-2.5 font-bold text-black">보내기</button>
+          <button className="rounded-lg bg-amber-500 px-3 font-bold text-black hover:bg-amber-400">보내기</button>
         </form>
       ) : (
         <button onClick={() => setOpen(true)} className="rounded-full bg-black/50 px-3 py-1 text-white/80 hover:bg-black/70">
-          💬 채팅{!touch && ' ( / )'} · {online}명
+          💬 채팅{!touch && ' (Enter)'} · {online}명
         </button>
       )}
       {err && <div className="mt-1 text-amber-300">{err}</div>}

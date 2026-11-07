@@ -40,12 +40,40 @@ export function karaokeness(it: Pick<KaraokeItem, 'title' | 'channel'>): number 
 
 export const isAccompaniment = (it: Pick<KaraokeItem, 'title' | 'channel'>) => karaokeness(it) >= 2;
 
-/** 반주 영상을 앞으로 (같은 점수면 원래 검색 순서) */
-export function rankKaraoke<T extends Pick<KaraokeItem, 'title' | 'channel'>>(items: T[]): T[] {
+/**
+ * 다른 사이트(우리 게임)에서 재생을 막아 둔 것으로 알려진 채널 영상.
+ * TJ 미디어 공식 영상과 KY ENTERTAINMENT 공식 영상은 거의 다 막혀 있다 (유튜브 오류 150).
+ */
+export function likelyBlocked(it: Pick<KaraokeItem, 'title' | 'channel'>): boolean {
+  const t = `${it.title} ${it.channel}`;
+  return /\[TJ\s*노래방|TJ\s*Karaoke|TJ\s*미디어|TJ\s*Media|KY\s*ENTERTAINMENT/i.test(t);
+}
+
+/** 미리 틀어 본 결과: ok = 틀 수 있음, blocked = 막힘. 없으면 아직 모름 */
+export type Playable = 'ok' | 'blocked';
+
+/** 틀 수 있는 정도: 확인됨(2) > 모름(1) > 막혔을 듯(0) > 막힘 확인(-1) */
+function playRank(it: KaraokeItem, known: ReadonlyMap<string, Playable>): number {
+  const k = known.get(it.id);
+  if (k === 'ok') return 2;
+  if (k === 'blocked') return -1;
+  return likelyBlocked(it) ? 0 : 1;
+}
+
+/**
+ * 반주 영상을 앞으로. 막힌 영상은 맨 뒤로 (같은 점수면 원래 검색 순서).
+ * known 을 주면 미리 틀어 본 결과를 따르고, 없으면 채널 이름으로 짐작한다.
+ */
+export function rankKaraoke<T extends KaraokeItem>(items: T[], known: ReadonlyMap<string, Playable> = new Map()): T[] {
   return items
-    .map((it, i) => ({ it, i, k: karaokeness(it) }))
-    .sort((a, b) => (b.k >= 2 ? 1 : 0) - (a.k >= 2 ? 1 : 0) || b.k - a.k || a.i - b.i)
+    .map((it, i) => ({ it, i, k: karaokeness(it), p: playRank(it, known) }))
+    .sort((a, b) => (b.p >= 1 ? 1 : 0) - (a.p >= 1 ? 1 : 0) || (b.k >= 2 ? 1 : 0) - (a.k >= 2 ? 1 : 0) || b.p - a.p || b.k - a.k || a.i - b.i)
     .map((x) => x.it);
+}
+
+/** 고른 영상이 막혔을 때 대신 틀 반주: 같은 검색 결과에서 아직 막히지 않은 반주 중 첫 번째 */
+export function fallbackSong<T extends KaraokeItem>(list: T[], failedId: string, known: ReadonlyMap<string, Playable>): T | null {
+  return rankKaraoke(list, known).find((it) => it.id !== failedId && isAccompaniment(it) && playRank(it, known) >= 1) ?? null;
 }
 
 /** 노래방 기계처럼 점수 매기기: 대부분 80~99, 가끔 100점. 탬버린·박수로 분위기를 띄우면 조금 오른다 */

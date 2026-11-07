@@ -16,6 +16,7 @@ import { cloudSave, type SyncState } from '@/game/net/cloudSave';
 import { sessionLock } from '@/game/net/sessionLock';
 import { expToNext } from '@/game/data/progression';
 import BossSelect from './BossSelect';
+import type { PcGame } from './PcRoomPanel';
 import { loadRecord, loadStreak, rankOf } from '@/game/core/cpuRecord';
 
 // 게임 화면들은 들어갈 때 불러온다 (첫 화면·로그인을 빨리 띄우려고 — 3D·서울 코드가 크다)
@@ -71,6 +72,8 @@ const LEVEL_LABEL = { high: '상단', mid: '중단', low: '하단' } as const;
 
 export default function Game() {
   const [screen, setScreen] = useState<Screen>({ kind: 'menu' });
+  /** PC방(서울)에서 시작한 게임인가: 끝나면 메뉴 대신 서울로 */
+  const [fromCity, setFromCity] = useState(false);
   const [keys, setKeys] = useState(false);
   // 프로필은 하위 화면(필드/보스)이 직접 수정하고, 화면을 나올 때 저장 + 다시 그린다
   const [profile, setProfile] = useState<PlayerProfile>(newProfile);
@@ -197,13 +200,23 @@ export default function Game() {
     setProfile({ ...profile });
     setScreen(next);
   };
-  const menu = () => go({ kind: 'menu' });
+  // PC방에서 시작한 게임이면 끝난 뒤 서울로 돌아간다
+  const menu = () => {
+    if (fromCity) {
+      setFromCity(false);
+      go({ kind: 'city' });
+    } else go({ kind: 'menu' });
+  };
+  const playFromCity = (g: PcGame) => {
+    setFromCity(true);
+    go(g === 'cpu' ? { kind: 'match', mode: 'cpu' } : g === 'training' ? { kind: 'match', mode: 'training' } : g === 'boss' ? { kind: 'bossSelect' } : { kind: 'field' });
+  };
 
   switch (screen.kind) {
     case 'field':
       return <FieldView profile={profile} onExit={menu} />;
     case 'city':
-      return <CityView profile={profile} account={account} onExit={menu} />;
+      return <CityView profile={profile} account={account} onExit={menu} onPlay={playFromCity} />;
     case 'bossSelect':
       return <BossSelect profile={profile} onSelect={(boss) => go({ kind: 'boss', boss, attempt: 0 })} onBack={menu} />;
     case 'boss':

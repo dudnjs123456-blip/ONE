@@ -1,5 +1,5 @@
 // 도시 로직 헤드리스 검증: npx tsx scripts/city-sim.ts
-import { BUS_FARE, COIN_TOSS, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
+import { BUS_FARE, COIN_TOSS, PC_ROOM_FEE, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import { CHAT_MAX, wrapChat } from '../src/game/city/chat';
 import { bondOf, giftFlower } from '../src/game/city/npcChat';
 import { ITEM_IDS } from '../src/game/data/items';
@@ -1515,4 +1515,17 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('flower: once a day', giftFlower(fw, 'senior', 'bouquet') !== null && fw.profile.inventory.bouquet === 1);
   check('flower: not dropped by pedestrians', !(ITEM_IDS as readonly string[]).includes('rose'));
   check('flower shop on the map', fw.map.pois.some((p) => p.label === '꽃집'));
+}
+
+// PC방: E → 게임 고르기 창 요청, 이용료
+{
+  let pc: CityInput = { move: null, run: false, interact: false };
+  const pw = new CityWorld({ read: () => pc });
+  const poi = pw.map.pois.find((p) => p.label === 'PC방')!;
+  (pw as unknown as { moveTo: (l: string, x: number, z: number, fx: number, fz: number) => void }).moveTo('city', poi.x, poi.z, 0, 1);
+  pc = { move: null, run: false, interact: true };
+  pw.step();
+  check('pc room: E opens game picker', pw.pcRoomRequest);
+  pw.profile.gold = 25;
+  check('pc room: fee', pw.spendGold(PC_ROOM_FEE) && pw.profile.gold === 5 && !pw.spendGold(PC_ROOM_FEE));
 }

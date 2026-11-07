@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { KARAOKE_CHIPS, SONG_PRICE, isAccompaniment, karaokeQuery, rankKaraoke, rollScore, scoreComment, type KaraokeItem } from '@/game/city/karaoke';
+import { KARAOKE_CHIPS, SONG_PRICE, fallbackSong, isAccompaniment, karaokeQuery, likelyBlocked, rankKaraoke, rollScore, scoreComment, type KaraokeItem, type Playable } from '@/game/city/karaoke';
 import { isMuted, playCoin, playLevelUp } from '@/game/render/sfx';
+import { probeYouTube } from '@/game/render/ytProbe';
 
 const RECENT_KEY = 'ironfist.karaoke.recent';
 const BEST_KEY = 'ironfist.karaoke.best';
+/** 미리 틀어 본 결과 (영상 id → 틀 수 있음/막힘). 오래된 것부터 지워 이만큼만 남긴다 */
+const PLAYABLE_KEY = 'ironfist.karaoke.playable';
+const PLAYABLE_MAX = 400;
+/** 검색하면 위에서부터 이만큼 미리 틀어 본다 (동시에 3개씩) */
+const PROBE_TOP = 10;
+const PROBE_PARALLEL = 3;
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -61,10 +68,24 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
   const [toast, setToast] = useState<string | null>(null);
   const [queue, setQueue] = useState<KaraokeItem[]>([]);
   const [current, setCurrent] = useState<KaraokeItem | null>(null);
-  const [scoring, setScoring] = useState<{ score: number; comment: string; best: boolean } | null>(null);
+  const [scoring, setScoring] = useState<{
+    score: number;
+    comment: string;
+    best: boolean;
+  } | null>(null);
   const [recent, setRecent] = useState<KaraokeItem[]>([]);
   const [best, setBest] = useState(0);
   const [, redraw] = useState(0);
+  /** 미리 틀어 본 결과 */
+  const [known, setKnown] = useState<ReadonlyMap<string, Playable>>(() => new Map());
+  const knownRef = useRef(known);
+  knownRef.current = known;
+  /** 지금 틀어 보는 중인 영상 */
+  const [probing, setProbing] = useState<ReadonlySet<string>>(() => new Set());
+  const probeStops = useRef<(() => void)[]>([]);
+  /** 곡을 고를 때 함께 있던 검색 결과 (막혔을 때 같은 노래의 다른 반주를 찾는다) */
+  const altsRef = useRef(new Map<string, KaraokeItem[]>());
+  const currentRef = useRef<KaraokeItem | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const startedAt = useRef(0);
   const hype = useRef(0);
@@ -74,10 +95,54 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
   const ended = useRef(false);
   const scoreTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(scoreTimer.current), []);
+  useEffect(() => () => probeStops.current.splice(0).forEach((stop) => stop()), []);
+
+  /** 틀 수 있는지 알게 된 영상을 기억한다 (다음에 들어와도 그대로) */
+  const remember = useCallback((id: string, r: Playable) => {
+    setKnown((m) => {
+      if (m.get(id) === r) return m;
+      const next = new Map(m);
+      next.delete(id);
+      next.set(id, r);
+      while (next.size > PLAYABLE_MAX) next.delete(next.keys().next().value as string);
+      store(PLAYABLE_KEY, [...next]);
+      return next;
+    });
+  }, []);
+
+  /** 검색 결과 위쪽 영상들을 화면 밖에서 소리 없이 틀어 보고, 막힌 것을 표시한다 */
+  const probeList = useCallback(
+    (list: KaraokeItem[]) => {
+      probeStops.current.splice(0).forEach((stop) => stop());
+      const todo = list.filter((it) => !knownRef.current.has(it.id)).slice(0, PROBE_TOP);
+      setProbing(new Set(todo.map((it) => it.id)));
+      let alive = true;
+      probeStops.current.push(() => (alive = false));
+      const worker = async () => {
+        while (alive && todo.length) {
+          const it = todo.shift()!;
+          const pr = probeYouTube(it.id);
+          probeStops.current.push(pr.cancel);
+          const r = await pr.done;
+          if (!alive) return;
+          if (r) remember(it.id, r);
+          setProbing((cur) => {
+            const n = new Set(cur);
+            n.delete(it.id);
+            return n;
+          });
+        }
+      };
+      for (let i = 0; i < PROBE_PARALLEL; i++) void worker();
+    },
+    [remember],
+  );
 
   useEffect(() => {
     setRecent(load<KaraokeItem[]>(RECENT_KEY, []));
     setBest(load<number>(BEST_KEY, 0));
+    const saved = load<[string, Playable][]>(PLAYABLE_KEY, []);
+    if (Array.isArray(saved)) setKnown(new Map(saved.filter((e) => Array.isArray(e) && (e[1] === 'ok' || e[1] === 'blocked'))));
   }, []);
 
   const say = (m: string) => {
@@ -97,6 +162,7 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
       hype.current = 0;
       startedAt.current = Date.now();
       setScoring(null);
+      currentRef.current = it;
       setCurrent(it);
       setRecent((r) => {
         const next = [it, ...r.filter((x) => x.id !== it.id)].slice(0, 12);
@@ -113,7 +179,10 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
   const next = useCallback(() => {
     const [head, ...rest] = queueRef.current;
     setQueue(rest);
-    if (!head || !start(head)) setCurrent(null);
+    if (!head || !start(head)) {
+      currentRef.current = null;
+      setCurrent(null);
+    }
   }, [start]);
 
   /** 한 곡이 끝났다: 30초 넘게 불렀으면 점수, 아니면 바로 다음 곡 */
@@ -148,16 +217,29 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
       }
       const st = m.event === 'onStateChange' ? m.info : m.event === 'infoDelivery' ? (m.info as { playerState?: number } | null)?.playerState : undefined;
       if (st === 0) finish();
+      if (st === 1 && currentRef.current) remember(currentRef.current.id, 'ok');
       if (m.event === 'onError' && !ended.current) {
         ended.current = true;
         world.karaokePay(-SONG_PRICE);
+        const failed = currentRef.current;
+        if (failed) remember(failed.id, 'blocked');
+        // 영상 주인이 다른 사이트 재생을 막아 둔 영상: 같은 검색 결과에서 틀 수 있는 다른 반주로 바로 바꾼다
+        const alts = failed ? (altsRef.current.get(failed.id) ?? []) : [];
+        const now = new Map(knownRef.current);
+        if (failed) now.set(failed.id, 'blocked');
+        const alt = failed ? fallbackSong(alts, failed.id, now) : null;
+        if (alt && start(alt)) {
+          altsRef.current.set(alt.id, alts);
+          say('🔁 이 영상은 유튜브에서 다른 사이트 재생을 막아 뒀어요 — 같은 노래의 다른 반주로 바꿔 틀게요');
+          return;
+        }
         say('🚫 이 영상은 노래방 화면에서 못 틀어요 — 골드는 돌려드렸어요. 다른 반주를 골라 주세요');
         next();
       }
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [finish, next, world]);
+  }, [finish, next, world, remember, start]);
 
   const search = async (text: string) => {
     const s = karaokeQuery(text);
@@ -168,8 +250,9 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
       const r = await fetch(`/api/yt-search?q=${encodeURIComponent(s)}`);
       const j = (await r.json()) as { items?: KaraokeItem[] };
       if (my !== seq.current) return;
-      const list = rankKaraoke(j.items ?? []);
+      const list = rankKaraoke(j.items ?? [], knownRef.current);
       setItems(list);
+      probeList(list);
       if (!list.length) say('검색 결과가 없어요 — 가수 이름이나 다른 제목으로 찾아보세요');
     } catch {
       if (my === seq.current) say('검색이 안 돼요 — 잠시 뒤 다시 해 주세요');
@@ -180,6 +263,8 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
 
   /** 예약: 부르는 곡이 없으면 바로 시작 */
   const reserve = (it: KaraokeItem, now = false) => {
+    if (known.get(it.id) === 'blocked') return say('🚫 이 영상은 유튜브에서 다른 사이트 재생을 막아 뒀어요 — 다른 반주를 골라 주세요');
+    altsRef.current.set(it.id, items ?? recent);
     if (!current || now) {
       if (now && current) ended.current = true;
       window.clearTimeout(scoreTimer.current);
@@ -204,7 +289,9 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
     <div className="absolute inset-0 z-30 flex flex-col bg-gradient-to-br from-[#1a0630] via-[#12051f] to-[#05121f] text-white">
       <div className="flex items-center gap-2 border-b border-fuchsia-400/30 px-3 py-2">
         <div className="text-lg font-black tracking-wide text-fuchsia-300 drop-shadow-[0_0_8px_#e879f9]">🎤 코인노래방</div>
-        <span className="hidden text-xs text-white/50 sm:inline">한 곡 {SONG_PRICE} G · 최고 {best || '-'}점</span>
+        <span className="hidden text-xs text-white/50 sm:inline">
+          한 곡 {SONG_PRICE} G · 최고 {best || '-'}점
+        </span>
         <span className="ml-auto rounded-full bg-black/40 px-3 py-1 text-sm font-bold text-amber-200">💰 {gold.toLocaleString()} G</span>
         <button onClick={onClose} className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20">
           나가기
@@ -223,7 +310,16 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
                 title={current.title}
                 allow="autoplay; encrypted-media; picture-in-picture"
                 className="h-full w-full border-0"
-                onLoad={() => frameRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*')}
+                onLoad={() =>
+                  frameRef.current?.contentWindow?.postMessage(
+                    JSON.stringify({
+                      event: 'listening',
+                      id: 1,
+                      channel: 'widget',
+                    }),
+                    '*',
+                  )
+                }
               />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_40%,#3b0764,#000_70%)] text-center">
@@ -319,32 +415,45 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
               ))}
             </div>
           )}
-          <div className="text-[11px] text-white/45">{items ? '검색 결과 (노래방 반주 먼저)' : recent.length ? '최근 부른 곡' : ''}</div>
+          <div className="text-[11px] text-white/45">{items ? `검색 결과 (노래방 반주 먼저)${probing.size ? ` · 틀 수 있는지 확인 중… ${probing.size}` : ''}` : recent.length ? '최근 부른 곡' : ''}</div>
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-            {list.map((it) => (
-              <div key={it.id} className="flex items-center gap-2 rounded bg-white/5 p-1 hover:bg-white/10">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={it.thumb} alt="" className="h-10 w-[72px] shrink-0 rounded object-cover" loading="lazy" />
-                <div className="min-w-0 flex-1">
-                  <div className="line-clamp-2 text-xs leading-tight">{it.title}</div>
-                  <div className="flex items-center gap-1 text-[10px] text-white/45">
-                    {isAccompaniment(it) && <span className="rounded bg-emerald-500/80 px-1 font-bold text-black">반주</span>}
-                    <span className="truncate">{it.channel}</span>
-                    {it.length && <span>· {it.length}</span>}
+            {list.map((it) => {
+              const k = known.get(it.id);
+              const blocked = k === 'blocked';
+              return (
+                <div key={it.id} className={`flex items-center gap-2 rounded p-1 ${blocked ? 'bg-white/[0.02] opacity-45' : 'bg-white/5 hover:bg-white/10'}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={it.thumb} alt="" className="h-10 w-[72px] shrink-0 rounded object-cover" loading="lazy" />
+                  <div className="min-w-0 flex-1">
+                    <div className="line-clamp-2 text-xs leading-tight">{it.title}</div>
+                    <div className="flex items-center gap-1 text-[10px] text-white/45">
+                      {isAccompaniment(it) && <span className="rounded bg-emerald-500/80 px-1 font-bold text-black">반주</span>}
+                      {blocked ? (
+                        <span className="rounded bg-rose-600/80 px-1 font-bold text-white">재생 불가</span>
+                      ) : k === 'ok' ? (
+                        <span className="rounded bg-sky-500/80 px-1 font-bold text-black">✓ 재생 가능</span>
+                      ) : probing.has(it.id) ? (
+                        <span className="rounded bg-white/15 px-1">확인 중…</span>
+                      ) : likelyBlocked(it) ? (
+                        <span className="rounded bg-amber-500/70 px-1 text-black">막혔을 수도</span>
+                      ) : null}
+                      <span className="truncate">{it.channel}</span>
+                      {it.length && <span>· {it.length}</span>}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-0.5">
+                    <button onClick={() => reserve(it)} disabled={blocked} className="rounded bg-fuchsia-600 px-2 py-0.5 text-[11px] font-bold hover:bg-fuchsia-500 disabled:bg-white/10 disabled:text-white/40">
+                      {current ? '예약' : '부르기'}
+                    </button>
+                    {current && !blocked && (
+                      <button onClick={() => reserve(it, true)} className="rounded bg-white/10 px-2 py-0.5 text-[10px] hover:bg-white/20">
+                        바로
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="flex shrink-0 flex-col gap-0.5">
-                  <button onClick={() => reserve(it)} className="rounded bg-fuchsia-600 px-2 py-0.5 text-[11px] font-bold hover:bg-fuchsia-500">
-                    {current ? '예약' : '부르기'}
-                  </button>
-                  {current && (
-                    <button onClick={() => reserve(it, true)} className="rounded bg-white/10 px-2 py-0.5 text-[10px] hover:bg-white/20">
-                      바로
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {toast && <div className="rounded bg-black/70 px-2 py-1 text-center text-xs text-amber-200">{toast}</div>}
         </div>

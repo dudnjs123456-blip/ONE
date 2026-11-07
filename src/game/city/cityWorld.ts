@@ -571,6 +571,8 @@ const MINUTES_PER_FRAME = 1 / 3600; // 게임 시각 = 실제 시각 (1초 = 1�
  * 행인을 때리면: 체력바가 뜨고, 쓰러뜨리면 지갑의 돈(가끔 소지품)을 줍는다.
  * 본 사람들이 신고하면 경찰이 출동하고, 현장에 남아 있다 잡히면 집 앞에서 다시 시작.
  */
+/** PC방 한 판 이용료 (골드) */
+export const PC_ROOM_FEE = 20;
 /** 분수 동전 (골드) */
 export const COIN_TOSS = 10;
 /** 버스 교통비 (골드) */
@@ -631,6 +633,8 @@ export class CityWorld {
   karaokeRequest = false;
   /** 버스정류장에서 E → 행선지 고르기 창 */
   busRequest = false;
+  /** PC방에서 E → 게임 고르기 창 */
+  pcRoomRequest = false;
   /** 펫샵 창을 열어 달라 (UI 가 읽고 끈다) */
   petShopRequest = false;
   /** 펫샵 놀이터에서 고른 아이 (UI 가 분양 창을 연다) */
@@ -717,7 +721,7 @@ export class CityWorld {
   /** 보낼 채팅 (마을 연결이 가져가서 보낸다) */
   chatOut: string[] = [];
   /** 머리 위 말풍선으로 띄울 것 (화면이 가져간다). who = 'me' 또는 친구 id */
-  chatBubbles: { who: string; text: string }[] = [];
+  chatBubbles: { who: string; name: string; text: string }[] = [];
   private lastChatAt = -Infinity;
   /** 지금 들어가 있는 집의 주인 (null = 내 집) */
   homeOwner: string | null = null;
@@ -1743,7 +1747,7 @@ export class CityWorld {
     if (now - this.lastChatAt < CHAT_GAP_MS) return '조금 천천히 보내 주세요';
     this.lastChatAt = now;
     this.addChat({ from: 'me', name: this.netName || '나', text, at: now, me: true });
-    this.chatBubbles.push({ who: 'me', text });
+    this.chatBubbles.push({ who: 'me', name: this.netName || '나', text });
     this.chatOut.push(text);
     return null;
   }
@@ -1752,14 +1756,24 @@ export class CityWorld {
   receiveChat(id: string, name: string, raw: string, now = Date.now()) {
     const text = cleanChat(String(raw ?? ''));
     if (!text) return;
-    this.addChat({ from: id, name: String(name || '이웃').slice(0, 16), text, at: now, me: false });
-    this.chatBubbles.push({ who: id, text });
+    const nm = String(name || '이웃').slice(0, 16);
+    this.addChat({ from: id, name: nm, text, at: now, me: false });
+    this.chatBubbles.push({ who: id, name: nm, text });
   }
 
   private addChat(l: ChatLine) {
     this.chatLog.push(l);
     if (this.chatLog.length > CHAT_KEEP) this.chatLog.splice(0, this.chatLog.length - CHAT_KEEP);
     this.chatVersion++;
+  }
+
+  /** 골드 쓰기 (모자라면 false) */
+  spendGold(amount: number): boolean {
+    const pr = this.profile;
+    if (amount < 0 || pr.gold < amount) return false;
+    pr.gold -= amount;
+    saveProfile(pr);
+    return true;
   }
 
   /** 분수에 동전 던지기 (10G): 소원 한마디. 가끔 반짝 (작은 행운 — 골드 조금 돌려받기) */
@@ -2518,6 +2532,10 @@ export class CityWorld {
         return;
       }
       this.busRequest = true;
+      return;
+    }
+    if (poi.kind === 'shop' && poi.label === 'PC방') {
+      this.pcRoomRequest = true;
       return;
     }
     if (poi.kind === 'shop' && poi.label === '코인노래방') {
