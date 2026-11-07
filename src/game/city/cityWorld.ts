@@ -7,6 +7,7 @@ import type { Buttons } from '../core/types';
 import { applyHit, detectHit, type CombatEvent } from '../core/combat';
 import { ITEMS, ITEM_IDS } from '../data/items';
 import { SHOPS, type ShopDef } from '../data/shops';
+import { CHAT_GAP_MS, CHAT_KEEP, cleanChat, type ChatLine } from './chat';
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
@@ -709,6 +710,15 @@ export class CityWorld {
   readonly remotes = new Map<string, RemotePlayer>();
   /** 친구에게 보낼 타격 (네트워크가 가져간다) */
   outbox: NetHit[] = [];
+  /** 동네 채팅 기록 (최근 것이 끝) */
+  chatLog: ChatLine[] = [];
+  /** 채팅이 바뀔 때마다 1 씩 (화면 갱신용) */
+  chatVersion = 0;
+  /** 보낼 채팅 (마을 연결이 가져가서 보낸다) */
+  chatOut: string[] = [];
+  /** 머리 위 말풍선으로 띄울 것 (화면이 가져간다). who = 'me' 또는 친구 id */
+  chatBubbles: { who: string; text: string }[] = [];
+  private lastChatAt = -Infinity;
   /** 지금 들어가 있는 집의 주인 (null = 내 집) */
   homeOwner: string | null = null;
   /** 마지막으로 나를 때린 친구 */
@@ -1713,6 +1723,35 @@ export class CityWorld {
     pr.casino.lost += amount;
     saveProfile(pr);
     return true;
+  }
+
+  /**
+   * 채팅 보내기: 다듬고(길이·욕설) 기록·말풍선에 올린 뒤 마을로 보낸다.
+   * @returns 못 보낸 이유 (보냈으면 null)
+   */
+  postChat(raw: string, now = Date.now()): string | null {
+    const text = cleanChat(raw);
+    if (!text) return '보낼 말을 입력해 주세요';
+    if (now - this.lastChatAt < CHAT_GAP_MS) return '조금 천천히 보내 주세요';
+    this.lastChatAt = now;
+    this.addChat({ from: 'me', name: this.netName || '나', text, at: now, me: true });
+    this.chatBubbles.push({ who: 'me', text });
+    this.chatOut.push(text);
+    return null;
+  }
+
+  /** 친구가 보낸 채팅 (마을 연결이 부른다). 같은 곳에 있으면 그 친구 머리 위에도 띄운다 */
+  receiveChat(id: string, name: string, raw: string, now = Date.now()) {
+    const text = cleanChat(String(raw ?? ''));
+    if (!text) return;
+    this.addChat({ from: id, name: String(name || '이웃').slice(0, 16), text, at: now, me: false });
+    this.chatBubbles.push({ who: id, text });
+  }
+
+  private addChat(l: ChatLine) {
+    this.chatLog.push(l);
+    if (this.chatLog.length > CHAT_KEEP) this.chatLog.splice(0, this.chatLog.length - CHAT_KEEP);
+    this.chatVersion++;
   }
 
   /** 분수에 동전 던지기 (10G): 소원 한마디. 가끔 반짝 (작은 행운 — 골드 조금 돌려받기) */

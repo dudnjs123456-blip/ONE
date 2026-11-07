@@ -15,6 +15,7 @@ import { apartmentSigns, buildVillaEntrance, decorateFacade, swingDoors, type Do
 import { instanceProp } from './propsKit';
 import { CarKit, type CarView } from './carKit';
 import { TreeKit } from './treeKit';
+import { ChatBubbles } from './chatBubbles';
 import { RoomPortal } from './roomPortal';
 import { unitPlace, villaFloor } from '../city/villa';
 import { buildCorridorScene, type CorridorView } from './corridorScene';
@@ -264,6 +265,7 @@ export class CityRenderer {
   private drawSize = new THREE.Vector2();
   /** 실사풍 가로수 (바람에 흔들린다) */
   private treeKit = new TreeKit();
+  private chatBubbles = new ChatBubbles();
   /** 공원 분수·그네 등 매 프레임 움직이는 것 */
   private parkAnims: ((t: number) => void)[] = [];
   /** 횡단보도·펜스·신호등 */
@@ -666,6 +668,16 @@ export class CityRenderer {
     // 1인칭: 내 몸은 감추고 눈높이 카메라로 (창밖 보기·잠자기 중엔 그쪽 카메라)
     const fp = world.firstPerson && !look && !world.mirror && !(sv && sv.rest > 0) && world.seat?.spot !== 'sofa';
     this.playerLift.visible = !fp;
+    // 채팅 말풍선: 지금 장면에 붙이고, 말한 사람 머리 위를 따라간다 (같은 곳에 있는 친구만)
+    const nowMs = performance.now();
+    for (const c of world.chatBubbles.splice(0)) this.chatBubbles.add(c.who, c.text, nowMs);
+    const chatScene = this.sceneOf(view);
+    if (this.chatBubbles.layer.parent !== chatScene) chatScene.add(this.chatBubbles.layer);
+    this.chatBubbles.update(nowMs, (who) => {
+      if (who === 'me') return fp || look ? null : world.player;
+      const r = world.remotes.get(who);
+      return r && r.room === world.roomKey ? r.fighter : null;
+    });
     const worn = world.outfitPreview ?? wornList(world.profile.wardrobe);
     if (worn.join(',') !== this.outfitKey) {
       this.outfitKey = worn.join(',');
@@ -1176,6 +1188,7 @@ export class CityRenderer {
   }
 
   dispose() {
+    this.chatBubbles.dispose();
     this.fx.dispose();
     this.weatherFx.dispose();
     this.groundKit.dispose();

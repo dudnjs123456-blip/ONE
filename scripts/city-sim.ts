@@ -1,5 +1,6 @@
 // 도시 로직 헤드리스 검증: npx tsx scripts/city-sim.ts
 import { BUS_FARE, COIN_TOSS, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
+import { CHAT_MAX, wrapChat } from '../src/game/city/chat';
 import { LifeTracker } from '../src/game/core/life';
 import { MOVES } from '../src/game/data/moves';
 import { bjDeal, bjHit, bjStand, handValue, hlOdds, isBlackjack, rollSicBo, rouletteMultiplier, spinRoulette, spinSlots } from '../src/game/city/casino';
@@ -1480,4 +1481,22 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   cmd2 = { move: null, run: false, interact: false };
   for (let i = 0; i < 240 && pw.location !== 'city'; i++) pw.step();
   check('leave north shop onto its sidewalk', pw.location === 'city' && pw.player.z < ph.z + 1.2 - 0.2 && Math.abs(pw.player.x - ph.x) < 1, `${pw.player.x.toFixed(1)},${pw.player.z.toFixed(1)} vs ${ph.x.toFixed(1)},${ph.z.toFixed(1)}`);
+}
+
+// 동네 채팅: 다듬기(길이·욕설), 도배 제한, 친구 말 받기, 말풍선 줄 나누기
+{
+  const cw = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  check('chat: empty is rejected', cw.postChat('   ', 1000) !== null);
+  check('chat: send', cw.postChat('안녕하세요 반가워요', 2000) === null && cw.chatLog.at(-1)?.me === true && cw.chatOut.length === 1 && cw.chatBubbles.length === 1);
+  check('chat: too fast is rejected', cw.postChat('도배', 2500) !== null);
+  cw.postChat('이 시 발 뭐야', 4000);
+  check('chat: profanity masked (spaced too)', !/시\s*발/.test(cw.chatLog.at(-1)!.text) && cw.chatLog.at(-1)!.text.includes('**'), cw.chatLog.at(-1)!.text);
+  cw.postChat('가'.repeat(200), 6000);
+  check('chat: max length', cw.chatLog.at(-1)!.text.length === CHAT_MAX);
+  cw.receiveChat('friend-1', 'friend1', '같이 낚시 가요!', 7000);
+  check('chat: receive from friend', cw.chatLog.at(-1)?.name === 'friend1' && !cw.chatLog.at(-1)?.me && cw.chatBubbles.at(-1)?.who === 'friend-1');
+  for (let i = 0; i < 80; i++) cw.receiveChat('f', 'f', `m${i}`, 8000 + i);
+  check('chat: keeps last 50', cw.chatLog.length === 50 && cw.chatLog.at(-1)!.text === 'm79');
+  const wl = wrapChat('오늘 저녁에 한강공원 분수 앞에서 다 같이 만나서 치킨 먹을 사람 손');
+  check('chat bubble: wraps to at most 3 lines', wl.length <= 3 && wl.every((l) => l.length <= 14), wl.join(' / '));
 }

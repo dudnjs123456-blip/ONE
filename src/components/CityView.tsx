@@ -23,6 +23,7 @@ import WardrobeView from './WardrobeView';
 import CasinoPanel from './CasinoPanel';
 import KaraokePanel from './KaraokePanel';
 import BusPanel from './BusPanel';
+import ChatBox from './ChatBox';
 import PetPanel from './PetPanel';
 import FishingPanel, { type FishTab } from './FishingPanel';
 import FishingShopPanel, { type FishShopTab } from './FishingShopPanel';
@@ -606,6 +607,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       {loading && <LoadingScreen {...loading} />}
       {/* 폰·태블릿: 화면 조작 버튼 (뒤에 그려지는 창들이 이 위를 덮는다) */}
       {touch && !loading && <CityTouchControls />}
+      {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}
       <div
         ref={perfRef}
         style={{ display: 'none' }}

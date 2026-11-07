@@ -98,6 +98,10 @@ export class TownLink {
         // 받기까지 걸린 시간: 왕복 시간의 절반쯤
         tvApplyRemote(m.tv, (this.ping ?? 150) / 2000);
       })
+      .on('broadcast', { event: 'chat' }, ({ payload }) => {
+        const m = payload as { id: string; name: string; text: string };
+        if (m && m.id !== me && typeof m.text === 'string') this.world.receiveChat(m.id, typeof m.name === 'string' ? m.name : '이웃', m.text);
+      })
       .on('broadcast', { event: 'hit' }, ({ payload }) => {
         const m = payload as { from: string; h: NetHit };
         if (m.h.to === me) this.world.receiveRemoteHit(m.from, m.h);
@@ -129,9 +133,12 @@ export class TownLink {
     const w = this.world;
     if (!ch || this.status !== 'online') {
       w.outbox.length = 0;
+      w.chatOut.length = 0;
       return;
     }
     for (const h of w.outbox.splice(0)) void ch.send({ type: 'broadcast', event: 'hit', payload: { from: this.acc.userId, h } });
+    // 채팅은 혼자여도 보낸다 (곧 들어올 친구는 못 보지만, 접속 중인 사람에겐 바로)
+    for (const text of w.chatOut.splice(0)) void ch.send({ type: 'broadcast', event: 'chat', payload: { id: this.acc.userId, name: this.acc.username, text } });
     // 혼자면 아무것도 보내지 않는다 (메시지 사용량 절약)
     if (!this.others.size) {
       this.ping = null;
