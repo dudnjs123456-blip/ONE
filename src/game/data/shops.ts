@@ -8,6 +8,8 @@ export interface MenuItem {
   fatigue?: number;
   /** 체력 회복 (약국) */
   hp?: number;
+  /** 먹지 않고 가방에 넣는 물건 (아이템 id, 꽃집) */
+  keep?: string;
   desc: string;
 }
 
@@ -139,6 +141,18 @@ export const SHOPS: Record<string, ShopDef> = Object.fromEntries(
         { id: 'painkiller', name: '진통제', icon: '💊', price: 45, hunger: 0, hp: 90, desc: '맞은 데가 욱신욱신할 때.' },
         { id: 'tonic', name: '피로회복제', icon: '🧃', price: 20, hunger: 0, fatigue: 20, desc: '한 병 쭉. 눈이 번쩍.' },
         { id: 'vitamin', name: '비타민 젤리', icon: '🍬', price: 12, hunger: 2, hp: 10, fatigue: 6, desc: '새콤달콤 하루 한 알.' },
+      ],
+    }),
+    shop({
+      // 꽃집: 꽃을 사서 가방에 넣었다가 박 반장에게 선물한다
+      sign: '꽃집', keeper: '꽃집 사장님', face: '👩‍🌾',
+      greetings: ['어서 오세요~ 오늘 꽃이 참 예쁘게 들어왔어요.', '선물하시게요? 받는 분이 누구세요?'],
+      recommend: '고마운 분께는 장미 한 송이, 특별한 날엔 꽃다발이 최고예요. 경비 아저씨들도 꽃 받으면 엄청 좋아하세요.',
+      gossip: ['행복빌라 박 반장님은 무뚝뚝해 보여도 꽃 좋아하세요. 예전에 화분 키우셨대요.', '봄엔 한강공원에 벚꽃이 정말 예뻐요.'],
+      thanks: ['예쁘게 포장해 드렸어요~', '좋은 하루 보내세요!'],
+      menu: [
+        { id: 'buy-rose', name: '장미 한 송이', icon: '🌹', price: 30, hunger: 0, keep: 'rose', desc: '가방에 넣기. 선물하면 호감도 +4.' },
+        { id: 'buy-bouquet', name: '꽃다발', icon: '💐', price: 90, hunger: 0, keep: 'bouquet', desc: '가방에 넣기. 선물하면 호감도 +10.' },
       ],
     }),
   ].map((s) => [s.sign, s]),

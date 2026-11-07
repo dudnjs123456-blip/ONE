@@ -17,6 +17,13 @@ export const ITEMS: Record<string, ItemDef> = {
   battery: { id: 'battery', name: '보조배터리', icon: '🔋', desc: '30% 충전돼 있다.', value: 12 },
   receipt: { id: 'receipt', name: '영수증', icon: '🧾', desc: '치킨 두 마리, 콜라 1.25L.', value: 0 },
   keyring: { id: 'keyring', name: '열쇠고리', icon: '🔑', desc: '귀여운 캐릭터 열쇠고리.', value: 5 },
+  // 꽃집에서 사는 선물 (행인이 떨어뜨리지 않는다)
+  rose: { id: 'rose', name: '장미 한 송이', icon: '🌹', desc: '박 반장에게 선물하면 좋아한다 (하루 한 번).', value: 10 },
+  bouquet: { id: 'bouquet', name: '꽃다발', icon: '💐', desc: '정성 가득한 꽃다발. 선물하면 크게 기뻐한다.', value: 30 },
 };
 
-export const ITEM_IDS = Object.keys(ITEMS);
+/** 행인이 떨어뜨릴 수 있는 소지품 (꽃집 꽃은 빼고) */
+export const ITEM_IDS = ['tcard', 'coupon', 'gum', 'earbuds', 'lotto', 'battery', 'receipt', 'keyring'] as const;
+
+/** 선물용 꽃: 아이템 id → 호감도 */
+export const FLOWER_GIFTS: Record<string, number> = { rose: 4, bouquet: 10 };

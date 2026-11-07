@@ -1488,6 +1488,14 @@ export class CityWorld {
     const pr = this.profile;
     if (pr.gold < item.price) return { ok: false, message: `아이고… ${item.price - pr.gold}G 가 모자라네요.` };
     if (item.hunger > 0 && pr.life.hunger < 5 && !item.fatigue) return { ok: false, message: '배불러서 더는 못 먹겠다…' };
+    // 꽃집 꽃처럼 가방에 넣는 물건
+    if (item.keep) {
+      if (pr.gold < item.price) return { ok: false, message: `${item.price - pr.gold}G 가 모자라요.` };
+      pr.gold -= item.price;
+      pr.inventory[item.keep] = (pr.inventory[item.keep] ?? 0) + 1;
+      saveProfile(pr);
+      return { ok: true, message: `${item.icon} ${item.name} — 가방에 넣었어요 (${pr.inventory[item.keep]}개) · "${s.thanks[Math.floor(this.rng() * s.thanks.length)]}"` };
+    }
     if (item.hp && !item.fatigue && this.player.hp >= this.player.maxHp) return { ok: false, message: '지금은 다친 데가 없어요.' };
     pr.gold -= item.price;
     pr.life.hunger = Math.max(0, pr.life.hunger - item.hunger);

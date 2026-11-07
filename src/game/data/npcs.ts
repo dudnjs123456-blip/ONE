@@ -85,6 +85,8 @@ export interface NpcBond {
   memories: { day: number; text: string }[];
   /** 마지막으로 커피를 준 날 */
   lastGiftDay?: number;
+  /** 마지막으로 꽃을 받은 날 (하루 한 번만 호감도가 오른다) */
+  lastFlowerDay?: number;
 }
 
 /** 대화 한 번에 API 로 보내는 게임 상황 */

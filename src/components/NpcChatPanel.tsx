@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { applyReply, ask, bondOf, greeting, type ChatLine } from '@/game/city/npcChat';
+import { applyReply, ask, bondOf, giftFlower, greeting, type ChatLine } from '@/game/city/npcChat';
+import { FLOWER_GIFTS, ITEMS } from '@/game/data/items';
 import { EMOTION_FACE, TALK_NPCS, type NpcEmotion } from '@/game/data/npcs';
 
 /**
@@ -84,6 +85,28 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
         </div>
 
         <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+          {/* 가방에 꽃이 있으면 선물 (하루 한 번 호감도 +) */}
+          {Object.keys(FLOWER_GIFTS)
+            .filter((id) => (world.profile.inventory[id] ?? 0) > 0)
+            .map((id) => (
+              <button
+                key={id}
+                disabled={busy}
+                onClick={() => {
+                  const why = giftFlower(world, npcId, id);
+                  if (why) {
+                    setNote(why);
+                    return;
+                  }
+                  setAffinity(bondOf(world, npcId).affinity);
+                  setNote(`${ITEMS[id].icon} ${ITEMS[id].name}을(를) 드렸다 · 호감도 +${FLOWER_GIFTS[id]}`);
+                  void send(`(${ITEMS[id].name}을 건넨다) 반장님, 이거 받으세요.`);
+                }}
+                className="rounded-full border border-pink-300/50 bg-pink-500/15 px-2.5 py-1 text-xs text-pink-100 hover:bg-pink-500/30 disabled:opacity-40"
+              >
+                {ITEMS[id].icon} {ITEMS[id].name} 선물 ({world.profile.inventory[id]})
+              </button>
+            ))}
           {npc.suggestions.map((s) => (
             <button key={s} disabled={busy} onClick={() => send(s)} className="rounded-full border border-white/15 px-2.5 py-1 text-xs hover:bg-white/10 disabled:opacity-40">
               {s}

@@ -25,7 +25,7 @@ function iconOf(p: Poi) {
 
 function groupOf(p: Poi) {
   if (p.kind === 'home') return '내 집';
-  if (p.kind === 'shop') return p.label === '약국' ? '약국' : SHOPS[p.label] ? '음식점' : '가게';
+  if (p.kind === 'shop') return p.label === '약국' || p.label === '꽃집' ? p.label : SHOPS[p.label] ? '음식점' : '가게';
   if (p.kind === 'park') return '공원';
   if (p.kind === 'job') return '일자리';
   if (p.kind === 'casino') return '오락';

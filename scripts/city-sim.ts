@@ -1,6 +1,8 @@
 // 도시 로직 헤드리스 검증: npx tsx scripts/city-sim.ts
 import { BUS_FARE, COIN_TOSS, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import { CHAT_MAX, wrapChat } from '../src/game/city/chat';
+import { bondOf, giftFlower } from '../src/game/city/npcChat';
+import { ITEM_IDS } from '../src/game/data/items';
 import { LifeTracker } from '../src/game/core/life';
 import { MOVES } from '../src/game/data/moves';
 import { bjDeal, bjHit, bjStand, handValue, hlOdds, isBlackjack, rollSicBo, rouletteMultiplier, spinRoulette, spinSlots } from '../src/game/city/casino';
@@ -1499,4 +1501,18 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('chat: keeps last 50', cw.chatLog.length === 50 && cw.chatLog.at(-1)!.text === 'm79');
   const wl = wrapChat('오늘 저녁에 한강공원 분수 앞에서 다 같이 만나서 치킨 먹을 사람 손');
   check('chat bubble: wraps to at most 3 lines', wl.length <= 3 && wl.every((l) => l.length <= 14), wl.join(' / '));
+}
+
+// 꽃집: 꽃은 가방에, 박 반장에게 선물하면 하루 한 번 호감도 +, 행인은 꽃을 안 떨어뜨림
+{
+  const fw = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  fw.profile.gold = 500;
+  const r = fw.buyFood('buy-rose', '꽃집');
+  check('flower: rose goes into the bag', r.ok && fw.profile.inventory.rose === 1 && fw.profile.gold === 470, r.message);
+  fw.buyFood('buy-bouquet', '꽃집');
+  const before = bondOf(fw, 'senior').affinity;
+  check('flower: gift rose raises affinity +4', giftFlower(fw, 'senior', 'rose') === null && bondOf(fw, 'senior').affinity === Math.min(100, before + 4) && !fw.profile.inventory.rose);
+  check('flower: once a day', giftFlower(fw, 'senior', 'bouquet') !== null && fw.profile.inventory.bouquet === 1);
+  check('flower: not dropped by pedestrians', !(ITEM_IDS as readonly string[]).includes('rose'));
+  check('flower shop on the map', fw.map.pois.some((p) => p.label === '꽃집'));
 }

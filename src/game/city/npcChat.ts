@@ -1,6 +1,7 @@
 import { saveProfile } from '../core/profile';
 import { TALK_NPCS, type NpcBond, type NpcContext, type NpcReply } from '../data/npcs';
 import type { CityWorld } from './cityWorld';
+import { FLOWER_GIFTS } from '../data/items';
 
 /** 기억은 최근 것만 남긴다 */
 const MAX_MEMORIES = 15;
@@ -90,6 +91,23 @@ export async function ask(world: CityWorld, npcId: string, lines: ChatLine[]): P
     // 네트워크 오류 → 오프라인 대사
   }
   return offlineReply(lines[lines.length - 1]?.content ?? '', context);
+}
+
+/** 가방의 꽃을 선물한다 (하루 한 번 호감도 +). @returns 못 주면 이유, 줬으면 null */
+export function giftFlower(world: CityWorld, npcId: string, itemId: string): string | null {
+  const bonus = FLOWER_GIFTS[itemId];
+  const inv = world.profile.inventory;
+  if (!bonus || !(inv[itemId] > 0)) return '가방에 꽃이 없어요';
+  const bond = bondOf(world, npcId);
+  if (bond.lastFlowerDay === world.day) return '오늘은 이미 꽃을 드렸어요 (내일 또)';
+  inv[itemId]--;
+  if (inv[itemId] <= 0) delete inv[itemId];
+  bond.lastFlowerDay = world.day;
+  bond.affinity = Math.min(100, bond.affinity + bonus);
+  bond.memories.push({ day: world.day, text: itemId === 'bouquet' ? '후배가 꽃다발을 선물했다' : '후배가 장미 한 송이를 줬다' });
+  if (bond.memories.length > MAX_MEMORIES) bond.memories.splice(0, bond.memories.length - MAX_MEMORIES);
+  saveProfile(world.profile);
+  return null;
 }
 
 /** 대답을 게임에 반영: 호감도·기억·커피. @returns 화면에 띄울 알림 (없으면 null) */
