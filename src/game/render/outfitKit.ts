@@ -475,7 +475,10 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
  * 외곽선 굵기는 미터 단위라 카메라가 가까울수록(대전·동네·코디 창) 화면에서 두꺼워 보인다.
  * 필드 카메라(약 12m, 시야 45°)에서 보이는 굵기를 기준으로, 그보다 가까우면 그만큼 가늘게 해서
  * 어디서 보든 화면 속 선 굵기가 필드와 비슷하게 한다. 더 멀 때는 지금처럼 둔다.
+ * 거의 검정이던 선은 진해 보여서, 색은 부드러운 짙은 장밋빛으로 바꾸고 굵기도 절반으로 줄인다.
  */
+const SOFT_OUTLINE = 0x7a6070;
+const OUTLINE_SCALE = 0.5;
 const FIELD_VIEW = Math.hypot(8.5, 9) * Math.tan(THREE.MathUtils.degToRad(45 / 2));
 export function keepFieldOutline(root: THREE.Object3D) {
   const mats = new Set<THREE.Material>();
@@ -484,6 +487,7 @@ export function keepFieldOutline(root: THREE.Object3D) {
     if (m.isMesh && m.userData.isOutline) mats.add(m.material as THREE.Material);
   });
   for (const mat of mats) {
+    (mat as THREE.MeshBasicMaterial).color?.setHex(SOFT_OUTLINE);
     const base = mat.onBeforeCompile;
     mat.onBeforeCompile = (shader, r) => {
       base.call(mat, shader, r);
@@ -491,7 +495,7 @@ export function keepFieldOutline(root: THREE.Object3D) {
         'transformed += normalize(normal) * outlineWidth;',
         // 화면 속 크기 ∝ 1 / (거리 × tan(시야/2)), projectionMatrix[1][1] = 1 / tan(시야/2)
         `float olView = length((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz) / projectionMatrix[1][1];
-  transformed += normalize(normal) * outlineWidth * clamp(olView / ${FIELD_VIEW.toFixed(3)}, 0.15, 1.0);`,
+  transformed += normalize(normal) * outlineWidth * ${OUTLINE_SCALE.toFixed(2)} * clamp(olView / ${FIELD_VIEW.toFixed(3)}, 0.15, 1.0);`,
       );
     };
     mat.needsUpdate = true;
