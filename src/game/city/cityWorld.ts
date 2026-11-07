@@ -34,9 +34,10 @@ import { PET_BY_ID, PET_GOOD_BY_ID, PET_SHOP_NAME, coatOf } from '../data/pets';
 import { FishingSession, type FishPhase, type FishResult, type FishScene } from './fishing';
 import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
 import { weatherAt, type WeatherState } from './weather';
-import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt } from './worldClock';
+import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt, sharedNow } from './worldClock';
+import { PARK, RIDES, WHEEL, WHEEL_RIDE_MS, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
 
-export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store';
+export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store' | 'park';
 
 /** 마지막으로 있던 곳 (새로고침 후 이어서 시작) */
 export interface PlaceSnapshot {
@@ -341,6 +342,8 @@ export interface RemotePlayer {
   job: string | null;
   /** 친구가 근무를 시작한 실제 시각 */
   jobAt: number;
+  /** 친구가 타고 있는 놀이기구 좌석 (놀이공원) */
+  ride?: { id: RideId; seat: number } | null;
   /** 친구가 앉거나 누운 곳 (경비 데스크·소파). 소파 동작이 바뀐 프레임도 기억해 자세를 이어 그린다 */
   seat: { spot: 'desk' | 'sofa'; amt: number; act: SofaAct; prev: SofaAct; at: number; pt: number } | null;
   /** 친구가 근무하며 보내 주는 로비·복도 사람들 (친구 화면과 같은 장면) */
@@ -424,6 +427,8 @@ export interface NetState {
   pt?: NetPet[];
   /** 코인노래방에서 빌린 방 번호 (노래방 안에 있을 때만). 앉기·노래 자세도 이 방 자리에서 */
   kb?: number;
+  /** 타고 있는 놀이기구 '놀이기구:좌석' (놀이공원에서 탈 때만) */
+  rd?: string;
 }
 
 /** 내가 친구를 때렸다. 맞은 쪽이 혼자 할 때와 같은 계산(applyHit)으로 자기 체력에서 뺀다 */
@@ -606,6 +611,16 @@ export class CityWorld {
   cars: Car[] = [];
   npcs: Npc[] = [];
   nearby: Poi | null = null;
+  /** 놀이공원: 타고 있는 놀이기구 (at = 탄 실제 시각, cycle = 탄 운행 회차) */
+  ride: { id: RideId; seat: number; at: number; cycle: number } | null = null;
+  /** 놀이공원: 줄 서 있는 놀이기구 (다음 탑승 시간이 되면 자동으로 탄다) */
+  rideQueue: RideId | null = null;
+  /** 탑승 중 고개 돌리기 (방향키) */
+  rideLookYaw = 0;
+  rideLookPitch = 0;
+  private rideSaidAt = -999;
+  /** 놀이기구 시계 (모두 같은 시각). 시험에서는 바꿔 끼운다 */
+  parkClock: () => number = sharedNow;
   toast: { text: string; until: number } | null = null;
   /** 장소가 바뀐 프레임 (렌더러가 카메라·장면을 바꾼다) */
   locationChangedAt = 0;
@@ -930,7 +945,7 @@ export class CityWorld {
     const looking = this.lookingOut;
     if (looking) this.stepLookOut();
     const inp: CityInput = this.dialog || this.npcChat || this.elevatorOpen || looking || sleeping ? { move: null, run: false, interact: false } : { ...this.input.read(this) };
-    if (this.firstPerson && !looking && !sleeping) this.fpInput(inp);
+    if (this.firstPerson && !looking && !sleeping && !this.ride) this.fpInput(inp);
     if (this.fishing) this.stepFishing(inp);
     if (!sleeping && this.downedAt === null) this.stepCare(inp);
     if (sleeping) this.stepSleep(inp);
@@ -941,6 +956,7 @@ export class CityWorld {
       this.stepAutoDesk(inp);
     }
     if (this.seat) this.stepSeat(inp);
+    if (this.ride || this.rideQueue) this.stepRide(inp);
     // 자는 동안의 피로·배고픔·체력은 sleepRecover 가 실제 잔 시간만큼 바꾼다
     const { slow, canRun } = sleeping ? { slow: 1, canRun: true } : this.tickLife(inp.run && !!inp.move);
     // 피곤하거나 배고프면 느려지고, 한계(100)면 달릴 수 없다
@@ -985,7 +1001,7 @@ export class CityWorld {
     if (!frozen) this.hitRemotes();
 
     this.regenHp(inp);
-    this.nearby = sleeping || this.doorway || this.lookingOut || this.fishing || this.seat?.spot === 'sofa' ? null : this.findNearby();
+    this.nearby = sleeping || this.doorway || this.lookingOut || this.fishing || this.ride || this.seat?.spot === 'sofa' ? null : this.findNearby();
     if (inp.interact && !sleeping && this.job?.tryInteract()) {
       // 출입 확인 처리됨
     } else if (inp.interact && this.nearby) this.interact(this.nearby);
@@ -1056,9 +1072,187 @@ export class CityWorld {
     this.say(text, 6);
   }
 
+  // ───────────────────────── 놀이공원 ─────────────────────────
+
+  /** 지하철을 타고 놀이공원으로 (역 앞에서 내린다) */
+  private goToPark() {
+    this.parkReturn = { x: this.player.x, z: this.player.z };
+    this.moveTo('park', PARK.spawn.x, PARK.spawn.z, 0, -1);
+    this.say('🎡 한강랜드에 도착! 놀이기구 앞에서 E 를 누르면 줄을 서요', 4);
+  }
+
+  /** 놀이공원 역에서 다시 동네(한강공원역)로 */
+  private leavePark() {
+    const st = this.map.pois.find((q) => q.kind === 'subway');
+    const back = this.parkReturn ?? (st ? { x: st.x, z: st.z + 1.5 } : { x: this.map.home.x, z: this.map.home.z + 1 });
+    this.moveTo('city', back.x, back.z, 0, 1);
+    this.say('🚇 동네로 돌아왔어요', 2.5);
+  }
+
+  private parkReturn: { x: number; z: number } | null = null;
+
+  /** 지금 이 놀이기구에 탈 수 있나 (탑승 시간 · 대관람차는 칸이 맨 아래 근처일 때) */
+  private canBoard(id: RideId, now: number) {
+    if (id === 'wheel') return wheelCabinAtBottom(now).off < 0.2;
+    const ck = rideClock(id, now);
+    return ck.phase === 'boarding' && ck.left > 1.5;
+  }
+
+  /** 비어 있는 좌석 (친구가 앉은 자리는 피한다). 무서운 자리부터: 맨 앞 칸 · 바이킹 양 끝 */
+  private freeSeat(id: RideId, now: number): number | null {
+    const taken = new Set<number>();
+    for (const r of this.remotes.values()) if (r.room === this.roomKey && r.ride?.id === id) taken.add(r.ride.seat);
+    if (id === 'wheel') {
+      const { cabin } = wheelCabinAtBottom(now);
+      for (let j = 0; j < 4; j++) if (!taken.has(cabin * 4 + j)) return cabin * 4 + j;
+      return null;
+    }
+    const n = RIDES[id].seats;
+    const order = id === 'viking' ? [0, 1, 2, 9, 10, 11, 3, 4, 5, 6, 7, 8] : Array.from({ length: n }, (_, i) => i);
+    for (const k of order) if (!taken.has(k)) return k;
+    return null;
+  }
+
+  private joinRide(id: RideId) {
+    if (this.ride) return;
+    const now = this.parkClock();
+    if (this.canBoard(id, now)) {
+      this.board(id, now);
+      return;
+    }
+    this.rideQueue = id;
+    this.say(`${RIDES[id].icon} 줄을 섰어요 — 다음 탑승까지 약 ${this.waitSeconds(id, now)}초 (멀리 가면 줄에서 빠져요)`, 3.5);
+  }
+
+  /** 다음 탑승까지 남은 초 */
+  private waitSeconds(id: RideId, now: number) {
+    if (id === 'wheel') {
+      const step = (2 * Math.PI) / WHEEL.cabins;
+      const speed = (2 * Math.PI) / WHEEL.period;
+      return Math.max(1, Math.ceil(Math.max(0, step - wheelCabinAtBottom(now).off - 0.2) / speed));
+    }
+    const ck = rideClock(id, now);
+    return Math.max(1, Math.ceil(ck.phase === 'boarding' ? RIDES[id].period - RIDES[id].board + ck.left : ck.nextBoard));
+  }
+
+  private board(id: RideId, now: number) {
+    const seat = this.freeSeat(id, now);
+    if (seat === null) {
+      this.say(`${RIDES[id].icon} 자리가 꽉 찼어요. 다음 운행을 기다려요`, 3);
+      this.rideQueue = id;
+      return;
+    }
+    this.rideQueue = null;
+    this.ride = { id, seat, at: now, cycle: rideClock(id, now).cycle };
+    this.rideLookYaw = 0;
+    this.rideLookPitch = 0;
+    const where = id === 'coaster' ? ` (${Math.floor(seat / 4) + 1}번째 칸${seat < 2 ? ' 맨 앞줄!' : ''})` : '';
+    this.say(id === 'wheel' ? '🎡 대관람차 탑승! 한 바퀴 도는 동안 경치를 즐겨요 (방향키로 둘러보기)' : `${RIDES[id].icon} 탑승${where} — 안전바를 내립니다. E: 출발 전에 내리기`, 4);
+  }
+
+  /** 내린다 (운행이 끝났거나 출발 전에 내렸다) */
+  private unboard(done: boolean) {
+    const r = this.ride;
+    if (!r) return;
+    this.ride = null;
+    const ex = RIDES[r.id].exit;
+    this.placePlayer(ex.x, ex.z, 0, 1);
+    if (done) {
+      const msg: Record<RideId, string> = {
+        coaster: '🎢 다리가 후들거린다… 한 번 더?',
+        drop: '🗼 심장이 아직도 쿵쾅거린다',
+        viking: '🏴‍☠️ 속이 울렁울렁…',
+        wheel: '🎡 한강이 한눈에 보였다',
+      };
+      this.say(msg[r.id], 3.5);
+    }
+  }
+
+  /** 줄 서기 · 탑승 중 (매 프레임) */
+  private stepRide(inp: CityInput) {
+    const now = this.parkClock();
+    if (this.location !== 'park') {
+      this.ride = null;
+      this.rideQueue = null;
+      return;
+    }
+    if (this.rideQueue && !this.ride) {
+      const q = this.rideQueue;
+      const g = RIDES[q].gate;
+      if (Math.hypot(this.player.x - g.x, this.player.z - g.z) > 6) {
+        this.rideQueue = null;
+        this.say('줄에서 빠졌어요', 2);
+      } else if (this.canBoard(q, now)) this.board(q, now);
+      return;
+    }
+    const r = this.ride!;
+    const ck = rideClock(r.id, now);
+    // 고개 돌리기: 방향키 (손을 떼면 천천히 앞으로)
+    const mv = inp.move;
+    if (mv) {
+      this.rideLookYaw = Math.max(-1.9, Math.min(1.9, this.rideLookYaw - mv.x * 0.035));
+      this.rideLookPitch = Math.max(-1.0, Math.min(0.9, this.rideLookPitch - mv.z * 0.025));
+    } else {
+      this.rideLookYaw *= 0.97;
+      this.rideLookPitch *= 0.97;
+    }
+    // 좌석은 그 자리에 고정: 걷기·공격·점프 입력은 쓰지 않는다
+    const leave = inp.interact;
+    inp.move = null;
+    inp.run = false;
+    inp.interact = false;
+    inp.jump = false;
+    inp.buttons = undefined;
+    inp.down = false;
+    inp.duck = false;
+    inp.crouch = false;
+    if (r.id === 'wheel') {
+      if (now - r.at >= WHEEL_RIDE_MS - 500) this.unboard(true);
+      return;
+    }
+    if (ck.cycle !== r.cycle || ck.phase === 'idle') {
+      this.unboard(true);
+      return;
+    }
+    if (ck.phase === 'boarding') {
+      if (leave) {
+        this.unboard(false);
+        this.say('내렸어요', 1.5);
+        return;
+      }
+      // 친구와 같은 자리에 동시에 앉았으면 id 가 큰 쪽이 다른 자리로
+      const me = this.netId ?? '';
+      for (const o of this.remotes.values()) {
+        if (o.room === this.roomKey && o.ride?.id === r.id && o.ride.seat === r.seat && o.id < me) {
+          const s2 = this.freeSeat(r.id, now);
+          if (s2 !== null) r.seat = s2;
+        }
+      }
+      const left = Math.ceil(ck.left);
+      if (this.frame - this.rideSaidAt > 60 && left <= 5) {
+        this.rideSaidAt = this.frame;
+        this.say(left <= 1 ? '🔔 출발합니다!' : `⏱️ 출발 ${left}초 전`, 1);
+      }
+    }
+  }
+
+  /** 탑승 · 줄 서기 안내 문구 */
+  private ridePrompt(): string | null {
+    if (this.location !== 'park') return null;
+    const now = this.parkClock();
+    if (this.ride) {
+      const R = RIDES[this.ride.id];
+      if (this.ride.id === 'wheel') return `${R.icon} 대관람차 — 방향키로 둘러보기 (내릴 때까지 ${Math.max(0, Math.ceil((WHEEL_RIDE_MS - (now - this.ride.at)) / 1000))}초)`;
+      const ck = rideClock(this.ride.id, now);
+      return ck.phase === 'boarding' ? `${R.icon} 출발까지 ${Math.ceil(ck.left)}초 · E: 내리기 · 방향키: 고개 돌리기` : `${R.icon} 운행 중! 방향키: 고개 돌리기`;
+    }
+    if (this.rideQueue) return `${RIDES[this.rideQueue].icon} 줄 서는 중 — 탑승까지 약 ${this.waitSeconds(this.rideQueue, now)}초`;
+    return null;
+  }
+
   /** HUD 안내: 근무 중 출입 확인이 먼저, 아니면 근처 장소 */
   get promptLabel(): string | null {
-    return this.job?.prompt ?? this.nearby?.label ?? null;
+    return this.job?.prompt ?? this.ridePrompt() ?? this.nearby?.label ?? null;
   }
 
   // ───────────────────────── 체력 ─────────────────────────
@@ -2385,6 +2579,7 @@ export class CityWorld {
       case 'leave':
         if (this.location === 'home') this.moveTo('city', this.map.home.x, this.map.home.z + 1, 0, 1);
         else if (this.location === 'lobby' || this.location === 'corridor') this.moveTo('city', this.map.home.x, this.map.home.z + 1.4, 0, 1);
+        else if (this.location === 'park') this.leavePark();
         next();
         return;
       case 'goto': {
@@ -2722,6 +2917,19 @@ export class CityWorld {
     }
     if (poi.id === 'park-center') {
       this.tossCoin();
+      return;
+    }
+    if (poi.kind === 'subway') {
+      if (this.job) {
+        this.say('🚇 근무 중에는 지하철을 탈 수 없어요');
+        return;
+      }
+      if (this.location === 'park') this.leavePark();
+      else this.goToPark();
+      return;
+    }
+    if (poi.id.startsWith('ride-')) {
+      this.joinRide(poi.id.slice(5) as RideId);
       return;
     }
     if (poi.kind === 'bus') {
@@ -3486,6 +3694,10 @@ export class CityWorld {
     // 가게를 벗어나면 입어보던 옷은 벗는다 (문 말고 다른 길로 나가도)
     if (loc !== 'store') this.trial = {};
     if (loc !== 'city') this.stopFishing(true);
+    if (loc !== 'park') {
+      this.ride = null;
+      this.rideQueue = null;
+    }
     this.lookingOut = false;
     this.location = loc;
     this.homeOwner = loc === 'home' ? owner : null;
@@ -3540,6 +3752,10 @@ export class CityWorld {
       this.pen = L.spots.length ? new PenSim(L.spots, this.todayStock(), this.day * 31 + 7) : null;
     } else if (s.loc === 'corridor') {
       this.floor = Math.max(2, Math.min(this.villaFloors, s.floor || 2));
+    } else if (s.loc === 'park') {
+      // 놀이공원은 역 앞에서 다시 시작 (타던 놀이기구는 내린 상태로)
+      this.moveTo('park', PARK.spawn.x, PARK.spawn.z, 0, -1);
+      return;
     } else if (s.loc !== 'city' && s.loc !== 'home' && s.loc !== 'lobby') return;
     this.moveTo(s.loc, s.x, s.z, fx, fz);
   }
@@ -3554,7 +3770,7 @@ export class CityWorld {
   private findNearby(): Poi | null {
     const p = this.player;
     // 친구 집에선 침대·냉장고 등은 쓰지 않고 소파와 현관만
-    const pois = this.location === 'home' ? (this.homeOwner ? HOME.pois.filter((q) => q.id === 'exit' || q.id === 'sofa') : HOME.pois) : this.location === 'lobby' ? LOBBY.pois : this.location === 'corridor' ? this.corridorPois() : this.location === 'store' ? this.storePois() : this.map.pois;
+    const pois = this.location === 'home' ? (this.homeOwner ? HOME.pois.filter((q) => q.id === 'exit' || q.id === 'sofa') : HOME.pois) : this.location === 'lobby' ? LOBBY.pois : this.location === 'corridor' ? this.corridorPois() : this.location === 'store' ? this.storePois() : this.location === 'park' ? parkPois() : this.map.pois;
     let best: Poi | null = null;
     let bestD = Infinity;
     for (const poi of pois) {
@@ -3655,6 +3871,7 @@ export class CityWorld {
       se: seat ? (seat.spot === 'sofa' ? this.sofa.id : 'd') : null,
       sa: seat ? Math.round(this.seatAmount * 20) / 20 : 0,
       ...(this.myBooth() ? { kb: this.karaokeRental!.room } : {}),
+      ...(this.ride ? { rd: `${this.ride.id}:${this.ride.seat}` } : {}),
       ...this.netExtras(),
     };
   }
@@ -3822,6 +4039,7 @@ export class CityWorld {
     if (job && this.job?.job.id === job && (r.jobAt < this.job.startedAt || (r.jobAt === this.job.startedAt && r.id < me))) this.yieldJob(r);
 
     r.booth = typeof s.kb === 'number' ? s.kb : null;
+    r.ride = parseRide(s.rd);
     const se = s.se ?? null;
     if (!se) r.seat = null;
     else {
@@ -4329,6 +4547,8 @@ export class CityWorld {
             ? this.corridorSolids()
             : where === 'store'
               ? [...(this.store?.furniture ?? []).map((f) => f.rect), ...(this.store?.kind === 'karaoke' && p === this.player ? this.lockedBoothRects() : [])]
+              : where === 'park'
+                ? parkSolids()
         : this.map.buildings.map((b) => ({ x0: b.x - b.w / 2, x1: b.x + b.w / 2, z0: b.z - b.d / 2, z1: b.z + b.d / 2 }));
     // 플레이어는 차도에 못 들어간다 (횡단보도로만 건넌다). 경찰·행인은 그대로
     if (where === 'city' && roads) solids.push(...this.roadRects);
@@ -4359,7 +4579,7 @@ export class CityWorld {
         }
       }
     }
-    const b = where === 'home' ? HOME.room : where === 'lobby' ? LOBBY.room : where === 'corridor' ? CORRIDOR.room : where === 'store' && this.store ? this.store.room : this.map.bounds;
+    const b = where === 'home' ? HOME.room : where === 'lobby' ? LOBBY.room : where === 'corridor' ? CORRIDOR.room : where === 'store' && this.store ? this.store.room : where === 'park' ? PARK.bounds : this.map.bounds;
     const onBridge = where === 'city' && Math.abs(p.x - this.map.bridgeX) < 5;
     // 한강 낚시 데크: 강둑 너머 물 위로 나간 나무 데크 안에서만 (양옆 · 끝은 난간)
     const deck = where === 'city' && p.z > b.z1 - r ? this.map.fishDecks.find((d) => Math.abs(p.x - d.x) < d.w / 2 + 0.8) : undefined;
@@ -4663,4 +4883,13 @@ export class CityWorld {
       if (n.flee > 0) this.collideFighter(f, 'city'); // 도망칠 때 건물을 뚫지 않게
     });
   }
+}
+
+/** 친구가 보낸 '놀이기구:좌석' */
+function parseRide(v: unknown): { id: RideId; seat: number } | null {
+  if (typeof v !== 'string') return null;
+  const [id, seat] = v.split(':');
+  const n = Number(seat);
+  if (!(id in RIDES) || !Number.isInteger(n) || n < 0 || n >= RIDES[id as RideId].seats) return null;
+  return { id: id as RideId, seat: n };
 }

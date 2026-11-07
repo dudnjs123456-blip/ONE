@@ -49,7 +49,7 @@ import type { Account } from '@/game/net/auth';
 import { attachZoomControls } from './zoomControls';
 
 interface CityHud {
-  location: 'city' | 'home' | 'lobby' | 'corridor' | 'store';
+  location: 'city' | 'home' | 'lobby' | 'corridor' | 'store' | 'park';
   floor: number;
   clock: string;
   day: number;
@@ -1013,7 +1013,7 @@ function Minimap({ worldRef }: { worldRef: React.RefObject<CityWorld | null> }) 
         g.font = 'bold 13px sans-serif';
         g.textAlign = 'center';
         // 가게 안이면 가게 이름 (예전엔 '행복빌라 N층'으로 잘못 나왔다)
-        g.fillText(w.location === 'home' ? '집 안' : w.location === 'store' ? `${w.store?.sign ?? '가게'} 안` : w.location === 'lobby' ? '행복빌라 1층' : `행복빌라 ${w.floor}층`, W / 2, H / 2 + 4);
+        g.fillText(w.location === 'park' ? '🎡 한강랜드' : w.location === 'home' ? '집 안' : w.location === 'store' ? `${w.store?.sign ?? '가게'} 안` : w.location === 'lobby' ? '행복빌라 1층' : `행복빌라 ${w.floor}층`, W / 2, H / 2 + 4);
         return;
       }
       const p = w.player;

@@ -51,6 +51,12 @@ export function unlockAudioOnInput(): () => void {
   };
 }
 
+/** 계속 나는 소리(놀이기구 바람·레일 소리)를 직접 만들 때: 오디오 · 최종 볼륨 · 백색 소음 (소리가 막혀 있으면 null) */
+export function audioBus(): { ctx: AudioContext; out: GainNode; noise: AudioBuffer } | null {
+  const c = audio();
+  return c && master && noiseBuf ? { ctx: c, out: master, noise: noiseBuf } : null;
+}
+
 export function isMuted() {
   return muted;
 }

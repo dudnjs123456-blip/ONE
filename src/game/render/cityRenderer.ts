@@ -38,6 +38,9 @@ import { FishingView, buildFishDecks } from './fishingView';
 import { WeatherFx } from './weatherFx';
 import { weatherAt, type WeatherState } from '../city/weather';
 import { tvState } from '../city/tvState';
+import { ThemeParkScene } from './themeParkScene';
+import { RideAudio } from './rideAudio';
+import { seatPose, type SeatPose } from '../city/themePark';
 
 // ───────────────────────── 텍스처 (캔버스로 그림) ─────────────────────────
 
@@ -283,6 +286,14 @@ export class CityRenderer {
   /** 화면 분위기 (블룸·색감·톤 매핑) 와 그라데이션 하늘 */
   private fx!: LookFx;
   private sky = new SkyDome();
+  /** 한강 놀이공원 장면 (처음 갈 때 만든다) */
+  private park: ThemeParkScene | null = null;
+  private rideAudio = new RideAudio();
+  private _seat: SeatPose = { x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 1, ux: 0, uy: 1, uz: 0, speed: 0 };
+  private _seatM = new THREE.Matrix4();
+  private parkScene() {
+    return (this.park ??= new ThemeParkScene());
+  }
   /** 비 · 눈 · 번개 */
   private weatherFx!: WeatherFx;
   private weather: WeatherState = weatherAt(1, 0);
@@ -639,6 +650,9 @@ export class CityRenderer {
         for (const v of this.lobbyViews) sc.add(v.root);
         for (const p of this.lobbyPlates) sc.add(p.sprite);
       }
+      // 놀이공원도 바깥이라 도시의 해·하늘빛·하늘을 같이 쓴다 (한 번에 한 장면에만 붙일 수 있어 옮긴다)
+      const outdoor = loc === 'park' ? this.parkScene().scene : this.city;
+      if (this.hemi.parent !== outdoor) outdoor.add(this.hemi, this.sun, this.sun.target, this.sky.mesh);
       this.shownLocation = loc;
       this.camInit = false;
       // 장소가 바뀐 첫 프레임엔 그림자도 바로 새로
@@ -668,7 +682,8 @@ export class CityRenderer {
       this.fishingView.update(world.fishScene(), clock, h.handWorld?.(this._hand) ? this._hand : null);
     }
     // 1인칭: 내 몸은 감추고 눈높이 카메라로 (창밖 보기·잠자기 중엔 그쪽 카메라)
-    const fp = world.firstPerson && !look && !world.mirror && !(sv && sv.rest > 0) && world.seat?.spot !== 'sofa';
+    const riding = loc === 'park' && !!world.ride;
+    const fp = riding || (world.firstPerson && !look && !world.mirror && !(sv && sv.rest > 0) && world.seat?.spot !== 'sofa');
     this.playerLift.visible = !fp;
     // 채팅 말풍선: 지금 장면에 붙이고, 말한 사람 머리 위를 따라간다 (같은 곳에 있는 친구만)
     const nowMs = performance.now();
@@ -794,7 +809,16 @@ export class CityRenderer {
     this.storeTexts.update(clock.dt);
     this.updateCamera(world, clock);
     this.updateMirrorCam(world, clock, look);
+    if (view === 'park') {
+      const ps = this.parkScene();
+      ps.scene.background = this.city.background;
+      ps.scene.fog = this.city.fog;
+      ps.update(world.parkClock(), this.fxNight);
+    }
+    const ridePose = riding ? seatPose(world.ride!.id, world.ride!.seat, world.parkClock(), this._seat) : null;
+    this.rideAudio.update(riding ? world.ride!.id : null, ridePose, performance.now() / 1000);
     if (look) this.updateLookCam(world);
+    else if (ridePose) this.updateRideCam(world, ridePose, clock);
     else if (fp) this.updateFpCam(world, clock);
     const cam = look || fp ? this.lookCam : this.camera;
     if (loc === 'city') this.fadeOccluders(world, clock.dt, fp);
@@ -818,7 +842,8 @@ export class CityRenderer {
     this.syncDoors(world, clock.dt);
     this.fx.fade = world.screenFade;
     this.renderer.info.reset();
-    this.fx.render(this.sceneOf(view), cam, view === 'city' ? this.fxNight : 0, view === 'city' ? this.fxDusk : 0, view !== 'city');
+    const outside = view === 'city' || view === 'park';
+    this.fx.render(this.sceneOf(view), cam, outside ? this.fxNight : 0, outside ? this.fxDusk : 0, !outside);
     this.drawTvHole(view === 'home' && !!tvState.now, cam);
     this.lastCalls = this.renderer.info.render.calls;
     this.lastTris = this.renderer.info.render.triangles;
@@ -954,13 +979,23 @@ export class CityRenderer {
       // 낚시: 낚싯대를 든 자세 + 낚싯대·줄·찌·물고기 (내 낚시와 같은 그림)
       const holder = v.view as CharacterView & { hold?: { pitch: number } | null; handWorld?(out: THREE.Vector3): boolean };
       if ('hold' in holder) holder.hold = fishScene ? { pitch: v.fish?.armPitch ?? 0.5 } : null;
+      const rd = world.location === 'park' ? r.ride : null;
+      if (rd) v.view.rest = { t: 0.35, sit: { x: 0, z: 0, yaw: 0 }, lie: HOME.bed.lie, seatY: 0.45, sitLeg: 1.45 };
       v.view.update(f, clock);
       if (fishScene || v.fish?.group.visible) {
         v.fish ??= new FishingView(this.city);
         v.fish.update(fishScene, clock, holder.handWorld?.(this._hand) ? this._hand : null);
       }
       const lp = f.lerped(clock.alpha);
-      v.lift.position.y = world.stairLift(lp.x, lp.z);
+      if (rd) {
+        // 좌석 자세 그대로 (기울기·뒤집힘 포함)
+        const pose = seatPose(rd.id, rd.seat, world.parkClock(), this._seat);
+        this.parkScene().seatMatrix(pose, this._seatM).decompose(v.lift.position, v.lift.quaternion, v.lift.scale);
+        v.plate.sprite.visible = false;
+        continue;
+      }
+      v.lift.position.set(0, world.stairLift(lp.x, lp.z), 0);
+      v.lift.quaternion.identity();
       // 자는 동안은 이름표를 감춘다 (내 이름표와 같이)
       if (r.sleep && r.sleep.rest > 0) v.plate.sprite.visible = false;
       const down = f.hp <= 0;
@@ -1039,7 +1074,7 @@ export class CityRenderer {
   }
 
   private sceneOf(loc: CityLocation) {
-    return loc === 'home' ? this.home : loc === 'lobby' ? this.lobby : loc === 'corridor' ? this.corridor : loc === 'store' ? this.store : this.city;
+    return loc === 'home' ? this.home : loc === 'lobby' ? this.lobby : loc === 'corridor' ? this.corridor : loc === 'store' ? this.store : loc === 'park' ? this.parkScene().scene : this.city;
   }
 
   /** 거리의 가게 문: 먹거리 가게 · 펫샵 앞면에 유리 양문 (들어갈 때·나올 때 열린다) */
@@ -1285,8 +1320,8 @@ export class CityRenderer {
 
   private updateCamera(world: CityWorld, clock: FrameClock) {
     const p = world.player.lerped(clock.alpha);
-    // 실내(집·로비)는 같은 카메라
-    const home = world.location !== 'city';
+    // 실내(집·로비)는 같은 카메라 (놀이공원은 바깥)
+    const home = world.location !== 'city' && world.location !== 'park';
     const off = (home ? CAM_HOME : CAM_CITY).clone().multiplyScalar(home ? Math.min(1.3, Math.max(0.45, this.zoom)) : this.zoom);
     // 집 안에선 방 가운데 쪽으로 붙잡아 방 전체가 보이게
     // 로비는 데스크(서쪽 끝)에 앉아 있는 시간이 길어서 플레이어를 더 따라간다
@@ -2229,6 +2264,14 @@ export class CityRenderer {
   }
 
   /** 창밖 내다보기 카메라: 창문 바로 앞에서 바깥(창의 정면)을 본다. 방향키로 좌우·위아래 */
+  /** 놀이기구 1인칭: 좌석 눈높이에서, 놀이기구와 함께 기울고 뒤집힌다 */
+  private updateRideCam(world: CityWorld, pose: SeatPose, clock: FrameClock) {
+    this.lookCam.aspect = this.camera.aspect;
+    this.lookCam.far = this.camera.far;
+    this.parkScene().riderCamera(pose, world.rideLookYaw, world.rideLookPitch, this.lookCam, performance.now() / 1000, clock.dt, world.ride!.id);
+    this.placeSun(pose.x, pose.z);
+  }
+
   /** 1인칭 카메라: 눈높이, 보는 방향 = fpYaw·fpPitch */
   private updateFpCam(world: CityWorld, clock: FrameClock) {
     const p = world.player.lerped(clock.alpha);
