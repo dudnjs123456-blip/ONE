@@ -25,6 +25,7 @@ import {
   Locomotion,
   Mannequin,
   PoseSpring,
+  kicking,
   attackBoost,
   poseFor,
   type Appearance,
@@ -447,7 +448,7 @@ export class VrmCharacter implements CharacterView {
     this.loco.update(lp, c.dt, f.state === 'run' ? runStride : 0.8);
     const target = poseFor(f, t, c.sub, this.loco);
     // 관절별 스프링: 골반 → 몸통 → 팔 순으로 시차를 두고 따라와 사람 같은 무게감
-    const p = this.spring.step(target, c.dt, attackBoost(f));
+    const p = this.spring.step(target, c.dt, attackBoost(f), kicking(f));
     const speed = Math.hypot(this.loco.fwd, this.loco.lat);
     const { yaw, bank } = this.heading.update(Math.atan2(lp.fx, lp.fz), c.dt, f.state === 'attack', speed);
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);

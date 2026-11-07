@@ -118,33 +118,36 @@ const EXTENDED: Record<
       hpL: -0.78, knL: 0.78, hpR: 0.56, knR: 0.15, shL: -0.3, elL: -2.0, arL: -0.32,
     },
   },
-  // 미들킥: 디딤발을 굽히며 왼무릎을 가슴 높이까지 크게 끌어올렸다가 → 골반을 밀어 넣고 상체를 확 젖히며
-  // 발바닥으로 끝까지 찔러 찬다. 반대팔은 뒤로 크게 휘둘러 균형, 차고 나면 무릎을 다시 접어 거둔다
+  // 미들킥: 두 주먹을 턱에 붙인 채 왼무릎을 가슴까지 끌어올려 장전 → 골반을 앞으로 확 밀어 넣으며
+  // 발바닥으로 찔러 찬다. 차는 쪽 팔은 뒤로 내던져 반동을 싣고, 반대 손은 끝까지 턱을 지킨다
   midKickL: {
     base: GUARD,
     rechamber: true,
-    windup: 0.62,
-    overshoot: 0.22,
-    chamber: { hipYaw: 0.12, hpL: -1.6, knL: 2.1, lean: 0.1, twist: 0.12, hpR: 0.05, knR: 0.55, shL: -0.95, elL: -1.85, shR: -0.7, elR: -2.05 },
+    windup: 0.7,
+    overshoot: 0.24,
+    chamber: {
+      hipYaw: 0.15, hpL: -1.75, knL: 2.2, lean: 0.18, twist: 0.05, hpR: 0.0, knR: 0.6,
+      shL: -0.85, elL: -2.3, arL: -0.28, shR: -0.8, elR: -2.35, arR: -0.32,
+    },
     pose: {
-      hipYaw: -0.42, hpL: -1.7, knL: 0.02, abL: -0.12, lean: -0.45, twist: -0.28, roll: -0.08,
-      hpR: 0.1, knR: 0.2, shL: -0.2, elL: -1.15, shR: -1.15, elR: -1.5, arR: 0.3,
+      hipYaw: -0.55, hpL: -1.75, knL: 0.0, abL: -0.12, lean: -0.3, twist: -0.25, roll: -0.06,
+      hpR: 0.15, knR: 0.28, shL: 0.55, elL: -0.35, arL: 0.18, shR: -1.0, elR: -2.3, arR: -0.35,
     },
   },
-  // 하이킥: 오른무릎을 옆으로 접어 올렸다가 허리를 크게 돌리며 머리 높이로 휘둘러 차기 (돌려차기)
-  // 디딤발로 돌며 골반을 완전히 넘기고(턴오버) 상체를 크게 젖힌다. 차는 쪽 팔은 뒤로 내던져 회전에 힘을 싣는다
+  // 하이킥: 오른무릎을 옆으로 접어 올리며 어깨를 반대로 감아 장전 → 디딤발로 돌며 골반을 완전히 넘기고(턴오버)
+  // 머리 높이로 휘둘러 찬다. 오른팔은 뒤아래로 쭉 내던져 회전에 힘을 싣고, 왼손은 턱 앞 가드를 지킨다
   highKickR: {
     base: GUARD,
     rechamber: true,
-    windup: 0.6,
-    overshoot: 0.25,
+    windup: 0.68,
+    overshoot: 0.26,
     chamber: {
-      hipYaw: 0.25, hpR: -1.55, knR: 2.15, abR: 0.22, twist: -0.28, lean: -0.05, roll: 0.12, hpL: -0.15, knL: 0.55,
-      shL: -1.1, elL: -1.9, shR: -0.3, elR: -1.8,
+      hipYaw: 0.25, hpR: -1.55, knR: 2.15, abR: 0.22, twist: -0.4, lean: -0.05, roll: 0.12, hpL: -0.15, knL: 0.55,
+      shL: -1.0, elL: -2.25, arL: -0.3, shR: -0.55, elR: -2.2, arR: -0.12,
     },
     pose: {
-      hipYaw: 0.88, hpR: -2.05, knR: 0.04, abR: -0.12, lean: -0.62, twist: 0.38, roll: 0.36,
-      shR: 0.45, elR: -0.5, arR: 0.4, shL: -1.35, elL: -1.9, hpL: -0.05, knL: 0.22,
+      hipYaw: 1.0, hpR: -2.1, knR: 0.04, abR: -0.12, lean: -0.5, twist: 0.55, roll: 0.36,
+      shR: 0.7, elR: -0.25, arR: 0.35, shL: -1.05, elL: -2.3, arL: -0.35, hpL: -0.05, knL: 0.25,
     },
   },
   lowKickR: {
@@ -152,8 +155,11 @@ const EXTENDED: Record<
     rechamber: true,
     windup: 0.6,
     overshoot: 0.2,
-    chamber: { hpR: -1.1, knR: 1.9, twist: -0.15, shL: -1.0, elL: -1.8 },
-    pose: { hipYaw: 0.38, hpL: -1.15, knL: 1.85, hpR: -1.42, knR: 0.0, abR: -0.12, lean: 0.12, twist: 0.42, shR: 0.3, elR: -1.0, shL: -1.25, elL: -1.9 },
+    chamber: { hpR: -1.1, knR: 1.9, twist: -0.2, shL: -0.95, elL: -2.25, arL: -0.3, shR: -0.7, elR: -2.2, arR: -0.2 },
+    pose: {
+      hipYaw: 0.45, hpL: -1.15, knL: 1.85, hpR: -1.45, knR: 0.0, abR: -0.12, lean: 0.12, twist: 0.5,
+      shR: 0.45, elR: -0.4, arR: 0.25, shL: -1.0, elL: -2.25, arL: -0.32,
+    },
   },
   // 다리 후리기: 웅크린 채 왼다리를 바깥으로 크게 벌려 허리째 쓸어 돌린다
   sweepL: {
@@ -182,7 +188,7 @@ const EXTENDED: Record<
     chamber: { hpR: -1.3, knR: 2.0, hpL: -0.9, knL: 1.8, lean: -0.05 },
     pose: {
       hipYaw: 0.3, hpR: -1.55, knR: 0.0, abR: -0.08, hpL: -0.8, knL: 1.9, lean: -0.35, twist: 0.0,
-      shL: -1.4, elL: -0.8, shR: 0.4, elR: -1.0,
+      shL: -1.0, elL: -2.2, arL: -0.3, shR: 0.55, elR: -0.35, arR: 0.3,
     },
   },
   kneeR: {
@@ -571,20 +577,33 @@ const SPRING: Record<PoseKey, [number, number, number]> = {
   tilt: [14, 1, 0.3], drop: [14, 1, 0.3],
 };
 
+const ARM_KEYS = new Set<PoseKey>(['shL', 'elL', 'shR', 'elR', 'arL', 'arR']);
+const KICK_ANIMS = new Set<string>(['midKickL', 'highKickR', 'lowKickR', 'sweepL', 'flyKick', 'kneeR', 'slide', 'tailSweep']);
+
+/** 발차기 중인가 (팔 스프링을 단단하게) */
+export function kicking(f: Fighter) {
+  return f.state === 'attack' && !!f.move && KICK_ANIMS.has(f.move.anim);
+}
+
 /** 목표 포즈를 관절별 2차 스프링으로 따라가는 실제 표시 포즈 */
 export class PoseSpring {
   readonly x: Pose = { ...GUARD };
   private v = Object.fromEntries(KEYS.map((k) => [k, 0])) as Record<PoseKey, number>;
   private prevTarget: Pose = { ...GUARD };
 
-  /** @param boost 반응 속도 배율 (공격 중엔 크게 해서 타격이 뭉개지지 않게) */
-  step(target: Pose, dt: number, boost: number): Pose {
+  /**
+   * @param boost 반응 속도 배율 (공격 중엔 크게 해서 타격이 뭉개지지 않게)
+   * @param tightArms 발차기 중: 팔이 늦게 따라오며 출렁이면 흐느적거려 보여서 팔도 빠르고 단단하게
+   */
+  step(target: Pose, dt: number, boost: number, tightArms = false): Pose {
     const d = Math.min(Math.max(dt, 1e-4), 0.1);
     const n = Math.max(1, Math.ceil(d * 120));
     const h = d / n;
     for (const k of KEYS) {
-      const [w0, z, ff] = SPRING[k];
-      const w = w0 * boost;
+      const [w0, z0, ff] = SPRING[k];
+      const arm = tightArms && ARM_KEYS.has(k);
+      const w = w0 * boost * (arm ? 1.6 : 1);
+      const z = arm ? 0.95 : z0;
       // 목표의 속도를 앞먹임으로 넣어 주기 동작(걷기·달리기)은 지연 없이, 급변(상태 전환)은 부드럽게
       const tv = Math.max(-15, Math.min(15, (target[k] - this.prevTarget[k]) / d)) * ff;
       let x = this.x[k];
@@ -802,7 +821,7 @@ export class Mannequin implements CharacterView {
     this.loco.update(lp, c.dt, f.state === 'run' ? 1.7 : 0.8);
     let target = poseFor(f, t, c.sub, this.loco);
     if (this.casual && f.state === 'idle') target = { ...target, ...RELAXED };
-    const p = this.spring.step(target, c.dt, attackBoost(f));
+    const p = this.spring.step(target, c.dt, attackBoost(f), kicking(f));
     const speed = Math.hypot(this.loco.fwd, this.loco.lat);
     const { yaw, bank } = this.heading.update(Math.atan2(lp.fx, lp.fz), c.dt, f.state === 'attack', speed);
 
