@@ -467,7 +467,35 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
   parent.add(holder);
   const size = new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3());
   addOutline(g, 0.0045 / Math.max(0.05, Math.max(size.x, size.y, size.z)));
+  keepFieldOutline(g);
   return holder;
+}
+
+/**
+ * 외곽선 굵기는 미터 단위라 카메라가 가까울수록(대전·동네·코디 창) 화면에서 두꺼워 보인다.
+ * 필드 카메라(약 12m, 시야 45°)에서 보이는 굵기를 기준으로, 그보다 가까우면 그만큼 가늘게 해서
+ * 어디서 보든 화면 속 선 굵기가 필드와 비슷하게 한다. 더 멀 때는 지금처럼 둔다.
+ */
+const FIELD_VIEW = Math.hypot(8.5, 9) * Math.tan(THREE.MathUtils.degToRad(45 / 2));
+export function keepFieldOutline(root: THREE.Object3D) {
+  const mats = new Set<THREE.Material>();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && m.userData.isOutline) mats.add(m.material as THREE.Material);
+  });
+  for (const mat of mats) {
+    const base = mat.onBeforeCompile;
+    mat.onBeforeCompile = (shader, r) => {
+      base.call(mat, shader, r);
+      shader.vertexShader = shader.vertexShader.replace(
+        'transformed += normalize(normal) * outlineWidth;',
+        // 화면 속 크기 ∝ 1 / (거리 × tan(시야/2)), projectionMatrix[1][1] = 1 / tan(시야/2)
+        `float olView = length((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz) / projectionMatrix[1][1];
+  transformed += normalize(normal) * outlineWidth * clamp(olView / ${FIELD_VIEW.toFixed(3)}, 0.15, 1.0);`,
+      );
+    };
+    mat.needsUpdate = true;
+  }
 }
 
 /** 어깨 위 표면 높이 (x 근처, z 근처 정점 중 가장 높은 곳) */

@@ -5,7 +5,7 @@ import { VRMLoaderPlugin, VRMUtils, type VRM, type VRMHumanBoneName } from '@pix
 import type { Fighter } from '../core/fighter';
 import { smooth, type FrameClock } from './clock';
 import { track } from './loadTracker';
-import { OutfitDresser } from './outfitKit';
+import { OutfitDresser, keepFieldOutline } from './outfitKit';
 import {
   CLIP_BONES,
   CLIP_PARENTS,
@@ -873,6 +873,7 @@ export class VrmCharacter implements CharacterView {
 
     // 애니메이션 같은 또렷한 외곽선 (VRM 좌표는 미터 단위)
     addOutline(vrm.scene, 0.0035);
+    keepFieldOutline(vrm.scene);
     this.rims = setupMToonRim(vrm.scene);
     this.dresser = new OutfitDresser(vrm);
     if (this.outfit.length) this.dresser.apply(this.outfit);
