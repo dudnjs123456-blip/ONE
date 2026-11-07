@@ -734,7 +734,8 @@ export class CityWorld {
 
   private events: CombatEvent[] = [];
   private speech: Speech[] = [];
-  private cityReturn = { x: 0, z: 0 };
+  /** 가게에서 나올 때 설 자리 (f = -1 이면 북쪽을 보는 가게) */
+  private cityReturn: { x: number; z: number; f?: -1 } = { x: 0, z: 0 };
   private rng: () => number;
   private nextNpcId = 100;
 
@@ -1477,13 +1478,23 @@ export class CityWorld {
     const pr = this.profile;
     if (pr.gold < item.price) return { ok: false, message: `아이고… ${item.price - pr.gold}G 가 모자라네요.` };
     if (item.hunger > 0 && pr.life.hunger < 5 && !item.fatigue) return { ok: false, message: '배불러서 더는 못 먹겠다…' };
+    if (item.hp && !item.fatigue && this.player.hp >= this.player.maxHp) return { ok: false, message: '지금은 다친 데가 없어요.' };
     pr.gold -= item.price;
     pr.life.hunger = Math.max(0, pr.life.hunger - item.hunger);
     pr.life.fatigue = Math.max(0, pr.life.fatigue - (item.fatigue ?? 0));
+    let healed = 0;
+    if (item.hp) {
+      const before = this.player.hp;
+      this.player.hp = Math.min(this.player.maxHp, before + item.hp);
+      healed = this.player.hp - before;
+      pr.life.hp = this.player.hp;
+    }
     saveProfile(pr);
-    const effect = [item.hunger ? `배고픔 -${item.hunger}` : '', item.fatigue ? `피로도 -${item.fatigue}` : ''].filter(Boolean).join(', ');
+    const effect = [item.hunger ? `배고픔 -${item.hunger}` : '', item.fatigue ? `피로도 -${item.fatigue}` : '', healed ? `체력 +${healed}` : ''].filter(Boolean).join(', ');
     const thanks = s.thanks[Math.floor(this.rng() * s.thanks.length)];
-    return { ok: true, message: `${item.icon} ${item.name} 냠냠 (${effect}) — "${thanks}"` };
+    // 약은 "냠냠" 이 아니다
+    const verb = item.hp || (!item.hunger && item.fatigue) ? '사용' : '냠냠';
+    return { ok: true, message: `${item.icon} ${item.name} ${verb} (${effect || '효과 없음'}) — "${thanks}"` };
   }
 
   /** 근처에서 본 사람들 중 일부가 잠시 뒤 신고한다. by = 때린 사람 (경찰이 그 사람을 쫓는다) */
@@ -2091,7 +2102,8 @@ export class CityWorld {
       // 가장 가까운 음식점에서 사 먹고, 여분을 사 와서 냉장고에 넣는다
       const from = this.location === 'city' ? this.player : home;
       const shop = this.map.pois
-        .filter((p) => p.kind === 'shop' && SHOPS[p.label])
+        // 먹을 걸 파는 가게만 (약국 제외)
+        .filter((p) => p.kind === 'shop' && SHOPS[p.label]?.menu.some((m) => m.hunger >= 10))
         .reduce((a, b) => (Math.hypot(a.x - from.x, a.z - from.z) <= Math.hypot(b.x - from.x, b.z - from.z) ? a : b));
       steps = [
         { kind: 'leave' },
@@ -2468,14 +2480,15 @@ export class CityWorld {
     // 펫샵 · 음식점: 문을 열고 가게 안으로 들어간다
     if (poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop' || (poi.kind === 'shop' && SHOPS[poi.label])) {
       const L = storeLayout(poi.label);
-      // 가게 문은 건물 앞면 (POI 는 문에서 1.2m 앞)
-      const doorZ = poi.z - 1.2;
-      this.cityReturn = { x: poi.x, z: poi.z };
+      // 가게 문은 건물 앞면 (POI 는 문에서 1.2m 앞). 북쪽을 보는 가게는 문이 POI 의 남쪽
+      const s = poi.facing === -1 ? -1 : 1;
+      const doorZ = poi.z - 1.2 * s;
+      this.cityReturn = poi.facing === -1 ? { x: poi.x, z: poi.z, f: -1 } : { x: poi.x, z: poi.z };
       this.storeDoor = `shop:${poi.id}`;
       this.passDoor({
         open: this.storeDoor,
-        face: { x: 0, z: -1 },
-        to: { x: poi.x, z: doorZ + 0.35 },
+        face: { x: 0, z: -s },
+        to: { x: poi.x, z: doorZ + 0.35 * s },
         arrive: () => this.enterStore(poi.label),
         close: 'storeIn',
         out: { x: L.spawn.x, z: L.spawn.z },
@@ -2894,7 +2907,9 @@ export class CityWorld {
         to: { x: 0, z: L.room.z1 - 0.2 },
         arrive: () => {
           this.pen = null;
-          this.moveTo('city', back.x, back.z - 0.85, 0, 1);
+          // 가게를 등지고 인도에 선다 (북쪽을 보는 가게면 북쪽으로)
+          const s = back.f === -1 ? -1 : 1;
+          this.moveTo('city', back.x, back.z - 0.85 * s, 0, s);
           this.say(L.kind === 'pet' ? '🐾 또 놀러 와요~' : '또 오세요~', 1.5);
         },
         close: this.storeDoor,

@@ -1450,3 +1450,34 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   const g = pk.playground;
   check('park: no trees on the playground', !pw.map.trees.some((t) => t.x > g.x0 && t.x < g.x1 && t.z > g.z0 && t.z < g.z1));
 }
+
+// 북쪽 가게 입구 · 약국: 들어갔다 나오면 가게 앞 인도(북쪽)에 서고, 약으로 체력이 찬다
+{
+  let cmd2: CityInput = { move: null, run: false, interact: false };
+  const pw = new CityWorld({ read: () => cmd2 });
+  const north = pw.map.pois.filter((p) => p.kind === 'shop' && p.facing === -1);
+  check('north-facing shops get entrances', north.length >= 5, north.map((p) => p.label).join(', '));
+  const ph = pw.map.pois.find((p) => p.label === '약국')!;
+  check('pharmacy is enterable on the map', !!ph);
+  pw.busTravel; // (버스와 무관)
+  (pw as unknown as { moveTo: (l: string, x: number, z: number, fx: number, fz: number) => void }).moveTo('city', ph.x, ph.z, 0, 1);
+  cmd2 = { move: null, run: false, interact: true };
+  pw.step();
+  cmd2 = { move: null, run: false, interact: false };
+  for (let i = 0; i < 240 && pw.location !== 'store'; i++) pw.step();
+  check('enter pharmacy (north door)', pw.location === 'store');
+  pw.player.hp = Math.max(1, pw.player.maxHp - 60);
+  pw.profile.gold = 200;
+  const before = pw.player.hp;
+  const r = pw.buyFood('bandage', '약국');
+  check('pharmacy bandage heals HP', r.ok && pw.player.hp === Math.min(pw.player.maxHp, before + 40), r.message);
+  check('full HP: no bandage needed', (() => { pw.player.hp = pw.player.maxHp; return !pw.buyFood('bandage', '약국').ok; })());
+  // 출입문으로 나가면 약국 앞 인도 (북쪽) 에 선다 — 건물 안(남쪽)이 아니라
+  const exit = (pw as unknown as { storePois: () => { id: string; x: number; z: number }[] }).storePois().find((q) => q.id === 'store:exit')!;
+  (pw as unknown as { moveTo: (l: string, x: number, z: number, fx: number, fz: number) => void }).moveTo('store', exit.x, exit.z, 0, 1);
+  cmd2 = { move: null, run: false, interact: true };
+  pw.step();
+  cmd2 = { move: null, run: false, interact: false };
+  for (let i = 0; i < 240 && pw.location !== 'city'; i++) pw.step();
+  check('leave north shop onto its sidewalk', pw.location === 'city' && pw.player.z < ph.z + 1.2 - 0.2 && Math.abs(pw.player.x - ph.x) < 1, `${pw.player.x.toFixed(1)},${pw.player.z.toFixed(1)} vs ${ph.x.toFixed(1)},${ph.z.toFixed(1)}`);
+}

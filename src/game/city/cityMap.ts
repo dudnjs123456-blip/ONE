@@ -56,6 +56,8 @@ export interface Poi {
   x: number;
   z: number;
   radius: number;
+  /** 가게가 북쪽(-z)을 보면 -1 (문이 POI 의 남쪽에 있다). 없으면 남쪽을 보는 가게 */
+  facing?: -1;
 }
 
 export interface Road {
@@ -281,8 +283,9 @@ export function buildCityMap(seed = 2025): CityMap {
                 h: Math.round(range(3, 7)) * 3.2, color: pick([0xd9c7b0, 0xc9b8a6, 0xe0d5c5, 0xbfa58a, 0xd0d0d0]),
                 sign,
               });
-              // 남쪽(+z) 면 가게만 상호작용 지점 (북쪽은 장식)
+              // 가게 앞 인도에 상호작용 지점: 남쪽 줄은 남쪽 도로, 북쪽 줄은 북쪽 도로를 본다
               if (side > 0) pois.push({ id: `shop-${b.id}`, kind: 'shop', label: sign.text, x: b.x, z: b.z + d / 2 + 1.2, radius: 1.8 });
+              else pois.push({ id: `shop-${b.id}`, kind: 'shop', label: sign.text, x: b.x, z: b.z - d / 2 - 1.2, radius: 1.8, facing: -1 });
               x += w;
             }
           }

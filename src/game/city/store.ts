@@ -74,7 +74,7 @@ export function storeKindOf(sign: string): StoreKind {
   if (sign === PET_SHOP_NAME) return 'pet';
   if (sign === CLOTHES_SHOP_NAME) return 'clothes';
   if (sign === FISHING_SHOP_NAME) return 'fishing';
-  if (sign === '편의점 24') return 'mart';
+  if (sign === '편의점 24' || sign === '약국') return 'mart';
   if (sign === '카페 모먼트' || sign === '베이커리') return 'cafe';
   return 'diner';
 }

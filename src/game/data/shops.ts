@@ -6,6 +6,8 @@ export interface MenuItem {
   price: number;
   hunger: number;
   fatigue?: number;
+  /** 체력 회복 (약국) */
+  hp?: number;
   desc: string;
 }
 
@@ -122,6 +124,21 @@ export const SHOPS: Record<string, ShopDef> = Object.fromEntries(
         { id: 'tteokbokki', name: '떡볶이', icon: '🌶️', price: 25, hunger: 30, desc: '할머니표 매콤 떡볶이.' },
         { id: 'twigim', name: '모둠 튀김', icon: '🍤', price: 20, hunger: 15, desc: '김말이, 오징어, 고구마.' },
         { id: 'eomuk', name: '어묵', icon: '🍢', price: 10, hunger: 8, desc: '국물은 무한리필.' },
+      ],
+    }),
+    shop({
+      // 약국: 먹는 게 아니라 체력·피로 회복 (동네에서 싸우다 다쳤을 때)
+      sign: '약국', keeper: '약사 선생님', face: '👩‍⚕️',
+      greetings: ['어서 오세요. 어디가 불편하세요?', '안녕하세요~ 처방전 있으세요? 없어도 괜찮아요.'],
+      recommend: '많이 피곤하시면 피로회복제, 다치셨으면 연고랑 밴드부터 바르세요.',
+      gossip: ['요즘 한강 쪽에서 싸움이 잦대요. 다치지 않게 조심하세요.', '밤엔 문 닫으니 상비약은 미리 사 두세요.', '물 많이 드세요. 그게 제일 좋아요.'],
+      thanks: ['몸조리 잘하세요.', '하루 세 번, 식후 30분이요~'],
+      menu: [
+        { id: 'bandage', name: '밴드·연고', icon: '🩹', price: 20, hunger: 0, hp: 40, desc: '긁힌 데 바르고 붙이기.' },
+        { id: 'pas', name: '파스', icon: '🧴', price: 25, hunger: 0, hp: 25, fatigue: 8, desc: '뻐근한 어깨에 한 장.' },
+        { id: 'painkiller', name: '진통제', icon: '💊', price: 45, hunger: 0, hp: 90, desc: '맞은 데가 욱신욱신할 때.' },
+        { id: 'tonic', name: '피로회복제', icon: '🧃', price: 20, hunger: 0, fatigue: 20, desc: '한 병 쭉. 눈이 번쩍.' },
+        { id: 'vitamin', name: '비타민 젤리', icon: '🍬', price: 12, hunger: 2, hp: 10, fatigue: 6, desc: '새콤달콤 하루 한 알.' },
       ],
     }),
   ].map((s) => [s.sign, s]),

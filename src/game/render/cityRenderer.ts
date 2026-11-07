@@ -1034,24 +1034,28 @@ export class CityRenderer {
       if (poi.kind !== 'shop') continue;
       // 펫샵·옷가게는 기둥 안쪽으로 들어간 유리면에 문이 있다
       const inset = poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop';
-      const z = poi.z - 1.2 + (inset ? -0.35 : 0.08);
+      // 북쪽을 보는 가게는 문이 POI 의 남쪽에 있고 문짝도 북쪽을 본다 (문 묶음을 180° 돌린다)
+      const north = poi.facing === -1;
+      const z = north ? poi.z + 1.2 - 0.08 : poi.z - 1.2 + (inset ? -0.35 : 0.08);
       const w = inset ? 1.36 : 1.5;
       const g = new THREE.Group();
+      g.position.set(poi.x, 0, z);
+      if (north) g.rotation.y = Math.PI;
       this.city.add(g);
       if (!inset) {
         const fr = (bw: number, bh: number, x: number, y: number) => {
           const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.1), frame);
-          b.position.set(x, y, z - 0.02);
+          b.position.set(x, y, -0.02);
           g.add(b);
         };
-        fr(0.08, 2.3, poi.x - w / 2 - 0.04, 1.15);
-        fr(0.08, 2.3, poi.x + w / 2 + 0.04, 1.15);
-        fr(w + 0.16, 0.1, poi.x, 2.3);
+        fr(0.08, 2.3, -w / 2 - 0.04, 1.15);
+        fr(0.08, 2.3, w / 2 + 0.04, 1.15);
+        fr(w + 0.16, 0.1, 0, 2.3);
         const dark = new THREE.Mesh(new THREE.PlaneGeometry(w, 2.25), new THREE.MeshBasicMaterial({ color: 0x1a1612 }));
-        dark.position.set(poi.x, 1.125, z - 0.04);
+        dark.position.set(0, 1.125, -0.04);
         g.add(dark);
       }
-      this.shopDoors.set(poi.id, swingDoors(g, poi.x, z, w, 2.25, frame, glass, handle));
+      this.shopDoors.set(poi.id, swingDoors(g, 0, 0, w, 2.25, frame, glass, handle));
     }
   }
 
