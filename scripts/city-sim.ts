@@ -1,5 +1,5 @@
 // 도시 로직 헤드리스 검증: npx tsx scripts/city-sim.ts
-import { BUS_FARE, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
+import { BUS_FARE, COIN_TOSS, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import { LifeTracker } from '../src/game/core/life';
 import { MOVES } from '../src/game/data/moves';
 import { bjDeal, bjHit, bjStand, handValue, hlOdds, isBlackjack, rollSicBo, rouletteMultiplier, spinRoulette, spinSlots } from '../src/game/city/casino';
@@ -1434,4 +1434,19 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('bus: arrive at casino, fare paid', ok && Math.hypot(b.player.x - casino.x, b.player.z - casino.z) < 0.5 && b.profile.gold === 100 - BUS_FARE, `gold ${b.profile.gold}`);
   b.profile.gold = BUS_FARE - 1;
   check('bus: no money, no ride', !b.busTravel('lobby') && b.profile.gold === BUS_FARE - 1);
+}
+
+// 근린공원: 분수 안으로 못 들어가고, 분수 앞에서 동전 던지기, 놀이터 자리엔 나무 없음
+{
+  const pw = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  const pk = pw.map.parks[0];
+  const poi = pw.map.pois.find((p) => p.id === 'park-center')!;
+  check('park: fountain POI is outside the fountain', Math.hypot(poi.x - pk.fountain.x, poi.z - pk.fountain.z) > pk.fountain.r);
+  const inside = pw.collidePoint(pk.fountain.x + 0.5, pk.fountain.z + 0.5);
+  check('park: cannot stand inside the fountain', Math.hypot(inside.x - pk.fountain.x, inside.z - pk.fountain.z) > pk.fountain.r * 0.8, `${inside.x.toFixed(1)},${inside.z.toFixed(1)}`);
+  pw.profile.gold = 50;
+  pw.tossCoin();
+  check('park: coin toss costs 10G (or lucky +50)', pw.profile.gold === 50 - COIN_TOSS || pw.profile.gold === 50 - COIN_TOSS + COIN_TOSS * 5, String(pw.profile.gold));
+  const g = pk.playground;
+  check('park: no trees on the playground', !pw.map.trees.some((t) => t.x > g.x0 && t.x < g.x1 && t.z > g.z0 && t.z < g.z1));
 }

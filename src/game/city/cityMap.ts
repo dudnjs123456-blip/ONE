@@ -99,8 +99,16 @@ export interface Tree {
   room?: number;
 }
 
+export interface ParkFeatures {
+  fountain: { x: number; z: number; r: number };
+  /** 놀이터 모래밭 (미끄럼틀·그네·시소) */
+  playground: { x0: number; x1: number; z0: number; z1: number };
+}
+
 /** 건물 벽에 이만큼보다 가까운 나무는 심지 않는다 (줄기가 벽에 붙는다) */
 const TREE_MIN_ROOM = 1.6;
+/** 근린공원 분수 반지름 */
+const FOUNTAIN_R = 4.3;
 
 export interface CityMap {
   /** 걸어다닐 수 있는 범위 */
@@ -112,6 +120,10 @@ export interface CityMap {
   trees: Tree[];
   lights: { x: number; z: number }[];
   benches: { x: number; z: number; rot: number }[];
+  /** 근린공원: 가운데 분수 + 한쪽 놀이터 */
+  parks: ParkFeatures[];
+  /** 걸어서 지나갈 수 없는 공원 시설 (분수·놀이기구) */
+  propRects: { x0: number; x1: number; z0: number; z1: number }[];
   trails: TrailPark[];
   /** 강변 공원 (남쪽 끝), 한강 시작 z */
   parkZ: [number, number];
@@ -316,7 +328,8 @@ export function buildCityMap(seed = 2025): CityMap {
           pois.push({ id: 'trail', kind: 'park', label: '한강뷰 단지 산책로 공원', x: (x0 + x1) / 2, z: z1 - SIDEWALK - 2, radius: 3 });
           break;
         case 'park':
-          pois.push({ id: 'park-center', kind: 'park', label: '근린공원', x: (x0 + x1) / 2, z: (z0 + z1) / 2, radius: 4 });
+          // 분수 바로 앞 (남쪽) — 가운데에 서면 분수 안이라서
+          pois.push({ id: 'park-center', kind: 'park', label: '근린공원 분수 (동전 던지기)', x: (x0 + x1) / 2, z: (z0 + z1) / 2 + FOUNTAIN_R + 1.4, radius: 2.2 });
           break;
       }
     });
@@ -448,7 +461,22 @@ export function buildCityMap(seed = 2025): CityMap {
     }
     return best - 0.3;
   };
-  const keptTrees = trees.filter((t) => (t.room = roomOf(t)) >= TREE_MIN_ROOM);
+  // 근린공원 시설: 가운데 분수, 남서쪽 구석 놀이터 (난수를 쓰지 않으므로 다른 배치는 그대로)
+  const parks: ParkFeatures[] = blocks
+    .filter((b) => b.kind === 'park')
+    .map((b) => ({
+      fountain: { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2, r: FOUNTAIN_R },
+      playground: { x0: b.x0 + 3, x1: b.x0 + 12, z0: b.z1 - 12, z1: b.z1 - 5 },
+    }));
+  const inPlayground = (t: Tree) => parks.some(({ playground: g }) => t.x > g.x0 - 1 && t.x < g.x1 + 1 && t.z > g.z0 - 1 && t.z < g.z1 + 1);
+  const propRects = parks.flatMap(({ fountain: f, playground: g }) => [
+    // 분수는 원이지만 상자로 막는다 (테두리 안쪽만)
+    { x0: f.x - f.r * 0.85, x1: f.x + f.r * 0.85, z0: f.z - f.r * 0.85, z1: f.z + f.r * 0.85 },
+    // 미끄럼틀 (서쪽), 그네 (동쪽) — 시소는 낮아서 지나갈 수 있게 둔다
+    { x0: g.x0 + 0.8, x1: g.x0 + 2.6, z0: g.z0 + 1, z1: g.z0 + 4.6 },
+    { x0: g.x1 - 4.2, x1: g.x1 - 0.8, z0: g.z0 + 1.2, z1: g.z0 + 2 },
+  ]);
+  const keptTrees = trees.filter((t) => !inPlayground(t) && (t.room = roomOf(t)) >= TREE_MIN_ROOM);
 
   // 한강 낚시 데크: 강둑에서 물 위로 4.5m 나온 나무 데크 여섯 곳 (다리 근처는 피한다). 끝에 서서 E = 낚시
   const fishDecks: FishDeck[] = [-92, -58, -26, 4, 64, 94].map((x) => ({ x, w: 4.4, z0: parkZ[1] - 1.5, z1: parkZ[1] + 4.5 }));
@@ -464,6 +492,8 @@ export function buildCityMap(seed = 2025): CityMap {
     trees: keptTrees,
     lights,
     benches,
+    parks,
+    propRects,
     parkZ,
     riverZ: parkZ[1],
     bridgeX: XS[2],

@@ -264,6 +264,8 @@ export class CityRenderer {
   private drawSize = new THREE.Vector2();
   /** 실사풍 가로수 (바람에 흔들린다) */
   private treeKit = new TreeKit();
+  /** 공원 분수·그네 등 매 프레임 움직이는 것 */
+  private parkAnims: ((t: number) => void)[] = [];
   /** 횡단보도·펜스·신호등 */
   private traffic: TrafficProps | null = null;
   /** 내 애완동물 모델 (펫 id → 모델) */
@@ -783,6 +785,7 @@ export class CityRenderer {
     if (loc === 'city') this.fadeOccluders(world, clock.dt, fp);
     if (view === 'city') {
       this.treeKit.update(clock.t);
+      for (const a of this.parkAnims) a(clock.t);
       this.traffic?.update(world.signalSeconds);
     }
     this.sky.follow(cam);
@@ -1813,21 +1816,8 @@ export class CityRenderer {
     const oldBench = inst(new THREE.BoxGeometry(1.8, 0.12, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a5a35 }), benchMats, true);
     void instanceProp(s, 'nature/bench.glb', m.benches.map((b) => new THREE.Matrix4().makeRotationY(b.rot).setPosition(b.x, 0, b.z)), 0.9).then(() => oldBench.removeFromParent());
 
-    // 공원 분수
-    for (const b of m.blocks.filter((b) => b.kind === 'park')) {
-      const cx = (b.x0 + b.x1) / 2;
-      const cz = (b.z0 + b.z1) / 2;
-      const basin = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.3, 0.6, 32), new THREE.MeshStandardMaterial({ color: 0xc9c4ba }));
-      basin.position.set(cx, 0.3, cz);
-      s.add(basin);
-      const pool = new THREE.Mesh(new THREE.CircleGeometry(3.7, 32), new THREE.MeshStandardMaterial({ color: 0x5aa7d8, roughness: 0.15 }));
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.set(cx, 0.55, cz);
-      s.add(pool);
-      const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.5, 2.5, 8), new THREE.MeshBasicMaterial({ color: 0xcfeeff, transparent: true, opacity: 0.6 }));
-      jet.position.set(cx, 1.6, cz);
-      s.add(jet);
-    }
+    // 근린공원: 분수(물줄기·물결이 움직인다) + 놀이터(미끄럼틀·그네·시소)
+    for (const pk of m.parks) this.buildPark(s, pk);
 
     // 지하철 입구 · 버스정류장
     for (const poi of m.pois) {
@@ -1962,6 +1952,151 @@ export class CityRenderer {
     mesh.rotation.y = rotY;
     parent.add(mesh);
     return mesh;
+  }
+
+  /** 근린공원 분수 + 놀이터 */
+  private buildPark(s: THREE.Object3D, pk: CityMap['parks'][number]) {
+    const { fountain: f, playground: g } = pk;
+    const stone = new THREE.MeshStandardMaterial({ color: 0xcfc8bb, roughness: 0.75 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x3b4a52, roughness: 0.9 });
+    const add = (mesh: THREE.Mesh, x: number, y: number, z: number) => {
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      s.add(mesh);
+      return mesh;
+    };
+    // ── 분수: 둥근 담 + 물 + 가운데 2단 받침 ──
+    add(new THREE.Mesh(new THREE.CylinderGeometry(f.r, f.r + 0.25, 0.6, 40, 1, true), stone), f.x, 0.3, f.z);
+    const rim = add(new THREE.Mesh(new THREE.TorusGeometry(f.r + 0.05, 0.2, 8, 56), stone), f.x, 0.6, f.z);
+    rim.rotation.x = -Math.PI / 2;
+    const floor = add(new THREE.Mesh(new THREE.CircleGeometry(f.r, 40), dark), f.x, 0.04, f.z);
+    floor.rotation.x = -Math.PI / 2;
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x4aa6d9, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.85 });
+    const water = add(new THREE.Mesh(new THREE.CircleGeometry(f.r - 0.05, 40), waterMat), f.x, 0.42, f.z);
+    water.rotation.x = -Math.PI / 2;
+    water.castShadow = false;
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 1.1, 16), stone), f.x, 0.55, f.z);
+    add(new THREE.Mesh(new THREE.CylinderGeometry(1.4, 0.5, 0.35, 24), stone), f.x, 1.2, f.z);
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 0.6, 12), stone), f.x, 1.6, f.z);
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.25, 0.22, 20), stone), f.x, 1.95, f.z);
+    // 물줄기: 가운데 위로 솟는 줄기 + 받침 둘레에서 바깥으로 떨어지는 줄기 8개
+    const jetMat = new THREE.MeshBasicMaterial({ color: 0xdff4ff, transparent: true, opacity: 0.6, depthWrite: false });
+    const main = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.14, 1.8, 10, 1, true), jetMat);
+    main.position.set(f.x, 2.95, f.z);
+    s.add(main);
+    const arcs: THREE.Mesh[] = [];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const c = Math.cos(a);
+      const d = Math.sin(a);
+      const curve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(f.x + c * 1.3, 1.3, f.z + d * 1.3),
+        new THREE.Vector3(f.x + c * 2.4, 2.0, f.z + d * 2.4),
+        new THREE.Vector3(f.x + c * 3.2, 0.45, f.z + d * 3.2),
+      );
+      const arc = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, 0.05, 6), jetMat);
+      s.add(arc);
+      arcs.push(arc);
+    }
+    // 물결: 가운데에서 퍼지는 고리 셋
+    const ripples = [0, 1, 2].map((k) => {
+      const r = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.0, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false }));
+      r.rotation.x = -Math.PI / 2;
+      r.position.set(f.x, 0.44, f.z);
+      r.userData.phase = k / 3;
+      s.add(r);
+      return r;
+    });
+    this.parkAnims.push((t) => {
+      main.scale.y = 1 + Math.sin(t * 7) * 0.06;
+      jetMat.opacity = 0.5 + Math.sin(t * 11) * 0.08;
+      arcs.forEach((arc, i) => arc.scale.setScalar(1 + Math.sin(t * 5 + i) * 0.015));
+      for (const r of ripples) {
+        const p = (t * 0.35 + (r.userData.phase as number)) % 1;
+        r.scale.setScalar(1 + p * 2.9);
+        (r.material as THREE.MeshBasicMaterial).opacity = 0.35 * (1 - p);
+      }
+    });
+
+    // ── 놀이터: 모래밭 + 테두리 ──
+    const gw = g.x1 - g.x0;
+    const gd = g.z1 - g.z0;
+    const gx = (g.x0 + g.x1) / 2;
+    const gz = (g.z0 + g.z1) / 2;
+    const sand = add(new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), new THREE.MeshStandardMaterial({ color: 0xd8c38e, roughness: 1 })), gx, 0.03, gz);
+    sand.rotation.x = -Math.PI / 2;
+    sand.castShadow = false;
+    const curb = new THREE.MeshStandardMaterial({ color: 0x6d8f3a, roughness: 0.8 });
+    add(new THREE.Mesh(new THREE.BoxGeometry(gw + 0.3, 0.18, 0.15), curb), gx, 0.09, g.z0);
+    add(new THREE.Mesh(new THREE.BoxGeometry(gw + 0.3, 0.18, 0.15), curb), gx, 0.09, g.z1);
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, gd), curb), g.x0, 0.09, gz);
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, gd), curb), g.x1, 0.09, gz);
+    const red = new THREE.MeshStandardMaterial({ color: 0xe0453a, roughness: 0.5 });
+    const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.5 });
+    const blue = new THREE.MeshStandardMaterial({ color: 0x2f7fd6, roughness: 0.5 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.35, metalness: 0.7 });
+    // 미끄럼틀 (서쪽): 기둥 4개 + 발판 + 지붕 + 계단 + 미끄럼판
+    const sx = g.x0 + 1.7;
+    const sz = g.z0 + 1.8;
+    for (const [dx, dz] of [
+      [-0.8, -0.7],
+      [0.8, -0.7],
+      [-0.8, 0.7],
+      [0.8, 0.7],
+    ])
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 8), blue), sx + dx, 1.3, sz + dz);
+    add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 1.6), yellow), sx, 1.4, sz);
+    const roof = add(new THREE.Mesh(new THREE.ConeGeometry(1.35, 0.7, 4), red), sx, 2.95, sz);
+    roof.rotation.y = Math.PI / 4;
+    for (let i = 0; i < 5; i++) add(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.18), steel), sx, 0.25 + i * 0.27, sz - 0.9 - i * 0.12);
+    const slide = add(new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.06, 2.9), red), sx, 0.75, sz + 2.0);
+    slide.rotation.x = 0.52;
+    // 그네 (동쪽): A자 기둥 2쌍 + 위 막대 + 줄 매단 의자 2개 (흔들린다)
+    const wx = g.x1 - 2.5;
+    const wz = g.z0 + 1.6;
+    for (const dx of [-1.6, 1.6])
+      for (const tilt of [-0.28, 0.28]) {
+        const leg = add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.5, 8), steel), wx + dx, 1.2, wz + Math.sin(tilt) * 1.2);
+        leg.rotation.x = tilt;
+      }
+    const bar = add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 3.4, 8), steel), wx, 2.4, wz);
+    bar.rotation.z = Math.PI / 2;
+    const swings = [-0.75, 0.75].map((dx, i) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(wx + dx, 2.4, wz);
+      s.add(pivot);
+      for (const ox of [-0.22, 0.22]) {
+        const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.9, 4), steel);
+        rope.position.set(ox, -0.95, 0);
+        pivot.add(rope);
+      }
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.06, 0.25), i ? yellow : blue);
+      seat.position.y = -1.9;
+      seat.castShadow = true;
+      pivot.add(seat);
+      return pivot;
+    });
+    // 시소 (남쪽 가운데): 받침 + 판 (천천히 오르내린다)
+    const tx = gx;
+    const tz = g.z1 - 1.6;
+    add(new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 0.45, 10), steel), tx, 0.22, tz);
+    const plank = new THREE.Group();
+    plank.position.set(tx, 0.48, tz);
+    s.add(plank);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.08, 0.32), yellow);
+    board.castShadow = true;
+    plank.add(board);
+    for (const dx of [-1.35, 1.35]) {
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.3), red);
+      h.position.set(dx, 0.18, 0);
+      plank.add(h);
+    }
+    this.parkAnims.push((t) => {
+      swings[0].rotation.x = Math.sin(t * 1.9) * 0.35;
+      swings[1].rotation.x = Math.sin(t * 1.6 + 1.2) * 0.25;
+      plank.rotation.z = Math.sin(t * 0.9) * 0.22;
+    });
   }
 
   /** 카지노 입구: 네온 간판 + 레드 카펫 + 입구 조명 */

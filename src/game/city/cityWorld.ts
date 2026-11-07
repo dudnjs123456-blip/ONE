@@ -570,6 +570,8 @@ const MINUTES_PER_FRAME = 1 / 3600; // 게임 시각 = 실제 시각 (1초 = 1�
  * 행인을 때리면: 체력바가 뜨고, 쓰러뜨리면 지갑의 돈(가끔 소지품)을 줍는다.
  * 본 사람들이 신고하면 경찰이 출동하고, 현장에 남아 있다 잡히면 집 앞에서 다시 시작.
  */
+/** 분수 동전 (골드) */
+export const COIN_TOSS = 10;
 /** 버스 교통비 (골드) */
 export const BUS_FARE = 15;
 
@@ -1702,6 +1704,23 @@ export class CityWorld {
     return true;
   }
 
+  /** 분수에 동전 던지기 (10G): 소원 한마디. 가끔 반짝 (작은 행운 — 골드 조금 돌려받기) */
+  tossCoin() {
+    const pr = this.profile;
+    if (pr.gold < COIN_TOSS) {
+      this.say('🪙 던질 동전이 없어요');
+      return;
+    }
+    pr.gold -= COIN_TOSS;
+    const wishes = ['오늘 하루도 무사히…', '다음 경기는 꼭 이기게 해 주세요', '로또 1등!', '좋은 이웃을 만나게 해 주세요', '보스를 한 번에 잡게…', '내일은 맑았으면', '건강하게 해 주세요'];
+    const wish = wishes[Math.floor(this.rng() * wishes.length)];
+    if (this.rng() < 0.1) {
+      pr.gold += COIN_TOSS * 5;
+      this.say(`🪙 퐁당! "${wish}" — ✨ 물속에서 동전이 반짝! +${COIN_TOSS * 5} G`, 4);
+    } else this.say(`🪙 퐁당! "${wish}"`, 3);
+    saveProfile(pr);
+  }
+
   /** 버스 행선지: 동네 주요 장소 (정류장 앞에 내린다 — 실제로 서 있는 자리라 바로 E 로 들어갈 수 있다) */
   busDestinations(): { id: string; label: string; icon: string; x: number; z: number }[] {
     const find = (id: string) => this.map.pois.find((p) => p.id === id);
@@ -2428,6 +2447,10 @@ export class CityWorld {
     }
     if (poi.id === 'casino') {
       this.casinoRequest = true;
+      return;
+    }
+    if (poi.id === 'park-center') {
+      this.tossCoin();
       return;
     }
     if (poi.kind === 'bus') {
@@ -3969,6 +3992,8 @@ export class CityWorld {
         : this.map.buildings.map((b) => ({ x0: b.x - b.w / 2, x1: b.x + b.w / 2, z0: b.z - b.d / 2, z1: b.z + b.d / 2 }));
     // 플레이어는 차도에 못 들어간다 (횡단보도로만 건넌다). 경찰·행인은 그대로
     if (where === 'city' && roads) solids.push(...this.roadRects);
+    // 공원 분수·놀이기구도 뚫고 지나가지 못한다 (플레이어만 — 행인 길은 그대로)
+    if (where === 'city' && roads) solids.push(...this.map.propRects);
     for (const s of solids) {
       // 원(사람) vs 상자: 가장 가까운 점에서 밀어낸다
       const cx = Math.max(s.x0, Math.min(p.x, s.x1));
