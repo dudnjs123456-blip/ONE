@@ -113,6 +113,8 @@ function priceTex() {
 
 export interface KaraokeInterior {
   tick(t: number): void;
+  /** 방 문 (방 번호 → 열린 정도 0~1) */
+  doors: Map<number, { setOpen(t: number): void }>;
 }
 
 export function buildKaraokeInterior(g: THREE.Group, L: StoreLayout): KaraokeInterior {
@@ -138,6 +140,9 @@ export function buildKaraokeInterior(g: THREE.Group, L: StoreLayout): KaraokeInt
   const spin: THREE.Object3D[] = [];
   const pulse: { mat: THREE.MeshStandardMaterial; base: number; phase: number }[] = [];
   const lights: { l: THREE.PointLight; base: number; phase: number }[] = [];
+  const doors = new Map<number, { setOpen(t: number): void }>();
+  const leafGlass = new THREE.MeshStandardMaterial({ color: 0x6a3b8f, transparent: true, opacity: 0.45, roughness: 0.1, metalness: 0.3, depthWrite: false });
+  const leafFrame = std(0x1a1a20, 0.3, 0.6);
 
   // ── 칸막이 벽: 허리 높이 벽 + 위는 짙은 반투명 유리 (위에서 내려다봐도 방 안이 보이게) ──
   const partMat = std(0x2b1640, 0.85);
@@ -210,6 +215,38 @@ export function buildKaraokeInterior(g: THREE.Group, L: StoreLayout): KaraokeInt
     const plate = plateTex(b.no, col);
     plane(0.42, 0.32, new THREE.MeshBasicMaterial({ map: plate }), hallX - inward * 0.075, GLASS_TOP + 0.24, b.doorZ, b.side < 0 ? Math.PI / 2 : -Math.PI / 2);
     plane(0.42, 0.32, new THREE.MeshBasicMaterial({ map: plate }), hallX - inward * 0.075, GLASS_TOP + 0.24, b.doorZ, b.side < 0 ? -Math.PI / 2 : Math.PI / 2).position.x = hallX + inward * 0.075;
+
+    // 방 유리문: 경첩은 문 북쪽 끝, 방 안쪽으로 열린다 (빌린 방만 열림)
+    {
+      const dw = 0.95;
+      const pivot = new THREE.Group();
+      pivot.position.set(hallX, 0, b.doorZ - dw / 2);
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.03, 2.15, dw - 0.06), leafGlass);
+      pane.position.set(0, 1.1, dw / 2);
+      pane.renderOrder = 2;
+      pivot.add(pane);
+      for (const zz of [0.02, dw - 0.02]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, 2.2, 0.04), leafFrame);
+        post.position.set(0, 1.1, zz);
+        pivot.add(post);
+      }
+      for (const yy of [0.03, 2.18]) {
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, dw), leafFrame);
+        bar.position.set(0, yy, dw / 2);
+        pivot.add(bar);
+      }
+      const knob = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), std(0xd3d6db, 0.2, 1));
+      knob.position.set(0, 1.0, dw - 0.12);
+      pivot.add(knob);
+      g.add(pivot);
+      let cur = 0;
+      doors.set(b.no, {
+        setOpen(t: number) {
+          cur += (t - cur) * 0.15;
+          pivot.rotation.y = b.side * 1.35 * cur;
+        },
+      });
+    }
 
     // 화면 (바깥 벽) + 노래방 기계 + 스피커
     const scr = new THREE.MeshStandardMaterial({ map: screenTex(b.no), emissive: 0xffffff, roughness: 0.3 });
@@ -312,6 +349,7 @@ export function buildKaraokeInterior(g: THREE.Group, L: StoreLayout): KaraokeInt
   pulse.push({ mat: ring.material as THREE.MeshStandardMaterial, base: 1.6, phase: 0.5 });
 
   return {
+    doors,
     tick(t: number) {
       for (const s of spin) s.rotation.y = t * 0.8;
       for (const p of pulse) p.mat.emissiveIntensity = p.base * (0.8 + 0.2 * Math.sin(t * 2.2 + p.phase));

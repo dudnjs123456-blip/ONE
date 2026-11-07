@@ -1,9 +1,9 @@
 // 코인노래방: 검색어 · 반주 고르기 · 점수 · 지도 입구 확인 (npm run test:karaoke)
 import { buildCityMap, KARAOKE_NAME } from '../src/game/city/cityMap';
 import { CityWorld, type CityInput } from '../src/game/city/cityWorld';
-import { KARAOKE_BOOTHS, storeLayout } from '../src/game/city/store';
+import { KARAOKE_BOOTHS, STAIR, stairSign, storeLayout } from '../src/game/city/store';
 import { FIGHTER_RADIUS } from '../src/game/core/constants';
-import { fallbackSong, isAccompaniment, karaokeQuery, likelyBlocked, rankKaraoke, rollScore, scoreComment, type Playable } from '../src/game/city/karaoke';
+import { SONG_PACKS, SONG_PRICE, fallbackSong, isAccompaniment, karaokeQuery, likelyBlocked, rankKaraoke, rollScore, scoreComment, type Playable } from '../src/game/city/karaoke';
 import { mulberry32 } from '../src/game/core/controllers';
 
 let fail = 0;
@@ -122,9 +122,13 @@ const reach = (p: { x: number; z: number; radius: number }) => {
 check('입구에서 네 방 노래방 기계까지 모두 걸어갈 수 있다', sings.every(reach), sings.filter((p) => !reach(p)).map((p) => p.id).join(', '));
 check('카운터와 출입문까지도 걸어갈 수 있다', ['store:counter', 'store:exit'].every((id) => reach(L.pois.find((p) => p.id === id)!)));
 
-// ── 실제로 들어가서 2번방에서 노래 고르기 창 열기 ──
+const sits = L.pois.filter((p) => p.id.startsWith('store:sit:'));
+check('방 문이 열려 있으면 네 방 소파 옆까지 걸어갈 수 있다', sits.length === 4 && sits.every(reach), sits.filter((p) => !reach(p)).map((p) => p.id).join(', '));
+
+// ── 실제로 걸어 보기: 계단 문 → 1층 계단실 → 계단으로 2층 → 노래방 → 방 빌리기 → 노래 · 동작 → 나와서 계단으로 내려가기 ──
 let cmd: CityInput = { move: null, run: false, interact: false };
 const w = new CityWorld({ read: () => cmd });
+w.profile.gold = 1000;
 const press = (c: Partial<CityInput> = {}, n = 1) => {
   for (let i = 0; i < n; i++) {
     cmd = { move: null, run: false, interact: false, ...c };
@@ -132,24 +136,136 @@ const press = (c: Partial<CityInput> = {}, n = 1) => {
   }
   cmd = { move: null, run: false, interact: false };
 };
+/** 한 방향으로 걷다가 조건이 되면 멈춘다 (최대 프레임) */
+const walk = (move: { x: number; z: number }, until: () => boolean, max = 600) => {
+  for (let i = 0; i < max && !until(); i++) press({ move });
+  return until();
+};
+const at = () => `${w.location}/${w.store?.sign ?? ''} (${w.player.x.toFixed(2)}, ${w.player.z.toFixed(2)})`;
 const door = w.map.pois.find((p) => p.id === 'karaoke')!;
 w.player.reset(door.x, door.z, 0, -1);
 press();
-check('계단 문 앞에서 노래방 안내가 뜬다', w.nearby?.id === 'karaoke', w.nearby?.label);
+check('계단 문 앞에서 안내가 뜬다', w.nearby?.id === 'karaoke', w.nearby?.label);
 press({ interact: true });
 for (let i = 0; i < 300 && (w.location !== 'store' || w.doorway); i++) press();
-check('E → 계단을 올라 노래방 안으로', w.location === 'store' && w.store?.kind === 'karaoke', `${w.location} ${w.store?.sign}`);
-const room2 = w.store!.pois.find((p) => p.id === 'store:sing:2')!;
-w.player.reset(room2.x, room2.z, -1, 0);
+check('E → 펫샵 건물 1층 계단실로', w.store?.kind === 'stairs' && w.store.sign === stairSign(1), at());
+// 1층: 내려가는 계단은 없다 (서쪽은 계단 밑 창고)
+const f1 = w.store!;
+check('1층엔 내려가는 계단이 없고, 2층엔 있다', f1.furniture.some((f) => f.id === 'closet') && !storeLayout(stairSign(2)).furniture.some((f) => f.id === 'closet'));
+// 동쪽 계단으로 걸어 올라간다
+w.player.reset(1.0, 1.2, 0, -1);
 press();
-check('2번방 노래방 기계 앞', w.nearby?.id === 'store:sing:2', w.nearby?.label);
+let maxLift = 0;
+const ok2 = walk({ x: 0, z: -1 }, () => {
+  if (w.store?.sign === stairSign(1)) maxLift = Math.max(maxLift, w.stairLift(w.player.x, w.player.z));
+  return w.store?.sign === stairSign(2);
+});
+check('동쪽 계단을 걸어 올라가면 2층', ok2, at());
+check('계단을 오르는 동안 몸이 점점 올라간다', maxLift > 1.2, `최고 ${maxLift.toFixed(2)} m`);
+check('2층에 올라오면 층계참 (내려가는 계단 꼭대기)', w.player.z > STAIR.start && w.player.x < 0, at());
+press(undefined, 20);
+check('올라오자마자 다시 내려가지 않는다', w.store?.sign === stairSign(2), at());
+// 3층까지 올라가 보고 (비어 있는 층) 다시 2층으로
+w.player.reset(1.0, 1.2, 0, -1);
+walk({ x: 0, z: -1 }, () => w.store?.sign === stairSign(3));
+check('3층까지 걸어 올라간다', w.store?.sign === stairSign(3), at());
+check('3층(꼭대기)엔 올라가는 계단이 막혀 있다', w.store!.furniture.some((f) => f.id === 'roofGate'));
+const vac = w.store!.pois.find((p) => p.id === 'store:floordoor')!;
+check('3층 문은 임대 문의 (비어 있음)', /임대/.test(vac.label), vac.label);
+w.player.reset(-1.0, 1.2, 0, -1);
+walk({ x: 0, z: -1 }, () => w.store?.sign === stairSign(2));
+check('서쪽 계단으로 걸어 내려가면 2층', w.store?.sign === stairSign(2), at());
+// 2층 노래방 문
+const fd = w.store!.pois.find((p) => p.id === 'store:floordoor')!;
+w.player.reset(fd.x, fd.z, 1, 0);
+press();
+check('2층 층계참에 코인노래방 문', w.nearby?.id === 'store:floordoor' && w.nearby.label.includes(KARAOKE_NAME), w.nearby?.label);
+press({ interact: true });
+press();
+check('E → 코인노래방 안으로', w.store?.kind === 'karaoke', at());
+
+// 방을 빌리기 전: 방 문이 잠겨 있다
+const b2 = KARAOKE_BOOTHS.find((b) => b.no === 2)!;
+const corridorX = b2.doorX + -b2.side * 0.5;
+w.player.reset(corridorX, b2.doorZ, b2.side, 0);
+press();
+check('복도에서 방 문 앞: 빈방 안내', /빈방/.test(w.nearby?.label ?? ''), w.nearby?.label);
+walk({ x: b2.side, z: 0 }, () => false, 120);
+const inside = () => w.player.x > b2.rect.x0 && w.player.x < b2.rect.x1 && w.player.z > b2.rect.z0 && w.player.z < b2.rect.z1;
+check('방을 안 빌리면 문을 지나 들어갈 수 없다', !inside(), at());
+// 카운터에서 방 빌리기: 2번방 5곡
+const counter = w.store!.pois.find((p) => p.id === 'store:counter')!;
+w.player.reset(counter.x, counter.z, 1, 0);
+press();
+press({ interact: true });
+check('카운터에서 E → 빈방 확인 창', w.karaokeDeskRequest);
+w.karaokeDeskRequest = false;
+check('처음엔 네 방 모두 빈방', w.boothStates().every((s) => s.state === 'free'));
+const pack5 = SONG_PACKS.findIndex((p) => p.songs === 5);
+const r1 = w.rentKaraoke(2, pack5);
+check('2번방 · 5곡 빌리기 (220G)', r1.ok && w.profile.gold === 780 && w.karaokeRental?.room === 2 && w.karaokeRental.songs === 5, `${r1.message} · ${w.profile.gold}G`);
+check('다른 방을 또 빌릴 수는 없다', !w.rentKaraoke(3, 0).ok);
+check('카운터 창에 2번방이 내 방으로', w.boothStates().find((s) => s.no === 2)?.state === 'mine');
+// 이제 2번방 문으로 걸어 들어간다
+w.player.reset(corridorX, b2.doorZ, b2.side, 0);
+walk({ x: b2.side, z: 0 }, inside, 200);
+check('빌린 2번방엔 걸어 들어간다', inside(), at());
+// 다른 방(1번)은 여전히 잠김
+const b1 = KARAOKE_BOOTHS.find((b) => b.no === 1)!;
+w.player.reset(b1.doorX + -b1.side * 0.5, b1.doorZ, b1.side, 0);
+walk({ x: b1.side, z: 0 }, () => false, 120);
+check('남의 방(1번)은 여전히 못 들어간다', !(w.player.x > b1.rect.x0 && w.player.x < b1.rect.x1 && w.player.z > b1.rect.z0 && w.player.z < b1.rect.z1), at());
+// 노래방 기계 → 노래 고르기, 한 곡 쓰기
+const sing = w.store!.pois.find((p) => p.id === 'store:sing:2')!;
+w.player.reset(sing.x, sing.z, b2.side, 0);
+press();
+check('기계 앞 안내에 남은 곡', /남은 5곡/.test(w.nearby?.label ?? ''), w.nearby?.label);
 press({ interact: true });
 check('E → 노래 고르기 창 (2번방)', w.karaokeRequest && w.karaokeRoom === 2);
 w.karaokeRequest = false;
+check('곡을 틀면 남은 곡이 하나 줄고 골드는 그대로', w.karaokePay(SONG_PRICE) && w.karaokeRental?.songs === 4 && w.profile.gold === 780);
+check('못 튼 곡은 돌려받는다', w.karaokePay(-SONG_PRICE) && w.karaokeRental?.songs === 5);
+// 동작: 신나게 부르기 (서서) → 앉아서 부르기 (소파)
+check('방 안에서 신나게 부르기', w.karaokeAct('kHype') && w.seat?.spot === 'sofa' && w.sofa.id === 'kHype' && w.seatBooth === 2);
+press(undefined, 60);
+check('서서 부르는 자리는 화면 앞 (화면을 본다)', Math.abs(w.player.x - b2.stand.x) < 0.01 && Math.sign(w.player.fx) === b2.side, at());
+const ns = w.netState();
+check('친구에게도 방 번호 · 동작이 간다', ns.kb === 2 && ns.se === 'kHype', `kb ${ns.kb} se ${ns.se}`);
+check('앉아서 부르기로 바꾸면 소파 자리로', w.karaokeAct('kSit') && w.sofa.id === 'kSit' && w.sofa.prev === 'kHype' && Math.abs(w.player.x - b2.sit.x) < 0.01);
+press({ move: { x: 0, z: 1 } }, 2);
+press(undefined, 60);
+check('움직이면 일어난다', w.seat === null && w.seatBooth === null);
+// 방 밖에선 동작을 못 한다
+w.player.reset(0, 2.5, 0, -1);
+check('방 밖에서는 노래 동작 불가', !w.karaokeAct('kStand'));
+// 한 곡 쓰고 나가면 4곡 값 환불: 220 × 4/5 = 176
+w.karaokePay(SONG_PRICE);
 const exit = w.store!.pois.find((p) => p.id === 'store:exit')!;
 w.player.reset(exit.x, exit.z, 0, 1);
+press();
+press({ interact: true });
+press();
+check('노래방을 나오면 2층 층계참 · 남은 곡 값 환불', w.store?.sign === stairSign(2) && w.karaokeRental === null && w.profile.gold === 780 + 176, `${at()} · ${w.profile.gold}G`);
+// 걸어서 1층으로 내려가 거리로
+w.player.reset(-1.0, 1.2, 0, -1);
+walk({ x: 0, z: -1 }, () => w.store?.sign === stairSign(1));
+check('서쪽 계단으로 걸어 내려가면 1층', w.store?.sign === stairSign(1), at());
+const ex1 = w.store!.pois.find((p) => p.id === 'store:exit')!;
+w.player.reset(ex1.x, ex1.z, 0, 1);
 press({ interact: true });
 for (let i = 0; i < 300 && (w.location !== 'city' || w.doorway); i++) press();
-check('출입문 → 계단을 내려와 펫샵 건물 앞 인도로', w.location === 'city' && Math.abs(w.player.x - door.x) < 0.5 && w.player.z > door.z - 1.5, `(${w.player.x.toFixed(2)}, ${w.player.z.toFixed(2)})`);
+check('1층 출입문 → 펫샵 건물 앞 인도', w.location === 'city' && Math.abs(w.player.x - door.x) < 0.5, at());
+
+// 친구가 쓰는 방은 '사용 중'
+const w2 = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+w2.profile.gold = 1000;
+(w2 as unknown as { store: unknown }).store = storeLayout(KARAOKE_NAME);
+(w2 as unknown as { location: string }).location = 'store';
+w2.netId = 'b';
+w2.upsertRemote('a', '친구', '201');
+w2.applyRemoteState('a', { ...w.netState(), r: `s:${KARAOKE_NAME}`, kb: 3 });
+const st3 = w2.boothStates().find((s) => s.no === 3)!;
+check('친구가 빌린 방(3번)은 사용 중으로 보인다', st3.state === 'taken' && st3.by === '친구', JSON.stringify(st3));
+check('친구 방은 빌릴 수 없다', !w2.rentKaraoke(3, 0).ok);
 
 if (fail) process.exitCode = 1;

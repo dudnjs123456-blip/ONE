@@ -115,6 +115,10 @@ interface SofaPose {
   blink: number;
   aa: number;
   happy: number;
+  /** 서서 하는 동작 (1): 골반은 서 있는 높이 + hy 만큼 (뛰기) */
+  stand: number;
+  /** 오른손에 마이크 */
+  mic: number;
 }
 
 const SOFA_BONES: VRMHumanBoneName[] = [
@@ -128,13 +132,18 @@ const smoothstep = (a: number, b: number, x: number) => {
   return u * u * (3 - 2 * u);
 };
 
+/** 오른손 마이크를 입 앞으로: 팔을 앞으로 들고 팔꿈치를 접는다 */
+function micArm(arm: (side: 'left' | 'right', sh: number, el: number, ar: number, tw?: number) => void, wob: number) {
+  arm('right', -1.3 + wob, -2.4, 0.06, -0.35);
+}
+
 /**
  * 소파 동작별 자세. f = 그 동작을 시작하고 지난 프레임 (반복 동작용).
  * 앉은 자세들은 TV 를 보고(sit), 옆으로 눕기는 서쪽 팔걸이에 머리를 괴고 TV 쪽을 본다(lie)
  */
 function sofaPose(act: string, f: number, r: RestPose): SofaPose {
   const bones = new Map<VRMHumanBoneName, THREE.Quaternion>();
-  const P: SofaPose = { hx: r.sit.x, hy: r.seatY ?? 0.45, hz: r.sit.z, rx: 0, ry: r.sit.yaw, rz: 0, bones, phone: 0, blink: 0, aa: 0, happy: 0 };
+  const P: SofaPose = { hx: r.sit.x, hy: r.seatY ?? 0.45, hz: r.sit.z, rx: 0, ry: r.sit.yaw, rz: 0, bones, phone: 0, blink: 0, aa: 0, happy: 0, stand: 0, mic: 0 };
   const q = (x: number, y = 0, z = 0) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'XYZ'));
   const arm = (side: 'left' | 'right', sh: number, el: number, ar: number, tw = 0) => {
     const hang = ARM_HANG - ar;
@@ -233,6 +242,91 @@ function sofaPose(act: string, f: number, r: RestPose): SofaPose {
       leg('right', lerp(-1.55, -1.45), lerp(1.5, 0.35), 0.05, 0.5 * u);
       break;
     }
+    case 'kSit': {
+      // 소파에 앉아 마이크를 입에 대고 부른다: 몸을 박자에 맞춰 좌우로, 왼손은 무릎에서 까딱
+      P.mic = 1;
+      P.happy = 0.4;
+      P.aa = 0.25 + 0.45 * Math.max(0, Math.sin(f * 0.21));
+      const beat = Math.sin(f * 0.105);
+      P.rz = beat * 0.05;
+      bones.set('chest', q(0.04 + breathe, beat * 0.06));
+      bones.set('head', q(-0.08, beat * 0.1, beat * 0.08));
+      micArm(arm, 0);
+      arm('left', -0.55 + Math.max(0, beat) * 0.15, -0.95, -0.02);
+      leg('left', -1.55, 1.5 - Math.max(0, beat) * 0.12);
+      leg('right', -1.55, 1.5 - Math.max(0, -beat) * 0.12);
+      break;
+    }
+    case 'kTamb': {
+      // 앉아서 탬버린: 오른손을 머리 옆으로 들고 흔들며, 왼손으로 '착!' 친다
+      P.happy = 1;
+      P.aa = 0.3;
+      const c = f % 40;
+      const hit = c < 6 ? 1 - c / 6 : 0;
+      const shake = Math.sin(f * 0.9) * 0.18;
+      bones.set('head', q(-0.05, Math.sin(f * 0.1) * 0.12));
+      arm('right', -2.0 + shake * 0.4, -0.9, 0.35 + shake);
+      arm('left', -1.4 + hit * 0.4, -0.7 - hit * 0.5, -0.1);
+      leg('left', -1.6, 1.55);
+      leg('right', -1.6, 1.55);
+      break;
+    }
+    case 'kStand':
+    case 'kHype':
+    case 'kDance': {
+      // 서서 부르기: 화면 앞에서 마이크를 입에 대고. 신나게 = 박자에 맞춰 뛰며 왼주먹을 번쩍,
+      // 춤추며 = 엉덩이를 흔들며 좌우로 스텝
+      const st = r.stand ?? r.sit;
+      P.hx = st.x;
+      P.hz = st.z;
+      P.ry = st.yaw;
+      P.stand = 1;
+      P.hy = 0;
+      P.mic = 1;
+      P.aa = 0.3 + 0.5 * Math.max(0, Math.sin(f * 0.21));
+      for (const n of ['spine', 'chest'] as const) bones.set(n, q(0));
+      leg('left', 0, 0.04, 0.07, 0);
+      leg('right', 0, 0.04, 0.07, 0);
+      micArm(arm, 0);
+      if (act === 'kStand') {
+        // 왼손은 천천히 앞으로 뻗었다 가슴으로 (감정 잡기)
+        const sway = Math.sin(f * 0.05);
+        P.rz = sway * 0.04;
+        P.happy = 0.3;
+        P.blink = Math.sin(f * 0.02) > 0.7 ? 1 : 0;
+        bones.set('chest', q(breathe, sway * 0.08));
+        bones.set('head', q(-0.12, sway * 0.12, sway * 0.06));
+        const reach = 0.5 + 0.5 * Math.sin(f * 0.03);
+        arm('left', -0.4 - reach * 0.9, -0.3 - (1 - reach) * 1.2, 0.15 + reach * 0.3);
+      } else if (act === 'kHype') {
+        // 박자마다 콩콩 뛰고, 착지할 때 무릎을 굽힌다. 왼주먹은 하늘로
+        const ph = (f % 30) / 30;
+        const hop = Math.sin(ph * Math.PI);
+        P.hy = hop * 0.13 - (1 - hop) * 0.05;
+        P.happy = 1;
+        P.aa = 0.6 + hop * 0.35;
+        bones.set('chest', q(-0.1 * hop));
+        bones.set('head', q(-0.2 + (1 - hop) * 0.25));
+        leg('left', -0.35 * (1 - hop), 0.6 * (1 - hop) + 0.05, 0.12, 0.2 * hop);
+        leg('right', -0.35 * (1 - hop), 0.6 * (1 - hop) + 0.05, 0.12, 0.2 * hop);
+        arm('left', -2.9 + (1 - hop) * 0.5, -0.15 - (1 - hop) * 0.4, 0.1);
+      } else {
+        // 엉덩이를 좌우로 흔들며 옆으로 한 발씩, 왼팔은 크게 흔든다
+        const sw = Math.sin(f * 0.11);
+        P.hx += Math.cos(st.yaw) * sw * 0.12;
+        P.hz -= Math.sin(st.yaw) * sw * 0.12;
+        P.hy = -0.04 + Math.abs(sw) * 0.02;
+        P.rz = -sw * 0.12;
+        P.happy = 1;
+        bones.set('spine', q(0, 0, sw * 0.15));
+        bones.set('chest', q(0.02, sw * 0.15, -sw * 0.1));
+        bones.set('head', q(-0.08, -sw * 0.15, sw * 0.12));
+        leg('left', -0.15 - Math.max(0, sw) * 0.2, 0.25 + Math.max(0, sw) * 0.35, 0.14);
+        leg('right', -0.15 - Math.max(0, -sw) * 0.2, 0.25 + Math.max(0, -sw) * 0.35, 0.14);
+        arm('left', -0.6 + sw * 0.9, -0.5, 0.45 + Math.abs(sw) * 0.4);
+      }
+      break;
+    }
     case 'lounge': {
       // 옆으로 누워 팔걸이에 팔을 괴고 TV 보기 (침대처럼 바로 눕지 않는다)
       P.hx = r.lie.x;
@@ -274,6 +368,8 @@ export class VrmCharacter implements CharacterView {
   private lookW = 0;
   private lookYaw = 0;
   private phoneMesh: THREE.Group | null = null;
+  /** 노래방 마이크 (노래 부를 때만 보인다): 오른손에 쥔다 */
+  private micMesh: THREE.Group | null = null;
   /** 소파 동작 중 표정 (눈 감기·입 벌림·웃음) */
   private sofaFace: { blink: number; aa: number; happy: number } | null = null;
   /** VRM 을 못 불러와서 상자 인형으로 대신하는 중 */
@@ -404,6 +500,7 @@ export class VrmCharacter implements CharacterView {
     vrm.scene.rotation.x = 0;
     vrm.scene.rotation.z = 0;
     this.sofaFace = null;
+    if (this.micMesh) this.micMesh.visible = false;
     if (this.rest && this.rest.t > 0) {
       if (this.rest.sofa) this.applySofa(vrm, this.rest, lp, yaw);
       else this.applyRest(vrm, this.rest, lp, yaw, t);
@@ -475,15 +572,18 @@ export class VrmCharacter implements CharacterView {
     const wb = Math.min(1, r.t * 1.6);
     const hips = bone('hips')!;
     const standHy = hips.position.y;
+    // 서서 하는 동작은 골반을 서 있는 높이로 (hy 는 뛰는 만큼만 더한다)
+    const hyOf = (P: SofaPose) => (P.stand ? lp.y + standHy + P.hy : P.hy);
+    const hipLocal = (P: SofaPose) => (P.stand ? standHy : this.rig.hipsY);
     const hx = lerp(lp.x, lerp(A.hx, B.hx, k), u);
-    const hy = lerp(lp.y + standHy, lerp(A.hy, B.hy, k), u);
+    const hy = lerp(lp.y + standHy, lerp(hyOf(A), hyOf(B), k), u);
     const hz = lerp(lp.z, lerp(A.hz, B.hz, k), u);
     const ry = lerpAng(yaw, lerpAng(A.ry, B.ry, k), Math.min(1, u * 1.4));
     const rx = lerp(A.rx, B.rx, k) * u;
     const rz = lerp(A.rz, B.rz, k) * u;
     vrm.scene.rotation.set(rx, ry, rz, 'YXZ');
     // 골반이 (hx,hy,hz) 에 오도록 장면 루트 위치를 거꾸로 계산
-    hips.position.y = lerp(standHy, this.rig.hipsY, wb);
+    hips.position.y = lerp(standHy, lerp(hipLocal(A), hipLocal(B), k), wb);
     hips.quaternion.slerp(this.tmpQ.identity(), wb);
     const off = this.tmpV.set(hips.position.x, hips.position.y, hips.position.z).applyEuler(vrm.scene.rotation);
     vrm.scene.position.set(hx - off.x, hy - off.y, hz - off.z);
@@ -498,6 +598,7 @@ export class VrmCharacter implements CharacterView {
     this.lookW = 0;
     if (this.phoneMesh) this.phoneMesh.visible = this.phoneW > 0.5;
     this.sofaFace = { blink: lerp(A.blink, B.blink, k) * u, aa: lerp(A.aa, B.aa, k) * u, happy: lerp(A.happy, B.happy, k) * u };
+    if (this.micMesh) this.micMesh.visible = lerp(A.mic, B.mic, k) * u > 0.5;
   }
 
   /**
@@ -724,6 +825,17 @@ export class VrmCharacter implements CharacterView {
       ph.visible = false;
       hand.add(ph);
       this.phoneMesh = ph;
+      // 마이크: 손잡이(검정) + 그물 머리(은색). 주먹에서 엄지 쪽(위)으로 솟는다
+      const mic = new THREE.Group();
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.014, 0.17, 12), new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.35, metalness: 0.5 }));
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.032, 14, 10), new THREE.MeshStandardMaterial({ color: 0xb8bcc4, roughness: 0.3, metalness: 0.9 }));
+      head.position.y = 0.1;
+      mic.add(grip, head);
+      mic.position.set(-0.075, 0.02, 0.0);
+      if (this.v0) mic.position.set(0.075, 0.02, 0.0);
+      mic.visible = false;
+      hand.add(mic);
+      this.micMesh = mic;
     }
 
     // 클립 계산용: 모델에 실제로 있는 가장 가까운 부모 뼈

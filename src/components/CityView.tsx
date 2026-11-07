@@ -22,6 +22,8 @@ import GearPanel from './GearPanel';
 import WardrobeView from './WardrobeView';
 import CasinoPanel from './CasinoPanel';
 import KaraokePanel from './KaraokePanel';
+import KaraokeDeskPanel from './KaraokeDeskPanel';
+import { KARAOKE_ACTS } from '@/game/city/karaoke';
 import BusPanel from './BusPanel';
 import ChatBox from './ChatBox';
 import VoicePanel from './VoicePanel';
@@ -77,6 +79,8 @@ interface CityHud {
   lookOut: boolean;
   /** 소파에 있으면 지금 동작 */
   sofa: string | null;
+  /** 코인노래방 내 방 안: 지금 노래 동작 · 남은 곡 */
+  karaoke: { act: string | null; songs: number; room: number } | null;
   /** 1인칭 (마우스로 보는 중이면 mouse) */
   fp: { mouse: boolean } | null;
   /** 지금 장소 이름 (내 집 호수·친구 집 포함) */
@@ -208,6 +212,9 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
   const [gear, setGear] = useState(false);
   const [casino, setCasino] = useState(false);
   const [karaoke, setKaraoke] = useState(false);
+  const [karaokeDesk, setKaraokeDesk] = useState(false);
+  const karaokeDeskRef = useRef(karaokeDesk);
+  karaokeDeskRef.current = karaokeDesk;
   const [bus, setBus] = useState(false);
   const [pcRoom, setPcRoom] = useState(false);
   const onPlayRef = useRef(onPlay);
@@ -256,7 +263,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
     const canvas = canvasRef.current!;
     const kb = new CityKeyboard();
     kb.attach();
-    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || busRef.current || pcRoomRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
+    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
@@ -319,7 +326,14 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         return;
       }
       // 소파: 숫자 키 1~6 으로 동작 바꾸기
-      if (world.seat?.spot === 'sofa' && !e.repeat) {
+      if (world.inMyBooth() && !e.repeat) {
+        const n = /^(Digit|Numpad)([1-6])$/.exec(e.code);
+        if (n) {
+          world.karaokeAct(KARAOKE_ACTS[Number(n[2]) - 1].id);
+          return;
+        }
+      }
+      if (world.seat?.spot === 'sofa' && world.seatBooth === null && !e.repeat) {
         const n = /^(Digit|Numpad)([1-6])$/.exec(e.code);
         if (n) {
           world.sofaAction(SOFA_ACTS[Number(n[2]) - 1].id);
@@ -338,6 +352,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         else if (gearRef.current) setGear(false);
         else if (casinoRef.current) setCasino(false);
         else if (karaokeRef.current) setKaraoke(false);
+        else if (karaokeDeskRef.current) setKaraokeDesk(false);
         else if (busRef.current) setBus(false);
         else if (pcRoomRef.current) setPcRoom(false);
         else if (petsRef.current) setPets(null);
@@ -476,7 +491,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       }
 
       // 화면 위 글자(HUD)는 0.08초마다만 새로 만든다 (매 프레임 비교하던 것을 줄여서 가볍게)
-      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.busRequest || world.pcRoomRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
+      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.karaokeDeskRequest || world.busRequest || world.pcRoomRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
       const h: CityHud | null = !hudDue ? null : {
         location: world.location,
         floor: world.floor,
@@ -518,7 +533,8 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
           ? { top: world.villaFloors, here: world.location === 'lobby' ? 1 : world.floor, mine: Number(world.homeUnit.slice(0, -2)) || 0 }
           : null,
         lookOut: world.lookingOut,
-        sofa: world.seat?.spot === 'sofa' && world.seat.phase !== 'stand' ? world.sofa.id : null,
+        sofa: world.seat?.spot === 'sofa' && world.seat.phase !== 'stand' && world.seatBooth === null ? world.sofa.id : null,
+        karaoke: world.inMyBooth() && world.karaokeRental ? { act: world.seat?.spot === 'sofa' && world.seat.phase !== 'stand' && world.seatBooth !== null ? world.sofa.id : null, songs: world.karaokeRental.songs, room: world.karaokeRental.room } : null,
         fp: world.firstPerson ? { mouse: world.fpMouse } : null,
         place: world.placeLabel,
         online: link ? { status: link.status, friends: link.friends, ping: link.ping === null ? null : Math.round(link.ping) } : null,
@@ -545,6 +561,10 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       if (world.karaokeRequest) {
         world.karaokeRequest = false;
         setKaraoke(true);
+      }
+      if (world.karaokeDeskRequest) {
+        world.karaokeDeskRequest = false;
+        setKaraokeDesk(true);
       }
       if (world.busRequest) {
         world.busRequest = false;
@@ -779,6 +799,33 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       {pets && worldRef.current && <PetPanel key={`${pets}:${adoptPick ?? ''}`} world={worldRef.current} mode={pets} pick={adoptPick} onClose={() => setPets(null)} />}
       {casino && worldRef.current && <CasinoPanel world={worldRef.current} onClose={() => setCasino(false)} />}
       {karaoke && worldRef.current && <KaraokePanel world={worldRef.current} onClose={() => setKaraoke(false)} />}
+      {karaokeDesk && worldRef.current && <KaraokeDeskPanel world={worldRef.current} onClose={() => setKaraokeDesk(false)} />}
+      {/* 코인노래방 내 방 안: 노래 동작 버튼 (숫자 키 1~6) */}
+      {hud?.karaoke && !karaoke && (
+        <div className="pointer-events-auto absolute bottom-28 left-1/2 flex max-w-[calc(100vw-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-fuchsia-400/40 bg-[#14061f]/85 px-3 py-2 text-sm text-white shadow-xl">
+          <span className="mr-1 text-xs font-bold text-fuchsia-200">
+            🎤 {hud.karaoke.room}번방 · 남은 {hud.karaoke.songs}곡
+          </span>
+          {KARAOKE_ACTS.map((a, i) => (
+            <button
+              key={a.id}
+              onClick={() => worldRef.current?.karaokeAct(a.id)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold ${hud.karaoke?.act === a.id ? 'bg-fuchsia-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
+            >
+              <span className="mr-1 opacity-60">{i + 1}</span>
+              {a.icon} {a.label}
+            </button>
+          ))}
+          <button onClick={() => setKaraoke(true)} className="rounded-xl bg-fuchsia-600 px-3 py-1.5 text-xs font-bold hover:bg-fuchsia-500">
+            🎵 노래 고르기
+          </button>
+          {hud.karaoke.act && (
+            <button onClick={() => worldRef.current?.standUp()} className="rounded-xl px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/10">
+              그만하기 (E)
+            </button>
+          )}
+        </div>
+      )}
       {bus && worldRef.current && <BusPanel world={worldRef.current} onClose={() => setBus(false)} />}
       {pcRoom && worldRef.current && onPlay && <PcRoomPanel world={worldRef.current} onPlay={onPlay} onClose={() => setPcRoom(false)} />}
       {gear && worldRef.current && (

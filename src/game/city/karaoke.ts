@@ -6,6 +6,28 @@
 /** 한 곡 값 (골드). 코인노래방이라 곡마다 낸다 */
 export const SONG_PRICE = 50;
 
+/** 카운터에서 사는 곡 묶음 (많이 살수록 조금 싸다) */
+export const SONG_PACKS = [
+  { songs: 1, price: 50 },
+  { songs: 3, price: 140 },
+  { songs: 5, price: 220 },
+  { songs: 10, price: 400 },
+] as const;
+
+/** 노래방 동작 (방 안에서만): 앉아서(소파) · 서서 (화면 앞) */
+export type KaraokeAct = 'kSit' | 'kTamb' | 'cheer' | 'kStand' | 'kHype' | 'kDance';
+export const KARAOKE_ACTS: { id: KaraokeAct; icon: string; label: string; seated: boolean }[] = [
+  { id: 'kStand', icon: '🎤', label: '서서 부르기', seated: false },
+  { id: 'kHype', icon: '🔥', label: '신나게 부르기', seated: false },
+  { id: 'kDance', icon: '💃', label: '춤추며 부르기', seated: false },
+  { id: 'kSit', icon: '🛋️', label: '앉아서 부르기', seated: true },
+  { id: 'kTamb', icon: '🔔', label: '탬버린', seated: true },
+  { id: 'cheer', icon: '👏', label: '박수 · 환호', seated: true },
+];
+export const isSeatedAct = (id: string) => KARAOKE_ACTS.find((a) => a.id === id)?.seated ?? true;
+/** 마이크를 드는 동작 */
+export const MIC_ACTS = new Set<string>(['kSit', 'kStand', 'kHype', 'kDance']);
+
 /** 처음 들어갔을 때 보여 주는 추천 검색어 */
 export const KARAOKE_CHIPS = ['아이유 좋은 날', '버즈 가시', '뉴진스 Ditto', '임재범 고해', '볼빨간사춘기 우주를 줄게', '박효신 야생화', '싸이 강남스타일', '김광석 서른 즈음에'];
 

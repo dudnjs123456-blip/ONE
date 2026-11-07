@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 const ASSET_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
 
 const nextConfig: NextConfig = {
+  // 개발 서버 두 개를 같이 띄울 때 빌드 폴더가 겹치지 않게 (기본은 .next)
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   async headers() {
     return ["/models/:path*", "/anims/:path*", "/textures/:path*"].map((source) => ({
       source,

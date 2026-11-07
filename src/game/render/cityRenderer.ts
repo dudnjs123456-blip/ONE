@@ -650,6 +650,8 @@ export class CityRenderer {
     this.player.rest =
       sv && sv.rest > 0
         ? { t: sv.rest, sit: HOME.bed.sit, lie: HOME.bed.lie }
+        : seat > 0 && world.seat?.spot === 'sofa' && world.boothSpots(world.seatBooth)
+          ? { t: seat, ...world.boothSpots(world.seatBooth)!, lie: HOME.sofa.lie, seatY: 0.47, sofa: world.sofaView }
         : seat > 0 && world.seat?.spot === 'sofa'
           ? { t: seat, sit: HOME.sofa.sit, lie: HOME.sofa.lie, seatY: 0.52, sofa: world.sofaView }
           : seat > 0
@@ -944,6 +946,8 @@ export class CityRenderer {
         ? { t: r.sleep.rest, sit: HOME.bed.sit, lie: HOME.bed.lie }
         : !sv
         ? null
+        : sv.spot === 'sofa' && world.store?.kind === 'karaoke' && world.boothSpots(r.booth)
+          ? { t: sv.amt, ...world.boothSpots(r.booth)!, lie: HOME.sofa.lie, seatY: 0.47, sofa: sv.sofa }
         : sv.spot === 'sofa'
           ? { t: sv.amt, sit: HOME.sofa.sit, lie: HOME.sofa.lie, seatY: 0.52, sofa: sv.sofa }
           : { t: 0.35 * sv.amt, sit: LOBBY.chair, lie: HOME.bed.lie, seatY: 0.52, sitLeg: 1.45, phone: 1, look: null };
@@ -1112,7 +1116,9 @@ export class CityRenderer {
         this.store.add(this.keeperView.root);
       }
     }
+    if (this.keeperView) this.keeperView.root.visible = L.kind !== 'stairs';
     this.keeperView?.update(world.keeper, clock);
+    for (const [no, d] of this.storeScn?.booths ?? []) d.setOpen(world.boothOpen(no) ? 1 : 0);
     this.storeScn?.tick?.(clock.t, L.kind === 'fishing' ? world.fishingState.dex : undefined);
     // 펫샵: 진열대엔 남은 개수만큼, 분양된 아이의 이름표는 치운다
     if (this.storeScn && L.kind === 'pet') {
@@ -1285,8 +1291,10 @@ export class CityRenderer {
     // 집 안에선 방 가운데 쪽으로 붙잡아 방 전체가 보이게
     // 로비는 데스크(서쪽 끝)에 앉아 있는 시간이 길어서 플레이어를 더 따라간다
     const follow = world.location === 'lobby' ? 0.75 : world.location === 'corridor' ? 0.6 : 0.45;
-    let fx = home ? p.x * follow : p.x;
-    let fz = home ? p.z * 0.35 : p.z;
+    // 확대할수록 플레이어를 더 따라간다 (가까이 보면 방 가운데가 아니라 내 캐릭터 중심)
+    const closeK = Math.min(1, Math.max(0, (1 - this.zoom) / 0.45));
+    let fx = home ? p.x * (follow + (1 - follow) * closeK) : p.x;
+    let fz = home ? p.z * (0.35 + 0.65 * closeK) : p.z;
     const rest = world.location === 'home' ? (world.sleepView?.rest ?? 0) : 0;
     if (rest > 0) {
       // 침대를 비스듬히 내려다보도록 다가간다

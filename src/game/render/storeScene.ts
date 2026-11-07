@@ -4,6 +4,7 @@ import { glassMaterial } from './glassKit';
 import { buildClothesInterior } from './clothesInterior';
 import { buildFishingInterior } from './fishingInterior';
 import { buildKaraokeInterior } from './karaokeInterior';
+import { buildStairwellScene } from './stairwellScene';
 import type { FishingState } from '../data/fishing';
 import { swingDoors, type DoorControl } from './signage';
 import { SHOPS } from '../data/shops';
@@ -63,12 +64,20 @@ export interface StoreScene {
   cards: Map<string, THREE.Object3D>;
   /** 움직이는 것들 (낚시마트 수조 물고기 · 명예의 전당 기록) */
   tick?: (t: number, dex?: FishingState['dex']) => void;
+  /** 코인노래방 방 문 (방 번호 → 문). 빌린 방만 열린다 */
+  booths?: Map<number, DoorControl>;
 }
 
 export function buildStoreScene(L: StoreLayout, stock: StockPet[] = []): StoreScene {
+  // 상가 계단실은 가게와 전혀 다른 장면 (계단 · 층계참)
+  if (L.kind === 'stairs') {
+    const s = buildStairwellScene(L);
+    return { group: s.group, door: s.door, goods: new Map(), cards: new Map() };
+  }
   const g = new THREE.Group();
   let pet: { goods: Map<string, THREE.Object3D[]>; cards: Map<string, THREE.Object3D> } | null = null;
   let tick: StoreScene['tick'];
+  let booths: StoreScene['booths'];
   const { x0, x1, z0, z1 } = L.room;
   const W = x1 - x0;
   const D = z1 - z0;
@@ -262,6 +271,7 @@ export function buildStoreScene(L: StoreLayout, stock: StockPet[] = []): StoreSc
   } else if (L.kind === 'karaoke') {
     const k = buildKaraokeInterior(g, L);
     tick = (t) => k.tick(t);
+    booths = k.doors;
   }
 
   // 진열 물건 그림 · 가격표
@@ -273,7 +283,7 @@ export function buildStoreScene(L: StoreLayout, stock: StockPet[] = []): StoreSc
     sp.position.set(d.x + off.x, d.y + 0.38, d.z + off.z);
     g.add(sp);
   }
-  return { group: g, door, goods: pet?.goods ?? new Map(), cards: pet?.cards ?? new Map(), tick };
+  return { group: g, door, goods: pet?.goods ?? new Map(), cards: pet?.cards ?? new Map(), tick, booths };
 }
 type BoxFn = (w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, shadow?: boolean) => THREE.Mesh;
 

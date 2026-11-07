@@ -11,12 +11,12 @@ import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine 
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
-import { SONG_PRICE } from './karaoke';
+import { SONG_PACKS, SONG_PRICE, isSeatedAct, type KaraokeAct } from './karaoke';
 
 /** 코인노래방 사장님 한마디 (카운터에서 E) */
 const KARAOKE_TALK = [
-  `한 곡에 ${SONG_PRICE}G예요~ 방 안 노래방 기계에서 노래 고르면 바로 결제돼요!`,
-  '빈 방 아무 데나 들어가세요~ 1번부터 4번까지 다 비었어요!',
+  `한 곡에 ${SONG_PRICE}G, 5곡이면 220G예요~ 빈방 골라 드릴게요!`,
+  '어서 오세요~ 몇 곡 부르실래요? 많이 사면 더 싸요!',
   '탬버린 흔들면 점수가 좀 더 잘 나온대요~ 🔔',
   '30초 넘게 부르면 점수 나와요! 100점 나오면 사진 찍어 가세요~',
 ];
@@ -29,7 +29,7 @@ import { unitPlace, villaFloor } from './villa';
 import { SeniorAI, type NetSenior } from './senior';
 import { roadSolids, stopLines, vehicleLight, type Light, type Rect as RoadRect } from './traffic';
 import { PetCare } from './pets';
-import { PenSim, petGoodsStock, petStock, storeLayout, type ClothesCorner, type StockPet, type StoreLayout } from './store';
+import { KARAOKE_BOOTHS, PenSim, SHOP_BUILDING_FLOORS, STAIR, STAIR_TOP, boothDoorRect, petGoodsStock, petStock, stairFloorOf, stairSign, storeLayout, type ClothesCorner, type KaraokeBooth, type StockPet, type StoreLayout } from './store';
 import { PET_BY_ID, PET_GOOD_BY_ID, PET_SHOP_NAME, coatOf } from '../data/pets';
 import { FishingSession, type FishPhase, type FishResult, type FishScene } from './fishing';
 import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
@@ -134,7 +134,7 @@ export const HOME = {
 };
 
 /** 소파에서 할 수 있는 동작 (숫자 키 1~6) */
-export type SofaAct = 'sit' | 'relax' | 'lounge' | 'phone' | 'stretch' | 'cheer' | 'doze';
+export type SofaAct = 'sit' | 'relax' | 'lounge' | 'phone' | 'stretch' | 'cheer' | 'doze' | KaraokeAct;
 export const SOFA_ACTS: { id: SofaAct; icon: string; label: string }[] = [
   { id: 'relax', icon: '🛋️', label: '기대앉기' },
   { id: 'lounge', icon: '😌', label: '옆으로 눕기' },
@@ -347,6 +347,8 @@ export interface RemotePlayer {
   sleep: { rest: number; blanket: number } | null;
   /** 친구의 낚시 (낚싯대·찌·물고기) */
   fish: NetFish | null;
+  /** 친구가 코인노래방에서 빌린 방 (노래방 안에 있을 때만) */
+  booth: number | null;
   /** 친구 곁에 보이는 펫 */
   pets: NetPet[];
   /** 마지막으로 소식(모습·동네 장면)이 온 프레임. 오래 끊기면 동네 계산을 맡지 않는다 */
@@ -418,6 +420,8 @@ export interface NetState {
   fs?: NetFish | null;
   /** 곁에 보이는 펫 */
   pt?: NetPet[];
+  /** 코인노래방에서 빌린 방 번호 (노래방 안에 있을 때만). 앉기·노래 자세도 이 방 자리에서 */
+  kb?: number;
 }
 
 /** 내가 친구를 때렸다. 맞은 쪽이 혼자 할 때와 같은 계산(applyHit)으로 자기 체력에서 뺀다 */
@@ -642,6 +646,12 @@ export class CityWorld {
   karaokeRequest = false;
   /** 지금 노래 부르는 코인노래방 방 번호 (창 제목에 쓴다) */
   karaokeRoom: number | null = null;
+  /** 코인노래방 카운터에서 E → 빈방 · 곡 고르기 창 */
+  karaokeDeskRequest = false;
+  /** 코인노래방에서 빌린 방: 방 번호 · 남은 곡 · 산 곡 수 · 낸 돈 (노래방을 나가면 남은 곡 값은 돌려받는다) */
+  karaokeRental: { room: number; songs: number; bought: number; paid: number } | null = null;
+  /** 앉기·노래 자세를 할 자리 (노래방 방). null 이면 집 소파 */
+  seatBooth: number | null = null;
   /** 버스정류장에서 E → 행선지 고르기 창 */
   busRequest = false;
   /** PC방에서 E → 게임 고르기 창 */
@@ -1865,11 +1875,147 @@ export class CityWorld {
 
   /** 코인노래방: 곡 값 내기 (돈이 모자라면 false) / 음수면 돌려받기 */
   karaokePay(amount: number): boolean {
-    const pr = this.profile;
-    if (amount > 0 && pr.gold < amount) return false;
-    pr.gold -= amount;
-    saveProfile(pr);
+    // 방을 빌릴 때 산 곡에서 한 곡씩 쓴다 (음수 = 못 튼 곡 돌려받기)
+    const r = this.karaokeRental;
+    if (!r) return false;
+    if (amount > 0) {
+      if (r.songs <= 0) return false;
+      r.songs--;
+      return true;
+    }
+    if (amount < 0) r.songs = Math.min(r.bought, r.songs + 1);
     return true;
+  }
+
+  // ───────────────────────── 코인노래방: 방 빌리기 · 노래 동작 ─────────────────────────
+
+  /** 이 방을 쓰고 있는 친구 이름 (같은 노래방 안에 있는 친구만). 비었으면 null */
+  boothTakenBy(no: number): string | null {
+    if (this.location !== 'store' || this.store?.kind !== 'karaoke') return null;
+    for (const r of this.remotes.values()) if (r.room === this.roomKey && r.booth === no) return r.name;
+    return null;
+  }
+
+  /** 카운터: 방 상태 (빈방 · 사용 중 · 내 방) */
+  boothStates(): { no: number; state: 'free' | 'taken' | 'mine'; by: string | null }[] {
+    return KARAOKE_BOOTHS.map((b) => {
+      if (this.karaokeRental?.room === b.no) return { no: b.no, state: 'mine' as const, by: null };
+      const by = this.boothTakenBy(b.no);
+      return { no: b.no, state: by ? ('taken' as const) : ('free' as const), by };
+    });
+  }
+
+  /** 카운터에서 방 빌리기 (곡 묶음 하나). 이미 빌렸으면 곡만 더 산다 */
+  rentKaraoke(room: number, packIndex: number): { ok: boolean; message: string } {
+    const pack = SONG_PACKS[packIndex];
+    if (!pack) return { ok: false, message: '곡 수를 골라 주세요' };
+    const mine = this.karaokeRental;
+    if (mine && mine.room !== room) return { ok: false, message: `이미 ${mine.room}번방을 쓰고 있어요` };
+    if (!mine) {
+      if (!KARAOKE_BOOTHS.some((b) => b.no === room)) return { ok: false, message: '없는 방이에요' };
+      const by = this.boothTakenBy(room);
+      if (by) return { ok: false, message: `${room}번방은 ${by} 님이 쓰고 있어요` };
+    }
+    const pr = this.profile;
+    if (pr.gold < pack.price) return { ok: false, message: `${(pack.price - pr.gold).toLocaleString()}G 가 모자라요` };
+    pr.gold -= pack.price;
+    saveProfile(pr);
+    if (mine) {
+      mine.songs += pack.songs;
+      mine.bought += pack.songs;
+      mine.paid += pack.price;
+    } else this.karaokeRental = { room, songs: pack.songs, bought: pack.songs, paid: pack.price };
+    const L = this.store;
+    const text = mine ? `${pack.songs}곡 더 넣어 드렸어요~ 신나게 부르세요!` : `${room}번방 쓰세요~ ${pack.songs}곡 넣어 드렸어요! 🎤`;
+    if (L?.kind === 'karaoke') this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text });
+    return { ok: true, message: mine ? `🎫 ${pack.songs}곡 추가 (남은 곡 ${mine.songs})` : `🎫 ${room}번방 · ${pack.songs}곡 (${pack.price}G) — ${room}번방 문이 열렸어요` };
+  }
+
+  /** 노래방을 나간다: 빌린 방을 돌려주고, 안 부른 곡 값은 돌려받는다 */
+  private endKaraokeRental() {
+    const r = this.karaokeRental;
+    if (!r) return;
+    this.karaokeRental = null;
+    this.karaokeRoom = null;
+    if (this.seatBooth !== null) {
+      this.seat = null;
+      this.seatBooth = null;
+    }
+    const back = r.bought > 0 ? Math.floor((r.paid * r.songs) / r.bought) : 0;
+    if (back > 0) {
+      this.profile.gold += back;
+      saveProfile(this.profile);
+      this.say(`🎫 안 부른 ${r.songs}곡 값 ${back}G 를 돌려받았다`, 3);
+    }
+  }
+
+  /** 내가 빌린 방 */
+  private myBooth(): KaraokeBooth | null {
+    const r = this.karaokeRental;
+    return r && this.location === 'store' && this.store?.kind === 'karaoke' ? (KARAOKE_BOOTHS.find((b) => b.no === r.room) ?? null) : null;
+  }
+
+  /** 지금 내가 빌린 방 안에 서 있다 */
+  inMyBooth(): boolean {
+    const b = this.myBooth();
+    if (!b) return false;
+    const p = this.player;
+    return p.x > b.rect.x0 && p.x < b.rect.x1 && p.z > b.rect.z0 && p.z < b.rect.z1;
+  }
+
+  /** 잠긴 방 문 (내 방이 아닌 방은 못 들어간다) */
+  private lockedBoothRects(): Rect[] {
+    const mine = this.karaokeRental?.room;
+    return KARAOKE_BOOTHS.filter((b) => b.no !== mine).map(boothDoorRect);
+  }
+
+  /** 렌더러용: 이 방 문이 열려 있다 (내가 빌린 방만) */
+  boothOpen(no: number): boolean {
+    return this.karaokeRental?.room === no && this.location === 'store' && this.store?.kind === 'karaoke';
+  }
+
+  /**
+   * 노래방 동작: 내 방 안에서만. 앉는 동작은 소파 자리로, 서는 동작은 화면 앞으로 가서 한다.
+   * 움직이거나 E 를 누르면 그만둔다 (집 소파와 같은 방식).
+   */
+  karaokeAct(act: KaraokeAct): boolean {
+    const b = this.myBooth();
+    if (!b || !this.inMyBooth()) {
+      this.say('🎤 내가 빌린 방 안에서만 할 수 있어요');
+      return false;
+    }
+    const seated = isSeatedAct(act);
+    const spot = seated ? b.sit : b.stand;
+    const already = this.seat?.spot === 'sofa' && this.seat.phase !== 'stand' && this.seatBooth === b.no;
+    this.autopilot = null;
+    this.seatBooth = b.no;
+    // 몸(위치)은 그 자리로 옮기고, 그림은 지금 자세에서 새 자세로 부드럽게 넘어간다
+    this.placePlayer(spot.x, seated ? b.sit.z + 0.45 : spot.z, Math.sin(spot.yaw), Math.cos(spot.yaw));
+    if (already) this.sofaAction(act);
+    else {
+      this.seat = { phase: 'sit', at: this.frame, spot: 'sofa' };
+      this.sofa = { id: act, at: this.frame, prev: act, pt: 0 };
+    }
+    return true;
+  }
+
+  /** 렌더러용: 노래방 방 자리 (앉은 자리 · 서서 부르는 자리) */
+  boothSpots(no: number | null): { sit: KaraokeBooth['sit']; stand: KaraokeBooth['stand'] } | null {
+    const b = no === null ? null : KARAOKE_BOOTHS.find((q) => q.no === no);
+    return b ? { sit: b.sit, stand: b.stand } : null;
+  }
+
+  // ───────────────────────── 상가 계단실 ─────────────────────────
+
+  /** 계단실 다른 층으로 (또는 그 층 가게에서 층계참으로) */
+  private goStairFloor(f: number, x: number, z: number, fx: number, fz: number) {
+    const L = storeLayout(stairSign(f));
+    this.store = L;
+    this.pen = null;
+    this.keeper.reset(L.keeper.x, L.keeper.z, 0, 1);
+    this.moveTo('store', x, z, fx, fz);
+    const shop = SHOP_BUILDING_FLOORS[f];
+    this.say(f <= 1 ? '🏢 1층 계단 — 2층 코인노래방 · 3층 임대' : `🏢 ${f}층${shop ? ` — ${shop}` : ' — 비어 있는 층'}`, 2);
   }
 
   /** 카지노: 상금 받기 */
@@ -2044,6 +2190,11 @@ export class CityWorld {
     } else if (this.location === 'corridor' && p.x < CORRIDOR.stairs.trigger) {
       if (p.z > 0) this.goFloor(this.floor - 1, 'down');
       else if (this.floor < this.villaFloors) this.goFloor(this.floor + 1, 'up');
+    } else if (this.location === 'store' && this.store?.kind === 'stairs' && p.z < STAIR.trigger) {
+      const f = stairFloorOf(this.store.sign);
+      // 동쪽 계단 = 올라가기, 서쪽 계단 = 내려가기. 올라가면 위층 내려가는 계단 꼭대기, 내려가면 아래층 올라가는 계단 아래에 선다
+      if (p.x > 0 && f < STAIR_TOP) this.goStairFloor(f + 1, -1.0, STAIR.start + 0.45, 0, 1);
+      else if (p.x < 0 && f > 1) this.goStairFloor(f - 1, 1.0, STAIR.start + 0.45, 0, 1);
     }
   }
 
@@ -2054,6 +2205,14 @@ export class CityWorld {
       if (Math.abs(x - this.map.home.x) > 1.9) return 0;
       const dz = z - this.villaDoorZ(0);
       return dz < 1.0 ? 0.16 : dz < 1.6 ? 0.08 : 0;
+    }
+    if (this.location === 'store' && this.store?.kind === 'stairs') {
+      if (z >= STAIR.start) return 0;
+      const f = stairFloorOf(this.store.sign);
+      const k = Math.min(1, (STAIR.start - z) / (STAIR.start - STAIR.room.z0));
+      if (x > STAIR.mid && f < STAIR_TOP) return k * STAIR.rise;
+      if (x < -STAIR.mid && f > 1) return -k * STAIR.rise;
+      return 0;
     }
     if (this.location === 'lobby') {
       const st = LOBBY.stairs;
@@ -2355,6 +2514,7 @@ export class CityWorld {
     const s = HOME.sofa.sit;
     this.autopilot = null;
     this.placePlayer(this.player.x, this.player.z, Math.sin(s.yaw), Math.cos(s.yaw));
+    this.seatBooth = null;
     this.seat = { phase: 'sit', at: this.frame, spot: 'sofa' };
     // 앉고 나서 옆으로 눕는다
     this.sofa = { id: 'lounge', at: this.frame + SOFA_FRAMES, prev: 'sit', pt: 0 };
@@ -2381,7 +2541,10 @@ export class CityWorld {
     const wantsUp = !!inp.move || (inp.buttons ?? []).some(Boolean) || !!inp.jump || (sofa && !!inp.interact);
     if (s.phase === 'sit' && t >= n) s.phase = 'seated';
     if ((s.phase === 'seated' || s.phase === 'sit') && wantsUp) this.standUp();
-    if (this.seat?.phase === 'stand' && this.frame - this.seat.at >= n) this.seat = null;
+    if (this.seat?.phase === 'stand' && this.frame - this.seat.at >= n) {
+      this.seat = null;
+      this.seatBooth = null;
+    }
     // 소파에서는 E 가 '일어나기' (바로 다시 눕지 않게 막는다)
     if (sofa) inp.interact = false;
     if (sofa && this.sofa.id === 'stretch' && this.frame - this.sofa.at >= SOFA_STRETCH) this.sofaAction('relax');
@@ -2573,7 +2736,9 @@ export class CityWorld {
     }
     // 펫샵 · 음식점: 문을 열고 가게 안으로 들어간다
     if (poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop' || poi.id === 'karaoke' || (poi.kind === 'shop' && SHOPS[poi.label])) {
-      const L = storeLayout(poi.label);
+      // 펫샵 건물 계단 문은 1층 계단실로 들어간다 (걸어서 2층 노래방 · 3층으로)
+      const sign = poi.id === 'karaoke' ? stairSign(1) : poi.label;
+      const L = storeLayout(sign);
       // 가게 문은 건물 앞면 (POI 는 문에서 1.2m 앞). 북쪽을 보는 가게는 문이 POI 의 남쪽
       const s = poi.facing === -1 ? -1 : 1;
       const doorZ = poi.z - 1.2 * s;
@@ -2583,7 +2748,7 @@ export class CityWorld {
         open: this.storeDoor,
         face: { x: 0, z: -s },
         to: { x: poi.x, z: doorZ + 0.35 * s },
-        arrive: () => this.enterStore(poi.label),
+        arrive: () => this.enterStore(sign),
         close: 'storeIn',
         out: { x: L.spawn.x, z: L.spawn.z },
       });
@@ -2627,8 +2792,12 @@ export class CityWorld {
         : s
           ? s.greetings[Math.floor(this.rng() * s.greetings.length)]
           : '어서 오세요!';
+    if (L.kind === 'stairs') {
+      this.say('🏢 1층 계단 — 2층 코인노래방 · 3층 임대', 2.5);
+      return;
+    }
     this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: hi });
-    this.say(L.kind === 'karaoke' ? `🎤 계단을 올라 2층 ${sign}에 들어왔다` : `🚪 ${sign}에 들어왔다`, 2);
+    this.say(L.kind === 'karaoke' ? `🎤 2층 ${sign}에 들어왔다 — 카운터에서 방을 받으세요` : `🚪 ${sign}에 들어왔다`, 2.5);
   }
 
   /** 옷가게: 전투 장비 사기 (가방으로) */
@@ -2963,6 +3132,17 @@ export class CityWorld {
     const L = this.store;
     if (!L) return [];
     const out: Poi[] = L.pois.map((q) => {
+      if (L.kind === 'karaoke') {
+        const no = Number(q.id.split(':')[2]) || 0;
+        const rent = this.karaokeRental;
+        if (q.id.startsWith('store:booth:')) {
+          const by = this.boothTakenBy(no);
+          return { ...q, label: rent?.room === no ? `🚪 ${no}번방 — 내 방` : by ? `🔒 ${no}번방 — 사용 중 (${by})` : `🔒 ${no}번방 — 빈방 (카운터에서 받기)` };
+        }
+        if (q.id.startsWith('store:sing:') && rent?.room === no) return { ...q, label: `🎤 노래방 기계 — 노래 고르기 (남은 ${rent.songs}곡)` };
+        if (q.id === 'store:counter' && rent) return { ...q, label: `카운터 — ${rent.room}번방 · 남은 ${rent.songs}곡 (곡 더 사기)` };
+        return q;
+      }
       if (!q.id.startsWith('store:item:')) return q;
       const id = q.id.slice(11);
       if (L.kind === 'fishing') return { ...q, label: this.fishItemLabel(id) };
@@ -2988,6 +3168,12 @@ export class CityWorld {
     const L = this.store;
     if (!L) return;
     const id = poi.id;
+    if (id === 'store:exit' && L.kind === 'karaoke') {
+      // 노래방 문을 나서면 2층 층계참 (빌린 방은 돌려주고 안 부른 곡 값은 돌려받는다)
+      this.endKaraokeRental();
+      this.goStairFloor(2, STAIR.room.x1 - 0.75, STAIR.doorZ, -1, 0);
+      return;
+    }
     if (id === 'store:exit') {
       // 계산 안 한 옷을 입고는 못 나간다: 점원이 붙잡고 계산대로 안내한다
       const unpaid = this.unpaidTrial();
@@ -3023,13 +3209,43 @@ export class CityWorld {
       return;
     }
     if (L.kind === 'karaoke') {
-      if (id.startsWith('store:sing:')) {
-        this.karaokeRoom = Number(id.slice(11)) || null;
-        this.karaokeRequest = true;
-      } else if (id === 'store:counter') {
-        this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: KARAOKE_TALK[Math.floor(this.rng() * KARAOKE_TALK.length)] });
+      const no = Number(id.split(':')[2]) || 0;
+      if (id === 'store:counter') {
+        this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: this.karaokeRental ? `${this.karaokeRental.room}번방 쓰고 계시죠~ 곡 더 넣어 드릴까요?` : KARAOKE_TALK[Math.floor(this.rng() * KARAOKE_TALK.length)] });
+        this.karaokeDeskRequest = true;
+        return;
       }
-      if (id !== 'store:exit') return;
+      if (id.startsWith('store:booth:')) {
+        const by = this.boothTakenBy(no);
+        if (this.karaokeRental?.room === no) this.say(`🚪 ${no}번방 — 내 방이에요. 문이 열려 있어요`);
+        else if (by) this.say(`🔒 ${no}번방 — ${by} 님이 쓰고 있어요`);
+        else this.say(`🔒 ${no}번방 — 빈방이에요. 카운터에서 방을 받아야 들어갈 수 있어요`, 3);
+        return;
+      }
+      if (this.karaokeRental?.room !== no) {
+        this.say('🔒 카운터에서 방을 받아야 쓸 수 있어요');
+        return;
+      }
+      if (id.startsWith('store:sing:')) {
+        this.karaokeRoom = no;
+        this.karaokeRequest = true;
+      } else if (id.startsWith('store:sit:')) this.karaokeAct('kSit');
+      return;
+    }
+    // 상가 계단실: 1층 출입문 · 층별 안내판 · 층계참 가게 문
+    if (L.kind === 'stairs') {
+      const f = stairFloorOf(L.sign);
+      if (id === 'store:directory') {
+        const rows = Object.entries(SHOP_BUILDING_FLOORS).map(([fl, shop]) => `${fl}층 ${shop ?? '임대 문의'}`);
+        this.say(`📋 1층 멍냥 펫샵 · ${rows.join(' · ')}`, 4);
+        return;
+      }
+      if (id === 'store:floordoor') {
+        const shop = SHOP_BUILDING_FLOORS[f];
+        if (shop) this.enterStore(shop);
+        else this.say(`🔒 ${f}층은 아직 비어 있어요 — 새 가게가 곧 들어온대요`, 3);
+        return;
+      }
     }
     if (L.kind === 'fishing') {
       if (id === 'store:counter') this.fishingShopRequest = 'all';
@@ -3316,7 +3532,7 @@ export class CityWorld {
       this.store = L;
       this.cityReturn = { ...s.back };
       // 나갈 때 열리는 바깥 유리문
-      const door = this.map.pois.find((q) => q.label === s.sign);
+      const door = L.kind === 'stairs' || L.kind === 'karaoke' ? this.map.pois.find((q) => q.id === 'karaoke') : this.map.pois.find((q) => q.label === s.sign);
       if (door) this.storeDoor = `shop:${door.id}`;
       this.keeper.reset(L.keeper.x, L.keeper.z, 0, 1);
       this.pen = L.spots.length ? new PenSim(L.spots, this.todayStock(), this.day * 31 + 7) : null;
@@ -3404,7 +3620,7 @@ export class CityWorld {
     if (!r) {
       const f = new Fighter(this.remoteIndex++, name, { canBlock: false });
       f.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
-      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, pets: [], seenAt: -99999 };
+      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, booth: null, pets: [], seenAt: -99999 };
       this.remotes.set(id, r);
       this.say(`👋 ${name} 님이 접속했어요`, 3);
     }
@@ -3436,6 +3652,7 @@ export class CityWorld {
       ja: this.job?.startedAt,
       se: seat ? (seat.spot === 'sofa' ? this.sofa.id : 'd') : null,
       sa: seat ? Math.round(this.seatAmount * 20) / 20 : 0,
+      ...(this.myBooth() ? { kb: this.karaokeRental!.room } : {}),
       ...this.netExtras(),
     };
   }
@@ -3602,6 +3819,7 @@ export class CityWorld {
     const me = this.netId ?? '';
     if (job && this.job?.job.id === job && (r.jobAt < this.job.startedAt || (r.jobAt === this.job.startedAt && r.id < me))) this.yieldJob(r);
 
+    r.booth = typeof s.kb === 'number' ? s.kb : null;
     const se = s.se ?? null;
     if (!se) r.seat = null;
     else {
@@ -3620,7 +3838,7 @@ export class CityWorld {
         }
       }
       // 둘이 동시에 소파에 누웠으면 id 가 큰 쪽이 일어난다
-      if (spot === 'sofa' && r.room === this.roomKey && this.seat?.spot === 'sofa' && this.seat.phase !== 'stand' && r.id < me) {
+      if (spot === 'sofa' && this.location === 'home' && r.room === this.roomKey && this.seat?.spot === 'sofa' && this.seat.phase !== 'stand' && r.id < me) {
         this.standUp();
         this.say(`🛋️ ${r.name} 님이 먼저 소파에 누웠어요`, 2.5);
       }
@@ -4108,7 +4326,7 @@ export class CityWorld {
           : where === 'corridor'
             ? this.corridorSolids()
             : where === 'store'
-              ? (this.store?.furniture ?? []).map((f) => f.rect)
+              ? [...(this.store?.furniture ?? []).map((f) => f.rect), ...(this.store?.kind === 'karaoke' && p === this.player ? this.lockedBoothRects() : [])]
         : this.map.buildings.map((b) => ({ x0: b.x - b.w / 2, x1: b.x + b.w / 2, z0: b.z - b.d / 2, z1: b.z + b.d / 2 }));
     // 플레이어는 차도에 못 들어간다 (횡단보도로만 건넌다). 경찰·행인은 그대로
     if (where === 'city' && roads) solids.push(...this.roadRects);

@@ -677,6 +677,8 @@ export interface RestPose {
    * act 동작으로 k(0~1) 만큼 넘어가는 중, at = 지금 동작 시작 뒤 지난 프레임, pt = 이전 동작이 돌던 프레임
    */
   sofa?: { act: string; prev: string; k: number; at: number; pt: number } | null;
+  /** 서서 하는 동작(노래방 서서 부르기 등)을 할 자리. 없으면 sit 자리에서 */
+  stand?: { x: number; z: number; yaw: number };
 }
 
 export interface CharacterView {

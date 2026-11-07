@@ -21,7 +21,7 @@ export interface Rect {
   z1: number;
 }
 
-export type StoreKind = 'pet' | 'mart' | 'cafe' | 'diner' | 'clothes' | 'fishing' | 'karaoke';
+export type StoreKind = 'pet' | 'mart' | 'cafe' | 'diner' | 'clothes' | 'fishing' | 'karaoke' | 'stairs';
 
 /** 옷가게 진열 구역: 전투 장비 셋 + 코디 넷 */
 export type ClothesCorner = 'weapon' | 'gearAcc' | 'armor' | 'hat' | 'top' | 'bottom' | 'shoes';
@@ -75,6 +75,7 @@ export function storeKindOf(sign: string): StoreKind {
   if (sign === CLOTHES_SHOP_NAME) return 'clothes';
   if (sign === FISHING_SHOP_NAME) return 'fishing';
   if (sign === KARAOKE_NAME) return 'karaoke';
+  if (sign.startsWith(STAIR_PREFIX)) return 'stairs';
   if (sign === '편의점 24' || sign === '약국' || sign === '꽃집' || sign === '안경원') return 'mart';
   if (sign === '카페 모먼트' || sign === '베이커리') return 'cafe';
   return 'diner';
@@ -88,6 +89,7 @@ const THEMES: Record<StoreKind, StoreLayout['theme']> = {
   cafe: { wall: 0xefe4d6, floor: 0x9c7350, accent: 0x5a3b28 },
   diner: { wall: 0xf3e8d2, floor: 0xb89a74, accent: 0xc0392b },
   karaoke: { wall: 0x2a1838, floor: 0x3a3340, accent: 0xc026d3 },
+  stairs: { wall: 0xe4e1da, floor: 0xb9b6ae, accent: 0x6b6f76 },
 };
 
 const buildCache = new Map<string, StoreLayout>();
@@ -96,7 +98,7 @@ export function storeLayout(sign: string): StoreLayout {
   const hit = buildCache.get(sign);
   if (hit) return hit;
   const kind = storeKindOf(sign);
-  const layout = kind === 'pet' ? petLayout(sign) : kind === 'clothes' ? clothesLayout(sign) : kind === 'fishing' ? fishingLayout(sign) : kind === 'karaoke' ? karaokeLayout(sign) : foodLayout(sign, kind);
+  const layout = kind === 'pet' ? petLayout(sign) : kind === 'clothes' ? clothesLayout(sign) : kind === 'fishing' ? fishingLayout(sign) : kind === 'karaoke' ? karaokeLayout(sign) : kind === 'stairs' ? stairsLayout(sign) : foodLayout(sign, kind);
   buildCache.set(sign, layout);
   return layout;
 }
@@ -434,6 +436,12 @@ export interface KaraokeBooth {
   rect: Rect;
   side: -1 | 1;
   doorZ: number;
+  /** 문 (복도 쪽 벽) x */
+  doorX: number;
+  /** 소파에 앉은 골반 자리 (남쪽 = 방 가운데를 본다) */
+  sit: { x: number; z: number; yaw: number };
+  /** 서서 부르는 자리: 테이블과 화면 사이, 화면을 본다 */
+  stand: { x: number; z: number; yaw: number };
 }
 
 /** 코인노래방 크기 (10 × 8 m): 복도 폭 · 방과 로비 사이 벽 z · 방 문 폭 */
@@ -450,8 +458,21 @@ export const KARAOKE_BOOTHS: KaraokeBooth[] = (() => {
   const out: KaraokeBooth[] = [];
   for (const side of [-1, 1] as const) {
     const [bx0, bx1] = side < 0 ? [x0, -KARAOKE_HALL] : [KARAOKE_HALL, x1];
-    out.push({ no: out.length + 1, side, rect: { x0: bx0, x1: bx1, z0, z1: mid }, doorZ: (z0 + mid) / 2 });
-    out.push({ no: out.length + 1, side, rect: { x0: bx0, x1: bx1, z0: mid, z1: KARAOKE_LOBBY_Z }, doorZ: (mid + KARAOKE_LOBBY_Z) / 2 });
+    for (const [rz0, rz1] of [[z0, mid], [mid, KARAOKE_LOBBY_Z]]) {
+      const outX = side < 0 ? bx0 : bx1;
+      const hallX = side < 0 ? bx1 : bx0;
+      const inward = -side;
+      const sofaMid = (outX + inward * 0.8 + hallX - inward * 0.75) / 2;
+      out.push({
+        no: out.length + 1,
+        side,
+        rect: { x0: bx0, x1: bx1, z0: rz0, z1: rz1 },
+        doorZ: (rz0 + rz1) / 2,
+        doorX: hallX,
+        sit: { x: sofaMid, z: rz0 + 0.42, yaw: 0 },
+        stand: { x: outX + inward * 1.05, z: (rz0 + rz1) / 2 + 0.3, yaw: side < 0 ? -Math.PI / 2 : Math.PI / 2 },
+      });
+    }
   }
   return out;
 })();
@@ -487,13 +508,80 @@ function karaokeLayout(sign: string): StoreLayout {
     furniture.push({ id: `sofa:${b.no}`, rect: { ...xs(outX + inward * 0.8, hallX - inward * 0.75), z0: r.z0 + WALL_T, z1: r.z0 + 0.66 } });
     furniture.push({ id: `table:${b.no}`, rect: { ...xs(outX + inward * 1.4, outX + inward * 2.8), z0: r.z0 + 0.95, z1: r.z0 + 1.45 } });
     pois.push({ id: `store:sing:${b.no}`, kind: 'shop', label: `🎤 ${b.no}번방 노래방 기계 — 노래 부르기`, x: outX + inward * 0.95, z: cz + 0.25, radius: 0.75 });
+    // 소파 옆 (테이블 끝과 소파 끝 사이 빈 곳) — 앉기
+    pois.push({ id: `store:sit:${b.no}`, kind: 'shop', label: `🛋️ ${b.no}번방 소파에 앉기`, x: hallX - inward * 1.05, z: r.z0 + 0.95, radius: 0.6 });
+    // 복도에서 본 방 문
+    pois.push({ id: `store:booth:${b.no}`, kind: 'shop', label: `🚪 ${b.no}번방`, x: hallX + inward * 0.4, z: b.doorZ, radius: 0.55 });
   }
   // 로비: 카운터 (동쪽) · 대기 소파 (서쪽)
   furniture.push({ id: 'counter', rect: { x0: 3.0, x1: 3.6, z0: 1.15, z1: 2.95 } });
   furniture.push({ id: 'backbar', rect: { x0: room.x1 - 0.3, x1: room.x1, z0: 0.9, z1: 3.2 } });
   const keeper = { x: 4.2, z: 2.05 };
   furniture.push({ id: 'waitSofa', rect: { x0: room.x0, x1: room.x0 + 0.65, z0: 1.3, z1: 3.3 } });
-  pois.push({ id: 'store:counter', kind: 'shop', label: '카운터 — 사장님과 이야기 (이용 안내)', x: 2.4, z: 2.05, radius: 0.85 });
+  pois.push({ id: 'store:counter', kind: 'shop', label: '카운터 — 사장님께 빈방 확인 · 곡 사기', x: 2.4, z: 2.05, radius: 0.85 });
   pois.push({ id: 'store:exit', kind: 'home', label: '출입문 (계단으로 내려가기)', x: 0, z: room.z1 - 0.45, radius: 0.9 });
   return { sign, kind: 'karaoke', room, spawn: { x: 0, z: room.z1 - 1.0 }, keeper, furniture, displays: [], pois, spots: [], theme: THEMES.karaoke };
+}
+
+/** 방 문 자리 (잠겨 있으면 이 칸을 막는다) */
+export function boothDoorRect(b: KaraokeBooth): Rect {
+  return { x0: b.doorX - 0.08, x1: b.doorX + 0.08, z0: b.doorZ - KARAOKE_DOOR_W / 2, z1: b.doorZ + KARAOKE_DOOR_W / 2 };
+}
+
+// ───────────────────────── 상가 계단실 (펫샵 건물) ─────────────────────────
+
+/** 계단실 층 이름 앞부분: '상가 계단 2층' */
+export const STAIR_PREFIX = '상가 계단 ';
+/**
+ * 펫샵 건물 층별 가게 (번호 = 층). 1층은 거리에서 들어오는 계단 입구, 비어 있으면 null.
+ * 새 가게가 들어오면 여기에 이름만 넣으면 그 층 층계참에 문이 생긴다.
+ */
+export const SHOP_BUILDING_FLOORS: Record<number, string | null> = { 2: KARAOKE_NAME, 3: null };
+export const STAIR_TOP = 3;
+export const stairSign = (floor: number) => `${STAIR_PREFIX}${floor}층`;
+export const stairFloorOf = (sign: string) => Number(sign.slice(STAIR_PREFIX.length).replace('층', '')) || 1;
+
+/**
+ * 계단실 한 층 (4 × 6 m, 모든 층 같은 구조). 남쪽 = 층계참 (1층은 거리로 나가는 유리문),
+ * 북쪽 = 꺾어 올라가는 계단: 동쪽 칸은 위층으로 올라가는 계단, 서쪽 칸은 아래층으로 내려가는 계단.
+ * 계단 끝(trigger 보다 북쪽)까지 걸어가면 위·아래층으로. 층계참 동쪽 벽에 그 층 가게 문.
+ */
+export const STAIR = {
+  room: { x0: -2, x1: 2, z0: -3, z1: 3 } as Rect,
+  /** 계단이 시작되는 z (층계참 북쪽 끝) */
+  start: 0.4,
+  /** 이보다 북쪽까지 올라가면 다음 층 */
+  trigger: -2.45,
+  /** 계단 한 층 높이 (그림) */
+  rise: 1.7,
+  /** 두 계단 사이 벽 반폭 */
+  mid: 0.08,
+  /** 가게 문 (동쪽 벽) z */
+  doorZ: 1.7,
+};
+
+function stairsLayout(sign: string): StoreLayout {
+  const f = stairFloorOf(sign);
+  const room = STAIR.room;
+  const furniture: StoreLayout['furniture'] = [{ id: 'wall:mid', rect: { x0: -STAIR.mid, x1: STAIR.mid, z0: room.z0, z1: STAIR.start } }];
+  // 1층엔 내려가는 계단이 없다 (계단 밑 창고), 꼭대기 층엔 올라가는 계단이 없다 (옥상 문 잠김)
+  if (f <= 1) furniture.push({ id: 'closet', rect: { x0: room.x0, x1: -STAIR.mid, z0: room.z0, z1: STAIR.start } });
+  if (f >= STAIR_TOP) furniture.push({ id: 'roofGate', rect: { x0: STAIR.mid, x1: room.x1, z0: room.z0, z1: STAIR.start - 0.3 } });
+  const pois: Poi[] = [];
+  if (f <= 1) {
+    pois.push({ id: 'store:exit', kind: 'home', label: '출입문 (거리로 나가기)', x: 0, z: room.z1 - 0.45, radius: 0.9 });
+    pois.push({ id: 'store:directory', kind: 'shop', label: '📋 층별 안내판', x: room.x0 + 0.55, z: 1.7, radius: 0.7 });
+  } else {
+    const shop = SHOP_BUILDING_FLOORS[f];
+    pois.push({
+      id: 'store:floordoor',
+      kind: 'shop',
+      label: shop ? `🚪 ${f}층 ${shop} 들어가기` : `🚪 ${f}층 — 임대 문의 (아직 비어 있어요)`,
+      x: room.x1 - 0.55,
+      z: STAIR.doorZ,
+      radius: 0.75,
+    });
+  }
+  // 주인 없음: 화면 밖에 세워 둔다
+  return { sign, kind: 'stairs', room, spawn: { x: 0, z: room.z1 - 0.7 }, keeper: { x: 0, z: 50 }, furniture, displays: [], pois, spots: [], theme: THEMES.stairs };
 }

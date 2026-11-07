@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { KARAOKE_CHIPS, SONG_PRICE, fallbackSong, isAccompaniment, karaokeQuery, likelyBlocked, rankKaraoke, rollScore, scoreComment, type KaraokeItem, type Playable } from '@/game/city/karaoke';
+import { KARAOKE_ACTS, KARAOKE_CHIPS, SONG_PRICE, fallbackSong, isAccompaniment, karaokeQuery, likelyBlocked, rankKaraoke, rollScore, scoreComment, type KaraokeItem, type Playable } from '@/game/city/karaoke';
 import { isMuted, playCoin, playLevelUp } from '@/game/render/sfx';
 import { probeYouTube } from '@/game/render/ytProbe';
 
@@ -154,7 +154,7 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
   const start = useCallback(
     (it: KaraokeItem): boolean => {
       if (!world.karaokePay(SONG_PRICE)) {
-        say(`💸 골드가 모자라요 (한 곡 ${SONG_PRICE} G)`);
+        say('🎫 남은 곡이 없어요 — 카운터에서 곡을 더 사 주세요');
         return false;
       }
       playCoin();
@@ -282,26 +282,32 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
   };
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
-  const gold = world.profile.gold;
+  const songsLeft = world.karaokeRental?.songs ?? 0;
+  /** 노래 동작 (방 안 내 캐릭터가 한다). 신나는 동작은 분위기도 띄운다 */
+  const act = (id: (typeof KARAOKE_ACTS)[number]['id']) => {
+    if (!world.karaokeAct(id)) return;
+    if (current && (id === 'kHype' || id === 'kDance' || id === 'kTamb' || id === 'cheer')) hype.current++;
+    if (id === 'kTamb') shake('tambourine');
+    if (id === 'cheer') shake('clap');
+    redraw((n) => n + 1);
+  };
   const list = items ?? recent;
 
   return (
-    <div className="absolute inset-0 z-30 flex flex-col bg-gradient-to-br from-[#1a0630] via-[#12051f] to-[#05121f] text-white">
+    <div className="pointer-events-auto absolute bottom-3 right-3 top-3 z-30 flex w-[440px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-fuchsia-400/40 bg-gradient-to-br from-[#1a0630]/95 via-[#12051f]/95 to-[#05121f]/95 text-white shadow-2xl">
       <div className="flex items-center gap-2 border-b border-fuchsia-400/30 px-3 py-2">
         <div className="text-lg font-black tracking-wide text-fuchsia-300 drop-shadow-[0_0_8px_#e879f9]">🎤 코인노래방{world.karaokeRoom ? ` · ${world.karaokeRoom}번방` : ''}</div>
-        <span className="hidden text-xs text-white/50 sm:inline">
-          한 곡 {SONG_PRICE} G · 최고 {best || '-'}점
-        </span>
-        <span className="ml-auto rounded-full bg-black/40 px-3 py-1 text-sm font-bold text-amber-200">💰 {gold.toLocaleString()} G</span>
+        <span className="hidden text-xs text-white/50 sm:inline">최고 {best || '-'}점</span>
+        <span className={`ml-auto rounded-full bg-black/40 px-3 py-1 text-sm font-bold ${songsLeft ? 'text-amber-200' : 'text-rose-300'}`}>🎫 남은 {songsLeft}곡</span>
         <button onClick={onClose} className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20">
           나가기
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2 sm:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
         {/* 노래방 화면 */}
-        <div className="flex shrink-0 flex-col gap-1.5 sm:w-[58%]">
-          <div className="relative mx-auto aspect-video w-full max-h-[52vh] overflow-hidden rounded-lg border-2 border-fuchsia-500/50 bg-black shadow-[0_0_24px_rgba(217,70,239,0.35)] sm:max-h-[calc(100vh-110px)]">
+        <div className="flex shrink-0 flex-col gap-1.5">
+          <div className="relative mx-auto aspect-video w-full overflow-hidden rounded-lg border-2 border-fuchsia-500/50 bg-black shadow-[0_0_24px_rgba(217,70,239,0.35)]">
             {current ? (
               <iframe
                 key={current.id + startedAt.current}
@@ -336,6 +342,19 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
                 {scoring.best && <div className="mt-1 text-xs font-bold text-emerald-300">🏆 내 최고 점수!</div>}
               </div>
             )}
+          </div>
+          {/* 내 캐릭터 동작: 방 안에서만 (왼쪽 화면에 보인다) */}
+          <div className="flex flex-wrap gap-1">
+            {KARAOKE_ACTS.map((a, i) => (
+              <button
+                key={a.id}
+                onClick={() => act(a.id)}
+                className={`rounded-lg px-2 py-1 text-[11px] font-bold active:scale-95 ${world.seat?.phase !== 'stand' && world.seatBooth !== null && world.sofa.id === a.id ? 'bg-fuchsia-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
+              >
+                <span className="mr-0.5 opacity-50">{i + 1}</span>
+                {a.icon} {a.label}
+              </button>
+            ))}
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <button onClick={() => cheer('tambourine')} className="rounded-full bg-amber-500/90 px-3 py-1 text-sm font-bold text-black active:scale-95">
