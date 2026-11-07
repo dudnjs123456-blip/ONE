@@ -1,6 +1,7 @@
 // 보스전 헤드리스 검증: npx tsx scripts/boss-sim.ts
 import { BossBattle } from '../src/game/core/boss';
 import { CpuController, DummyController } from '../src/game/core/controllers';
+import * as ctrlMod from '../src/game/core/controllers';
 import { newProfile } from '../src/game/core/profile';
 import { BOSSES } from '../src/game/data/bosses';
 import { FIELD_SPAWNS, MONSTERS } from '../src/game/data/monsters';
@@ -48,12 +49,13 @@ function check(name: string, ok: boolean, detail = '') {
   const prof = newProfile();
   const b = new BossBattle(BOSSES[0], prof, new DummyController(), 1);
   b.phase = 'fight';
+  b.player.hp -= 1; // 퍼펙트 보너스 없는 보통 승리
   b.bossFighter.hp = 0;
   b.step();
   check('victory rewards', b.result?.win === true && prof.level > 1 && prof.gold === 230 && prof.bossClears.goblinKing === 1,
     `(Lv.${prof.level}, ${prof.gold}G)`);
   const b2 = new BossBattle(BOSSES[0], prof, new DummyController(), 1);
-  b2.phase = 'fight'; b2.bossFighter.hp = 0; b2.step();
+  b2.phase = 'fight'; b2.player.hp -= 1; b2.bossFighter.hp = 0; b2.step();
   check('repeat clear: no first bonus', b2.result?.firstClear === false && b2.result.gold === 80);
 }
 
@@ -123,4 +125,83 @@ for (const boss of BOSSES) {
   check('최단 기록: 첫 클리어는 비교 대상 없음', r1.win && !r1.newRecord);
   check('최단 기록: 더 빨리 깨면 신기록', r2.newRecord === true && prof.bossBest[BOSSES[0].id] === Math.round(r2.clearTime * 100) / 100, `(${r1.clearTime.toFixed(1)}s → ${r2.clearTime.toFixed(1)}s)`);
   check('최단 기록: 더 느리면 신기록 아님', !r3.newRecord);
+}
+
+// 퍼펙트: 한 대도 안 맞고 보스를 이기면 골드 +50% 와 PERFECT 문구
+{
+  const clear = (hurt: boolean) => {
+    const prof = newProfile();
+    prof.bossClears[BOSSES[0].id] = 1; // 최초 보너스 제외
+    const b = new BossBattle(BOSSES[0], prof, new DummyController(), 1);
+    b.phase = 'fight';
+    if (hurt) b.player.hp -= 10;
+    b.bossFighter.hp = 0;
+    for (let i = 0; i < 5 && !b.result; i++) b.step();
+    return { r: b.result!, banner: b.hud().banner };
+  };
+  const a = clear(false), c = clear(true);
+  check('보스 퍼펙트: 골드 +50%', a.r.perfect === true && a.r.gold === Math.round(BOSSES[0].reward.gold * 1.5) && (a.banner ?? '').includes('PERFECT'), `(${a.r.gold}G, ${a.banner})`);
+  check('보스 퍼펙트 아님: 기본 골드', !c.r.perfect && c.r.gold === BOSSES[0].reward.gold, `(${c.r.gold}G)`);
+}
+
+// 6) 보스전 통계: 준 데미지 = 보스가 잃은 체력, 받은 데미지 = 내가 잃은 체력
+{
+  const boss = BOSSES[1];
+  const prof = newProfile();
+  prof.level = boss.recommendedLevel;
+  const b = new BossBattle(boss, prof, new CpuController(5, 0, 'hard'), 5);
+  const startHp = b.player.hp;
+  for (let f = 0; f < (boss.timeLimit + 5) * 60 && !b.result; f++) b.step();
+  for (let f = 0; f < 400; f++) b.step();
+  const st = b.hud().stats;
+  const bossLost = b.bossFighter.maxHp - Math.max(0, b.bossFighter.hp);
+  const meLost = startHp - Math.max(0, b.player.hp);
+  check('보스전 통계: 준·받은 데미지가 실제 체력 변화와 같다', st.dealt === bossLost && st.taken === meLost && st.hits > 0, JSON.stringify(st) + ` 보스 -${bossLost} 나 -${meLost}`);
+}
+
+// 7) 가드만 굳히는 플레이어: 보스가 하단·잡기로 뚫는다 (권장 레벨에서 가드만으로 버티면 안 됨)
+{
+  let koCount = 0;
+  let grabs = 0;
+  for (const boss of BOSSES) {
+    const prof = newProfile();
+    prof.level = boss.recommendedLevel;
+    const b = new BossBattle(boss, prof, new DummyController(), 3);
+    let last = -1;
+    for (let f = 0; f < (boss.timeLimit + 5) * 60 && !b.result; f++) {
+      b.step();
+      const m = b.bossFighter.move;
+      if (m && b.bossFighter.moveSerial !== last) {
+        last = b.bossFighter.moveSerial;
+        if (m.id === 'bossGrab') grabs++;
+      }
+    }
+    if (b.player.hp <= 0) koCount++;
+  }
+  check('가드만 하면 보스가 잡기로 뚫고 대부분 KO', grabs > 0 && koCount >= 3, `잡기 ${grabs}번, KO ${koCount}/${BOSSES.length}`);
+}
+
+// 8) 보스전 리플레이: 시작 때 프로필을 복사해 두고, 녹화한 입력을 넣으면 같은 경기가 된다
+{
+  const { RecordingController, TapeController } = ctrlMod;
+  const boss = BOSSES[2];
+  const prof = newProfile();
+  prof.level = boss.recommendedLevel;
+  prof.life.fatigue = 55;
+  const snap = structuredClone(prof);
+  const rec = new RecordingController(new CpuController(9, 0, 'hard'));
+  const b = new BossBattle(boss, prof, rec, 77);
+  let n = 0;
+  while (!b.result && n < (boss.timeLimit + 5) * 60) {
+    b.step();
+    n++;
+  }
+  const r = new BossBattle(boss, structuredClone(snap), new TapeController(rec.tape), 77);
+  let k = 0;
+  while (!r.result && k < n + 10) {
+    r.step();
+    k++;
+  }
+  const same = k === n && r.result?.win === b.result?.win && r.bossFighter.hp === b.bossFighter.hp && r.player.hp === b.player.hp;
+  check('보스전 리플레이: 같은 입력이면 같은 경기', same, `원래 ${n}F 보스 ${b.bossFighter.hp} 나 ${b.player.hp} · 재생 ${k}F 보스 ${r.bossFighter.hp} 나 ${r.player.hp}`);
 }

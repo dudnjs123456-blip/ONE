@@ -1,6 +1,7 @@
 // 클라우드 저장 합치기 규칙 확인: npx tsx scripts/save-sim.ts
 import { mergeProfiles, toSave } from '../src/game/net/cloudSave';
 import { newProfile, type PlayerProfile } from '../src/game/core/profile';
+import { addResult, loadRecord, loadStreak, rankOf, rankPoints } from '../src/game/core/cpuRecord';
 
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`);
@@ -36,4 +37,39 @@ const mk = (patch: Partial<PlayerProfile>): PlayerProfile => ({ ...newProfile(),
 {
   const s = toSave(mk({ gear: { owned: ['cap'], equipped: {} }, casino: { played: 1, won: 0, lost: 0, best: 0 } }));
   check('toSave holds life data only', 'gear' in s && 'casino' in s && 'life' in s && !('level' in s) && !('gold' in s));
+}
+
+// VS CPU 전적·연승은 계정(save jsonb)에 들어가고, 이 브라우저 기록과 합쳐진다
+{
+  const mem = new Map<string, string>();
+  (globalThis as unknown as { localStorage: Pick<Storage, 'getItem' | 'setItem'> }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => void mem.set(k, v),
+  };
+  // 예전에 이 브라우저에만 쌓인 기록
+  mem.set('ironfist.cpuRecord', JSON.stringify({ easy: { w: 5, l: 1 }, normal: { w: 0, l: 2 } }));
+  mem.set('ironfist.cpuStreak', JSON.stringify({ cur: 2, best: 4 }));
+  const p = mk({ cpu: { record: { easy: { w: 3, l: 3 }, normal: { w: 0, l: 0 }, hard: { w: 1, l: 0 } }, streak: { cur: 1, best: 6 } } });
+  const r = loadRecord(p);
+  check('cpu record merges browser + account (bigger per level)', r.easy.w === 5 && r.easy.l === 3 && r.normal.l === 2 && r.hard.w === 1, JSON.stringify(r));
+  const s = loadStreak(p);
+  check('cpu streak: account current, best of both', s.cur === 1 && s.best === 6);
+  const res = addResult('hard', true, p);
+  check('result goes into profile', p.cpu?.record.hard.w === 2 && p.cpu?.streak.cur === 2 && res.streak.best === 6);
+  check('toSave includes cpu', JSON.stringify(toSave(p)).includes('"cpu"'));
+  const other = mk({ savedAt: 1, level: 1 });
+  const m = mergeProfiles(other, { ...p, savedAt: 5 });
+  check('cpu record survives cloud merge', m.cpu?.record.hard.w === 2);
+  // 로그인 안 한 상태(프로필 없음)도 브라우저에만 그대로
+  const g = addResult('easy', false);
+  check('guest result stays in browser', g.record.easy.w === 5 && g.record.easy.l === 4, JSON.stringify(g.record.easy));
+}
+
+// VS CPU 랭크: 승리 점수(쉬움 1·보통 2·어려움 3)로 오른다
+{
+  const r = (e: number, n: number, h: number) => ({ easy: { w: e, l: 0 }, normal: { w: n, l: 0 }, hard: { w: h, l: 0 } });
+  check('rank: no wins = 입문', rankOf(r(0, 0, 0)).name === '입문' && rankOf(r(0, 0, 0)).next?.need === 5);
+  check('rank: points weight by level', rankPoints(r(1, 2, 3)) === 1 + 4 + 9);
+  check('rank: 5 points = 수련생', rankOf(r(3, 1, 0)).name === '수련생');
+  check('rank: top rank has no next', rankOf(r(0, 0, 70)).name === '철권왕' && rankOf(r(0, 0, 70)).next === null);
 }

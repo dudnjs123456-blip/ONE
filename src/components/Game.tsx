@@ -16,6 +16,7 @@ import { cloudSave, type SyncState } from '@/game/net/cloudSave';
 import { sessionLock } from '@/game/net/sessionLock';
 import { expToNext } from '@/game/data/progression';
 import BossSelect from './BossSelect';
+import { loadRecord, loadStreak, rankOf } from '@/game/core/cpuRecord';
 
 // 게임 화면들은 들어갈 때 불러온다 (첫 화면·로그인을 빨리 띄우려고 — 3D·서울 코드가 크다)
 const loadingScreen = () => <div className="flex h-screen w-screen items-center justify-center bg-black text-sm text-white/60">불러오는 중…</div>;
@@ -73,6 +74,13 @@ export default function Game() {
   const [keys, setKeys] = useState(false);
   // 프로필은 하위 화면(필드/보스)이 직접 수정하고, 화면을 나올 때 저장 + 다시 그린다
   const [profile, setProfile] = useState<PlayerProfile>(newProfile);
+  /** VS CPU 카드의 랭크 한 줄 (브라우저 저장소도 읽으므로 화면이 뜬 뒤에 계산) */
+  const [cpuInfo, setCpuInfo] = useState<string | null>(null);
+  useEffect(() => {
+    const rk = rankOf(loadRecord(profile));
+    const best = loadStreak(profile).best;
+    setCpuInfo(`${rk.icon} ${rk.name} · ${rk.points}점${best > 0 ? ` · 최고 ${best}연승` : ''}`);
+  }, [profile]);
 
   const [sync, setSync] = useState<SyncState>(cloudSave.state);
   // 접속 흐름: 확인 중 → (서버가 있으면) 로그인 → 게임
@@ -264,7 +272,7 @@ export default function Game() {
             <span className="text-2xl font-bold">서울 · 내 집</span>
             <span className="rounded bg-black/40 px-2 py-0.5 text-xs font-bold text-sky-300">NEW</span>
           </div>
-          <div className="mt-1 text-sm text-white/60">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 친구와 같은 동네에서 만나기</div>
+          <div className="mt-1 text-sm text-white/60">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 코인노래방 · 친구와 같은 동네에서 만나기</div>
         </button>
 
         <h2 className="mb-3 mt-8 text-sm font-bold tracking-widest text-white/50">RPG</h2>
@@ -280,6 +288,12 @@ export default function Game() {
                 <span className="rounded bg-black/40 px-2 py-0.5 text-xs font-bold text-amber-300">{m.tag}</span>
               </div>
               <div className="mt-1 text-sm text-white/60">{m.desc}</div>
+              {/* 내 진행 상황 */}
+              <div className="mt-2 text-xs text-amber-200/80">
+                {m.screen.kind === 'field'
+                  ? `누적 처치 ${profile.kills.toLocaleString()}마리`
+                  : `클리어 ${BOSSES.filter((b) => profile.bossClears[b.id]).length}/${BOSSES.length} 보스`}
+              </div>
             </button>
           ))}
         </div>
@@ -294,6 +308,7 @@ export default function Game() {
             >
               <div className="text-xl font-bold">{m.label}</div>
               <div className="mt-1 text-sm text-white/60">{m.desc}</div>
+              {m.mode === 'cpu' && cpuInfo && <div className="mt-2 text-xs text-amber-200/80">{cpuInfo}</div>}
             </button>
           ))}
         </div>
@@ -338,7 +353,7 @@ export default function Game() {
                     <td className="whitespace-nowrap py-1 pr-2 font-mono text-amber-300">{notationArrows(m.notation)}</td>
                     <td className="py-1 pr-2">{m.name}</td>
                     <td className="whitespace-nowrap py-1 pr-2 text-white/60">{LEVEL_LABEL[m.level]}</td>
-                    <td className="py-1 font-mono text-white/60">i{playerStartup(m)}</td>
+                    <td className="whitespace-nowrap py-1 font-mono text-white/60">{playerStartup(m)}F</td>
                   </tr>
                 ))}
               </tbody>

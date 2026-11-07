@@ -1,5 +1,7 @@
 // 연습 모드 허수아비 검증: npx tsx scripts/training-sim.ts
 import { Match } from '../src/game/core/match';
+import * as ctrlDemo from '../src/game/core/controllers';
+import * as combosMod from '../src/game/data/combos';
 import { MOVES, playerStartup } from '../src/game/data/moves';
 import { punishableMoves } from '../src/game/core/punishCheck';
 import { TrainingDummyController, type Controller } from '../src/game/core/controllers';
@@ -215,4 +217,201 @@ function sideMove(holdFrames: number) {
   check('반격 판정: 잡기는 막히지 않음', pm.grab === null);
   const mj = tryMove('punish', 3, 1);
   check('가드 후 반격: 막힌 중단 잽(-1)은 안 당한다', mj.results[0] === '0:block' && !mj.playerHit, mj.results.join(' '));
+}
+
+// 퍼펙트: 한 대도 안 맞고 라운드를 이기면 승리 문구에 PERFECT, 맞았으면 없음
+function perfectRound(p1Hurt: boolean) {
+  const p1 = new Script(), p2 = new Script();
+  const m = new Match('versus', [p1, p2]);
+  while (m.phase !== 'fight') m.step();
+  m.fighters[0].x = -0.45; m.fighters[1].x = 0.45;
+  if (p1Hurt) m.fighters[0].hp -= 5;
+  m.fighters[1].hp = 1;
+  p1.press(6, 2);
+  p2.frames.push(...Array.from({ length: 20 }, () => ({ dir: 6 as Dir, buttons: [false, false, false, false] as RelInput['buttons'] })));
+  let banner = '';
+  for (let f = 0; f < 200; f++) { m.step(); const b = m.hud().banner; if (b && b.includes('WIN')) banner = b; }
+  return { banner, perfects: m.hud().perfects[0] };
+}
+{
+  const a = perfectRound(false), b = perfectRound(true);
+  check('퍼펙트: 무피해 승리면 PERFECT', a.banner.includes('PERFECT') && a.perfects === 1, `(${a.banner})`);
+  check('퍼펙트: 맞았으면 없음', b.banner.includes('WIN') && !b.banner.includes('PERFECT') && b.perfects === 0, `(${b.banner})`);
+}
+
+// 추천 콤보: 기술표에 적은 콤보가 실제로 끝까지 이어진다 (가드 안 하는 상대에게)
+{
+  const { COMBOS } = combosMod;
+  for (const c of COMBOS) {
+    let best = 0;
+    for (const dist of [0.75, 0.9, 1.05, 1.6, 2.0]) {
+      const p1 = new Script(), p2 = new Script();
+      const m = new Match('training', [p1, p2]);
+      m.fighters[0].x = -dist / 2; m.fighters[1].x = dist / 2;
+      for (const st of c.steps) {
+        p1.frames.push({ dir: st.dir, buttons: [1, 2, 3, 4].map((b) => st.buttons.includes(b)) as RelInput['buttons'] });
+        for (let i = 0; i < st.wait; i++) p1.frames.push({ dir: 5, buttons: [false, false, false, false] });
+      }
+      p2.frames.push(...Array.from({ length: 240 }, () => ({ dir: 6 as Dir, buttons: [false, false, false, false] as RelInput["buttons"] })));
+      let maxHits = 0;
+      for (let f = 0; f < 240; f++) { m.step(); maxHits = Math.max(maxHits, m.fighters[1].combo); }
+      best = Math.max(best, maxHits);
+    }
+    check(`추천 콤보 "${c.name}" ${c.hits}HIT 이상`, best >= c.hits, `(${best}HIT)`);
+  }
+}
+
+// 콤보 시연: 연습 모드에서 DemoController 로 재생하면 허수아비('open')에게 콤보가 들어간다
+{
+  const { DemoController } = ctrlDemo;
+  const { COMBOS } = combosMod;
+  const c = COMBOS[1];
+  const idle = new Script();
+  const demo = new DemoController(idle);
+  const dummy = new TrainingDummyController();
+  dummy.mode = 'open';
+  const m = new Match('training', [demo, dummy]);
+  m.fighters[0].reset(-0.425, 0, 1, 0); m.fighters[1].reset(0.425, 0, -1, 0);
+  const inputs: RelInput[] = [];
+  for (const st of c.steps) { inputs.push({ dir: st.dir, buttons: [1, 2, 3, 4].map((b) => st.buttons.includes(b)) as RelInput['buttons'] }); for (let i = 0; i < st.wait; i++) inputs.push({ dir: 5, buttons: [false, false, false, false] }); }
+  demo.play(inputs);
+  let mx = 0;
+  for (let f = 0; f < 200; f++) { m.step(); mx = Math.max(mx, m.fighters[1].combo); }
+  check(`시연: "${c.name}" 이 실제로 ${c.hits}HIT`, mx >= c.hits && !demo.playing, `(${mx}HIT)`);
+}
+
+// ── 입력 기록: 같은 입력은 프레임 수로 합치고, 최신이 맨 위, 최대 개수 유지 ──
+{
+  const seq: RelInput[] = [
+    ...Array.from({ length: 10 }, () => ({ dir: 5 as Dir, buttons: [false, false, false, false] as RelInput['buttons'] })),
+    { dir: 3 as Dir, buttons: [false, true, false, false] },
+    { dir: 3 as Dir, buttons: [false, true, false, false] },
+    ...Array.from({ length: 30 }, (_, i) => ({ dir: (i % 2 ? 6 : 4) as Dir, buttons: [true, false, false, true] as RelInput['buttons'] })),
+  ];
+  const src: Controller = { read: () => seq.shift()! };
+  const lg = new ctrlDemo.InputLogController(src, 14);
+  const ctx = {} as Parameters<Controller['read']>[0];
+  const first: RelInput[] = [];
+  for (let i = 0; i < 12; i++) first.push(lg.read(ctx));
+  check('입력 기록: 입력을 그대로 넘긴다', first[10].dir === 3 && first[10].buttons[1] === true);
+  check('입력 기록: 같은 입력은 프레임 수로 합친다 (최신이 위)', lg.log.length === 2 && lg.log[0].dir === 3 && lg.log[0].frames === 2 && lg.log[0].buttons.join() === '2' && lg.log[1].frames === 10, JSON.stringify(lg.log));
+  for (let i = 0; i < 30; i++) lg.read(ctx);
+  check('입력 기록: 최대 14줄', lg.log.length === 14 && lg.log[0].buttons.join() === '1,4', String(lg.log.length));
+}
+
+// ── 허수아비 녹화 재생: 내가 녹화한 입력(→ 기준)을 허수아비가 나를 향해 똑같이 쓴다 ──
+{
+  const idle: RelInput = { dir: 5 as Dir, buttons: [false, false, false, false] };
+  const upper: RelInput = { dir: 3 as Dir, buttons: [false, true, false, false] };
+  const tape = ctrlDemo.trimTape([idle, idle, idle, upper, idle, idle]);
+  check('녹화 앞뒤 빈 입력은 잘라낸다', tape.length === 1 && tape[0].dir === 3);
+  // 1P 가 직접 쓴 기술
+  const q = [upper];
+  const mine = new Match('training', [{ read: () => q.shift() ?? idle }, new TrainingDummyController()]);
+  let myMove = '';
+  for (let i = 0; i < 30; i++) {
+    mine.step();
+    if (mine.fighters[0].move && !myMove) myMove = mine.fighters[0].move.id;
+  }
+  // 허수아비가 재생
+  const d = new TrainingDummyController();
+  d.mode = 'playback';
+  d.setTape(tape);
+  const m = new Match('training', [{ read: () => idle }, d]);
+  const seen = new Set<string>();
+  for (let i = 0; i < 200; i++) {
+    m.step();
+    const mv = m.fighters[1].move;
+    if (mv) seen.add(mv.id);
+  }
+  check('허수아비 녹화 재생: 같은 기술을 나를 향해 쓴다', !!myMove && seen.has(myMove), `${myMove} / ${[...seen].join(',')}`);
+  // 녹화기: 꺼 두면 안 모으고, 최대 길이에서 멈춘다
+  const rec = new ctrlDemo.RecordingController({ read: () => upper });
+  rec.enabled = false;
+  rec.read({} as Parameters<Controller['read']>[0]);
+  rec.enabled = true;
+  rec.limit = 3;
+  for (let i = 0; i < 10; i++) rec.read({} as Parameters<Controller['read']>[0]);
+  check('녹화기: 꺼 두면 안 모으고 최대 길이에서 멈춤', rec.tape.length === 3);
+}
+
+// ── 연습 과제가 실제로 해낼 수 있는지: 앉아 가드 허수아비에게 4 HIT · 40 데미지 콤보 ──
+{
+  const run = (steps: [Dir, number[], number][]) => {
+    const frames: RelInput[] = [];
+    for (const [dir, b, w] of steps) {
+      frames.push({ dir, buttons: [1, 2, 3, 4].map((x) => b.includes(x)) as RelInput['buttons'] });
+      for (let i = 0; i < w; i++) frames.push({ dir: 5 as Dir, buttons: [false, false, false, false] });
+    }
+    const d = new TrainingDummyController();
+    d.mode = 'crouch';
+    const m = new Match('training', [{ read: () => frames.shift() ?? { dir: 5 as Dir, buttons: [false, false, false, false] } }, d]);
+    m.fighters[0].x = -0.45;
+    m.fighters[1].x = 0.45;
+    let hits = 0;
+    let dmg = 0;
+    for (let f = 0; f < 320; f++) {
+      m.step();
+      hits = Math.max(hits, m.fighters[1].combo);
+      dmg = Math.max(dmg, m.fighters[1].comboDamage);
+    }
+    return { hits, dmg };
+  };
+  const c4 = run([[3, [2], 28], [5, [1], 21], [6, [2], 22], [6, [2], 6], [5, [4], 4]]);
+  check('과제 "4 HIT 콤보"를 해낼 수 있다 (↘+2 → 1 → →+2 → →+2)', c4.hits >= 4, `${c4.hits}HIT ${c4.dmg}`);
+  const d40 = run([[3, [2], 36], [5, [2, 4], 11], [5, [1], 8], [2, [4], 16], [5, [1], 15], [5, [2], 33], [5, [2], 19]]);
+  check('과제 "한 콤보로 40 데미지"를 해낼 수 있다', Math.max(c4.dmg, d40.dmg) >= 40, `${c4.dmg} / ${d40.dmg}`);
+  // 서서 가드 허수아비는 어퍼컷(중단)을 막는다 → 기초 과제 힌트가 앉아 가드를 알려 줘야 함
+  const stand = (() => {
+    const frames: RelInput[] = [{ dir: 3 as Dir, buttons: [false, true, false, false] }];
+    const m = new Match('training', [{ read: () => frames.shift() ?? { dir: 5 as Dir, buttons: [false, false, false, false] } }, new TrainingDummyController()]);
+    m.fighters[0].x = -0.45;
+    m.fighters[1].x = 0.45;
+    for (let f = 0; f < 60; f++) m.step();
+    return m.hud().lastHit?.result;
+  })();
+  check('서서 가드 허수아비는 어퍼컷을 막는다 (힌트: 앉아 가드)', stand === 'block', String(stand));
+}
+
+// ── 시연: 추천 콤보 전부 — 게임과 같은 거리(대시 콤보 2.0m, 나머지 0.85m)에서 실제로 HIT 수가 나온다 ──
+for (const c of combosMod.COMBOS) {
+  const demo = new ctrlDemo.DemoController(new Script());
+  const dummy = new TrainingDummyController();
+  dummy.mode = 'open';
+  const m = new Match('training', [demo, dummy]);
+  const dist = c.notation.startsWith('f,f') ? 2.0 : 0.85;
+  m.fighters[0].reset(-dist / 2, 0, 1, 0);
+  m.fighters[1].reset(dist / 2, 0, -1, 0);
+  const inputs: RelInput[] = [];
+  for (const st of c.steps) {
+    inputs.push({ dir: st.dir, buttons: [1, 2, 3, 4].map((b) => st.buttons.includes(b)) as RelInput['buttons'] });
+    for (let i = 0; i < st.wait; i++) inputs.push({ dir: 5, buttons: [false, false, false, false] });
+  }
+  demo.play(inputs);
+  let mx = 0;
+  for (let f = 0; f < 260; f++) {
+    m.step();
+    mx = Math.max(mx, m.fighters[1].combo);
+  }
+  check(`시연 전부: "${c.name}" ${c.hits}HIT`, mx >= c.hits, `(${mx}HIT)`);
+}
+
+// ── 허수아비 '가드 안 함' (연습 모드 기본): 중단도 맞고, 서서 가드로 바꾸면 다시 막는다 ──
+{
+  const hitWith = (mode: ctrlDemo.DummyMode) => {
+    const frames: RelInput[] = [{ dir: 3 as Dir, buttons: [false, true, false, false] }];
+    const d = new TrainingDummyController();
+    d.mode = mode;
+    const m = new Match('training', [{ read: () => frames.shift() ?? { dir: 5 as Dir, buttons: [false, false, false, false] } }, d]);
+    m.fighters[0].x = -0.45;
+    m.fighters[1].x = 0.45;
+    for (let f = 0; f < 60; f++) m.step();
+    return { res: m.hud().lastHit?.result, d, m };
+  };
+  const a = hitWith('noguard');
+  check('가드 안 함: 어퍼컷(중단)이 맞는다', a.res === 'hit', String(a.res));
+  a.d.mode = 'stand';
+  a.m.step();
+  check('서서 가드로 바꾸면 다시 막을 수 있다', a.m.fighters[1].canBlock === true);
+  check('서서 가드: 어퍼컷을 막는다', hitWith('stand').res === 'block');
 }

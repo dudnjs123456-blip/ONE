@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FRAME_MS } from '@/game/core/constants';
 import type { PlayerProfile } from '@/game/core/profile';
-import { CityWorld, SOFA_ACTS, type CityInput } from '@/game/city/cityWorld';
+import { CityWorld, SOFA_ACTS, sleptLabel, type CityInput } from '@/game/city/cityWorld';
 import { P1_KEYS } from '@/game/core/input';
 import { bindCodes, bindLabel, type BindAction } from '@/game/core/keybinds';
 import CityTouchControls from './CityTouchControls';
@@ -21,6 +21,7 @@ import CalendarPanel from './CalendarPanel';
 import GearPanel from './GearPanel';
 import WardrobeView from './WardrobeView';
 import CasinoPanel from './CasinoPanel';
+import KaraokePanel from './KaraokePanel';
 import PetPanel from './PetPanel';
 import FishingPanel, { type FishTab } from './FishingPanel';
 import FishingShopPanel, { type FishShopTab } from './FishingShopPanel';
@@ -30,6 +31,7 @@ import type { ClothesCorner } from '@/game/city/store';
 import type { CosmeticSlot } from '@/game/data/fashion';
 import { shortDay } from '@/game/city/calendar';
 import { WEATHER_LABEL, type WeatherKind } from '@/game/city/weather';
+import { sharedNow, syncWorldClock } from '@/game/city/worldClock';
 import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
 import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
@@ -80,9 +82,10 @@ interface CityHud {
   job: { name: string; left: string; checked: number; pay: number; alert: string | null; auto: boolean; fighting: boolean; autoPatrol: boolean; hunt: boolean } | null;
   payslip: string | null;
   jobPanelRequest: boolean;
-  /** 잠자는 단계와 밤 진행도 */
+  /** 잠자는 단계, 12시간 중 잔 비율, 잔 시간(ms) */
   sleep: 'walk' | 'lie' | 'sleep' | 'wake' | null;
   night: number;
+  slept: number;
 }
 
 // 키는 키 설정(keybinds)을 따른다 — 기본: 방향키 이동, Q W A S 공격, 스페이스 점프, Shift 달리기, E 상호작용
@@ -197,6 +200,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   tvPanelRef.current = tvPanel;
   const [gear, setGear] = useState(false);
   const [casino, setCasino] = useState(false);
+  const [karaoke, setKaraoke] = useState(false);
   const [pets, setPets] = useState<null | 'shop' | 'care'>(null);
   const [adoptPick, setAdoptPick] = useState<string | null>(null);
   const [keys, setKeys] = useState(false);
@@ -214,6 +218,8 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   gearRef.current = gear;
   const casinoRef = useRef(casino);
   casinoRef.current = casino;
+  const karaokeRef = useRef(karaoke);
+  karaokeRef.current = karaoke;
   const petsRef = useRef(pets);
   petsRef.current = pets;
   // 낚시 도감 (F) · 낚시마트 계산대
@@ -235,10 +241,14 @@ export default function CityView({ profile, account, onExit }: { profile: Player
     const canvas = canvasRef.current!;
     const kb = new CityKeyboard();
     kb.attach();
-    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
+    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
+    // 날짜·시각·날씨는 모두가 같이 쓰는 동네 시계를 따른다 (서버 시각에 맞춘 뒤, 1분마다 다시 맞춘다)
+    world.attachSharedClock(sharedNow);
+    void syncWorldClock();
+    const clockTimer = window.setInterval(() => void syncWorldClock(2), 60_000);
     // 새로고침해도 마지막에 있던 곳에서 이어서 (이 브라우저에 계정별로 기억)
     const placeKey = `ironfist:place:${account?.userId ?? 'guest'}`;
     try {
@@ -246,6 +256,8 @@ export default function CityView({ profile, account, onExit }: { profile: Player
     } catch {
       /* 저장된 값이 깨졌으면 평소처럼 집 앞에서 */
     }
+    // 자다가 창을 닫았으면 침대에서 계속 잔다
+    world.resumeSleep();
     const savePlace = () => {
       const s = world.placeSnapshot();
       if (!s) return;
@@ -306,6 +318,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         else if (tvPanelRef.current) setTvPanel(false);
         else if (gearRef.current) setGear(false);
         else if (casinoRef.current) setCasino(false);
+        else if (karaokeRef.current) setKaraoke(false);
         else if (petsRef.current) setPets(null);
         else if (clothesRef.current) setClothes(null);
         else if (fishDexRef.current) setFishDex(null);
@@ -440,7 +453,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       }
 
       // 화면 위 글자(HUD)는 0.08초마다만 새로 만든다 (매 프레임 비교하던 것을 줄여서 가볍게)
-      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
+      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
       const h: CityHud | null = !hudDue ? null : {
         location: world.location,
         floor: world.floor,
@@ -488,6 +501,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         online: link ? { status: link.status, friends: link.friends, ping: link.ping === null ? null : Math.round(link.ping) } : null,
         sleep: world.sleepView?.phase ?? null,
         night: Math.round((world.sleepView?.night ?? 0) * 100) / 100,
+        slept: Math.floor((world.sleepView?.slept ?? 0) / 60_000) * 60_000,
       };
       if (world.jobPanelRequest) {
         world.jobPanelRequest = false;
@@ -504,6 +518,10 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       if (world.casinoRequest) {
         world.casinoRequest = false;
         setCasino(true);
+      }
+      if (world.karaokeRequest) {
+        world.karaokeRequest = false;
+        setKaraoke(true);
       }
       // 옷가게 창은 띄운 채로 걸어 다닐 수 있다 (입어본 옷을 입고 둘러보기). 가게를 벗어나면 닫는다
       if (clothesRef.current && world.location !== 'store') setClothes(null);
@@ -564,6 +582,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       renderer.dispose();
       savePlace();
       window.clearInterval(placeTimer);
+      window.clearInterval(clockTimer);
       window.removeEventListener('pagehide', savePlace);
       worldRef.current = null;
     };
@@ -723,6 +742,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       {fishDex && worldRef.current && <FishingPanel key={fishDex} world={worldRef.current} start={fishDex} onClose={() => setFishDex(null)} />}
       {pets && worldRef.current && <PetPanel key={`${pets}:${adoptPick ?? ''}`} world={worldRef.current} mode={pets} pick={adoptPick} onClose={() => setPets(null)} />}
       {casino && worldRef.current && <CasinoPanel world={worldRef.current} onClose={() => setCasino(false)} />}
+      {karaoke && worldRef.current && <KaraokePanel world={worldRef.current} onClose={() => setKaraoke(false)} />}
       {gear && worldRef.current && (
         <GearPanel
           world={worldRef.current}
@@ -929,7 +949,7 @@ function Minimap({ worldRef }: { worldRef: React.RefObject<CityWorld | null> }) 
   );
 }
 
-/** 잠자는 동안: 위아래 검은 띠 + 빠르게 흐르는 시계 + 밤→아침 진행 막대 */
+/** 잠자는 동안: 위아래 검은 띠 + 지금 시각 + 잔 시간 (아무 키나 누르면 깬다, 12시간이면 저절로) */
 function SleepOverlay({ hud }: { hud: CityHud }) {
   const on = hud.sleep === 'sleep';
   const show = hud.sleep === 'lie' || hud.sleep === 'sleep' || hud.sleep === 'wake';
@@ -940,7 +960,9 @@ function SleepOverlay({ hud }: { hud: CityHud }) {
       <div className="absolute inset-x-0 bottom-0 h-[11%] bg-black/90" />
       <div className="absolute left-1/2 top-[14%] -translate-x-1/2 text-center drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
         <div className="text-7xl font-black tabular-nums tracking-wider">{hud.clock}</div>
-        <div className="mt-1 text-base text-white/80">{shortDay(hud.day)} · 쿨쿨 자는 중</div>
+        <div className="mt-1 text-base text-white/80">
+          {shortDay(hud.day)} · 쿨쿨 자는 중 · {sleptLabel(hud.slept)}째
+        </div>
         <div className="mt-3 flex items-center justify-center gap-2 text-lg">
           <span>🌙</span>
           <div className="h-2 w-72 overflow-hidden rounded-full bg-white/20">
@@ -948,6 +970,7 @@ function SleepOverlay({ hud }: { hud: CityHud }) {
           </div>
           <span>☀️</span>
         </div>
+        <div className="mt-2 text-sm text-white/70">아무 키나 누르면 일어나요 · 12시간을 자면 저절로 깨요</div>
       </div>
       <div className="absolute left-[56%] top-[40%] animate-bounce text-4xl font-black text-sky-200/90">
         Z<span className="text-2xl">z</span><span className="text-xl">z</span>

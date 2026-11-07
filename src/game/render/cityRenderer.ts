@@ -357,17 +357,7 @@ export class CityRenderer {
     this.city.add(this.playerLift);
     this.city.add(this.myPlate.sprite);
 
-    for (const n of world.npcs) {
-      // 행인: Kenney 사람 모델 12종 중 하나 (번호로 골고루)
-      const m = new PersonView(n.fighter.index);
-      m.root.scale.setScalar(0.92 + (n.fighter.index % 5) * 0.03);
-      this.npcViews.push(m);
-      this.city.add(m.root);
-      const plate = new Nameplate(true);
-      plate.sprite.visible = false;
-      this.npcPlates.push(plate);
-      this.city.add(plate.sprite);
-    }
+    for (const n of world.npcs) this.addNpcView(n.fighter.index);
     this.buildPolice();
     this.lobbyDoor = buildLobbyScene(this.lobby).door;
     {
@@ -700,7 +690,14 @@ export class CityRenderer {
     }
 
     if (view === 'city') {
+      // 행인 수·사람이 바뀌었으면 (친구 컴퓨터가 계산한 동네) 모델도 맞춘다
+      while (this.npcViews.length < world.npcs.length) this.addNpcView(world.npcs[this.npcViews.length].fighter.index);
+      for (let i = world.npcs.length; i < this.npcViews.length; i++) {
+        this.npcViews[i].root.visible = false;
+        this.npcPlates[i].sprite.visible = false;
+      }
       world.npcs.forEach((n, i) => {
+        if (this.npcViews[i].variant !== n.fighter.index) this.setNpcView(i, n.fighter.index);
         // 멀리 있는 행인은 자세 계산을 줄이고, 아주 멀면 아예 감춘다 (어차피 화면 밖)
         const view = this.npcViews[i];
         const d = Math.hypot(n.fighter.x - eye.x, n.fighter.z - eye.z);
@@ -1889,6 +1886,28 @@ export class CityRenderer {
         this.carViews[i] = v;
       });
     });
+  }
+
+  /** 행인 모델: Kenney 사람 모델 중 하나 (번호로 골고루) */
+  private makeNpcView(index: number) {
+    const m = new PersonView(index);
+    m.root.scale.setScalar(0.92 + (index % 5) * 0.03);
+    this.city.add(m.root);
+    return m;
+  }
+
+  private addNpcView(index: number) {
+    this.npcViews.push(this.makeNpcView(index));
+    const plate = new Nameplate(true);
+    plate.sprite.visible = false;
+    this.npcPlates.push(plate);
+    this.city.add(plate.sprite);
+  }
+
+  /** 그 자리의 행인이 다른 사람으로 바뀌었다 */
+  private setNpcView(i: number, index: number) {
+    this.city.remove(this.npcViews[i].root);
+    this.npcViews[i] = this.makeNpcView(index);
   }
 
   private buildLandmarks() {

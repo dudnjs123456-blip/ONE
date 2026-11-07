@@ -34,14 +34,14 @@ check('보통이 쉬움을 이긴다', n3 > e3, `(보통 ${n3} : 쉬움 ${e3})`)
 // 벽 활용: 어려움 CPU 끼리 붙이면 벽꽝이 실제로 나온다
 {
   let walls = 0;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 20; i++) {
     const m = new Match('cpu', [new CpuController(300 + i, 0, 'hard'), new CpuController(900 + i, 0, 'hard')]);
     for (let f = 0; f < 60 * 60 * 6 && m.phase !== 'matchEnd'; f++) {
       m.step();
       for (const e of m.drainEvents()) if (e.wall) walls++;
     }
   }
-  check('어려움 CPU 는 벽꽝을 만든다', walls >= 2, `(6경기 벽꽝 ${walls}번)`);
+  check('어려움 CPU 는 벽꽝을 만든다', walls >= 4, `(20경기 벽꽝 ${walls}번)`);
 }
 
 // 횡보 회피: CPU 가 반응할 수 있을 때 직선기(라이트 스트레이트)가 나오면, 어려움은 가끔 막는 대신 옆으로 피한다

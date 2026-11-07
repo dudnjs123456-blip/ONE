@@ -1,7 +1,8 @@
 // 엔진 헤드리스 검증: npx tsx scripts/sim-test.ts
 import { Match } from '../src/game/core/match';
 import * as moveData from '../src/game/data/moves';
-import type { Controller } from '../src/game/core/controllers';
+import { CpuController, type Controller } from '../src/game/core/controllers';
+import * as ctrlMod from '../src/game/core/controllers';
 import type { RelInput } from '../src/game/core/input';
 import type { Dir } from '../src/game/core/types';
 
@@ -179,4 +180,58 @@ for (const [btn, want] of [[3, 'dashKnee'], [4, 'slideKick']] as const) {
   }
   for (const [b, id] of Object.entries(JUMP_MOVES)) if (!MOVES[id].notation.includes(b)) bad.push(`점프+${b}→${id}: ${MOVES[id].notation}`);
   check('기술표 표기 = 실제 입력', bad.length === 0, bad.join(' / '));
+}
+
+// ── 경기 통계: 준 데미지 = 상대가 잃은 체력 합 (라운드마다), 맞힌 횟수 ≥ 카운터 ──
+{
+
+  const m = new Match('cpu', [new CpuController(77, 0, 'hard'), new CpuController(99, 0, 'hard')]);
+  let lost: [number, number] = [0, 0];
+  let prevHp = m.fighters.map((f) => f.hp);
+  let prevRound = m.hud().round;
+  for (let i = 0; i < 60 * 60 * 8 && m.hud().phase !== 'matchEnd'; i++) {
+    m.step();
+    const h = m.hud();
+    if (h.round !== prevRound) {
+      prevRound = h.round;
+      prevHp = m.fighters.map((f) => f.hp);
+      continue;
+    }
+    m.fighters.forEach((f, k) => {
+      if (f.hp < prevHp[k]) lost[k] += prevHp[k] - f.hp;
+      prevHp[k] = f.hp;
+    });
+  }
+  const st = m.hud().stats;
+  check('경기 통계: 준 데미지 = 상대가 잃은 체력', st[0].damage === lost[1] && st[1].damage === lost[0], `P1 ${st[0].damage}/${lost[1]} · P2 ${st[1].damage}/${lost[0]}`);
+  check('경기 통계: 맞힌 횟수 ≥ 카운터, 막기도 셈', st.every((s) => s.hits >= s.counters && s.hits > 0) && st[0].guards + st[1].guards > 0, JSON.stringify(st));
+  m.restart();
+  check('다시 시작하면 통계 초기화', m.hud().stats.every((s) => s.damage === 0 && s.hits === 0));
+}
+
+// ── 리플레이: 녹화한 입력을 새 경기에 넣으면 똑같이 재현된다 (다시 시작한 경기도) ──
+{
+  const ra = new ctrlMod.RecordingController(new CpuController(5, 0, 'hard'));
+  const rb = new ctrlMod.RecordingController(new CpuController(6, 0, 'normal', 'aggressive'));
+  const m = new Match('cpu', [ra, rb], ['A', 'B']);
+  // 잠깐 싸우다가 다시 시작 (녹화도 처음부터)
+  for (let i = 0; i < 900; i++) m.step();
+  m.restart();
+  ra.reset();
+  rb.reset();
+  let n = 0;
+  while (m.hud().phase !== 'matchEnd' && n < 60 * 60 * 10) {
+    m.step();
+    n++;
+  }
+  const r = new Match('cpu', [new ctrlMod.TapeController(ra.tape), new ctrlMod.TapeController(rb.tape)], ['A', 'B']);
+  let k = 0;
+  while (r.hud().phase !== 'matchEnd' && k < n + 10) {
+    r.step();
+    k++;
+  }
+  const a = m.hud();
+  const b = r.hud();
+  const same = k === n && a.fighters.every((f, i) => f.hp === b.fighters[i].hp && f.wins === b.fighters[i].wins) && JSON.stringify(a.stats) === JSON.stringify(b.stats);
+  check('리플레이: 같은 입력이면 같은 경기 (다시 시작 후 포함)', same, `원래 ${n}F ${a.fighters.map((f) => f.wins + '승/' + f.hp).join(' ')} · 재생 ${k}F ${b.fighters.map((f) => f.wins + '승/' + f.hp).join(' ')}`);
 }

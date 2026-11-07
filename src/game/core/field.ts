@@ -71,6 +71,8 @@ export interface FieldHudState {
   respawnIn: number;
   target: { name: string; level: number; hp: number; maxHp: number } | null;
   log: { id: number; text: string }[];
+  /** 이번 사냥(필드에 들어온 뒤) 성과 */
+  session: { seconds: number; kills: number; exp: number; gold: number; deaths: number };
 }
 
 const idle = (): FieldCommand => ({ move: null, input: NEUTRAL_INPUT });
@@ -154,6 +156,8 @@ export class MonsterBrain {
  */
 export class FieldWorld {
   frame = 0;
+  /** 이번 사냥 성과 (필드에 들어온 뒤부터) */
+  private session = { kills: 0, exp: 0, gold: 0, deaths: 0 };
   hitstop = 0;
   readonly player: Fighter;
   auto = true;
@@ -269,6 +273,7 @@ export class FieldWorld {
       respawnIn: Math.ceil((PLAYER_RESPAWN_FRAMES - this.playerDeadFrames) / FPS),
       target: t && { name: t.type.name, level: t.type.level, hp: t.fighter.hp, maxHp: t.fighter.maxHp },
       log: this.log.slice(-6),
+      session: { seconds: Math.floor(this.frame / FPS), ...this.session },
     };
   }
 
@@ -389,6 +394,9 @@ export class FieldWorld {
         m.rewarded = true;
         this.profile.kills++;
         this.profile.gold += m.type.gold;
+        this.session.kills++;
+        this.session.exp += m.type.exp;
+        this.session.gold += m.type.gold;
         this.texts.push({ x: f.x, y: 2.2, z: f.z, text: `+${m.type.exp} EXP`, kind: 'exp' });
         this.texts.push({ x: f.x, y: 1.8, z: f.z, text: `+${m.type.gold} G`, kind: 'gold' });
         this.addLog(`${m.type.name} 처치 (+${m.type.exp} EXP, +${m.type.gold} G)`);
@@ -405,6 +413,7 @@ export class FieldWorld {
     if (p.hp <= 0 && p.state === 'ko') {
       if (++this.playerDeadFrames >= PLAYER_RESPAWN_FRAMES) {
         this.playerDeadFrames = 0;
+        this.session.deaths++;
         p.reset(0, 0, 0, -1);
         this.target = null;
         this.addLog('마을에서 부활했습니다');

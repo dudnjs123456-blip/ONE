@@ -42,3 +42,28 @@ check('다시 누르면 유지된다', kb.read(P1_KEYS).down);
   const m = mergeRaw(kbRaw, a);
   check('키보드 + 패드 합치기', m.up && m.right && m.buttons[0] && m.buttons[1]);
 }
+
+// 실제 키보드도: 프레임 사이에 눌렀다 뗀 탭은 한 번 읽히고, 읽지 않는 키는 잠시 뒤 저절로 풀린다
+{
+  const k2 = new Keyboard();
+  type KH = { onDown: (e: Partial<KeyboardEvent>) => void; onUp: (e: Partial<KeyboardEvent>) => void };
+  const h = k2 as unknown as KH;
+  const ev = (code: string, repeat = false) => ({ code, repeat, preventDefault() {} });
+  h.onDown(ev(P1_KEYS.buttons[1]));
+  h.onUp(ev(P1_KEYS.buttons[1]));
+  const r1 = k2.read(P1_KEYS);
+  const r2 = k2.read(P1_KEYS);
+  check('keyboard: tap between frames is read once', r1.buttons[1] && !r2.buttons[1]);
+  h.onDown(ev('ShiftLeft'));
+  h.onUp(ev('ShiftLeft'));
+  check('keyboard: non-read key released right away', !k2.has('ShiftLeft'));
+  h.onDown(ev(P1_KEYS.right));
+  h.onDown(ev(P1_KEYS.right, true));
+  check('keyboard: held key stays held', k2.read(P1_KEYS).right && k2.read(P1_KEYS).right);
+  h.onUp(ev(P1_KEYS.right));
+  check('keyboard: release after read is immediate', !k2.read(P1_KEYS).right);
+  // P2 키처럼 이 화면에서 읽지 않는 게임 키도 잠시 뒤엔 풀린다
+  h.onDown(ev('Numpad7'));
+  h.onUp(ev('Numpad7'));
+  setTimeout(() => check('keyboard: unread game key auto-released', !k2.has('Numpad7')), 200);
+}

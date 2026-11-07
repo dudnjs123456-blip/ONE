@@ -38,7 +38,7 @@ function Wins({ wins, side }: { wins: number; side: 0 | 1 }) {
 }
 
 /** @param raised 화면 아래에 터치 버튼이 있으면 프레임 정보를 위로 올린다 */
-export default function Hud({ hud, raised = false }: { hud: HudState; raised?: boolean }) {
+export default function Hud({ hud, raised = false, subtitle = null }: { hud: HudState; raised?: boolean; /** 라운드 시작 때 배너 아래 작은 글씨 */ subtitle?: string | null }) {
   const [p1, p2] = hud.fighters;
   const training = hud.mode === 'training';
   const lh = hud.lastHit;
@@ -77,9 +77,12 @@ export default function Hud({ hud, raised = false }: { hud: HudState; raised?: b
       {/* 중앙 배너 */}
       {hud.banner && (
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-7xl font-black italic tracking-widest text-amber-300 drop-shadow-[0_4px_0_rgba(0,0,0,0.8)]">
+          <div className="px-4 text-center text-[clamp(2rem,7vw,4.5rem)] font-black italic tracking-widest text-amber-300 drop-shadow-[0_4px_0_rgba(0,0,0,0.8)]">
             {hud.banner}
           </div>
+          {hud.phase === 'intro' && subtitle && (
+            <div className="absolute top-[calc(50%+3.5rem)] text-sm font-bold tracking-widest text-white/80 drop-shadow">{subtitle}</div>
+          )}
         </div>
       )}
 

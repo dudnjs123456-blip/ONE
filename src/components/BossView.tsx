@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BossBattle, type BossHudState } from '@/game/core/boss';
 import { FRAME_MS } from '@/game/core/constants';
 import { makeClock } from '@/game/render/clock';
-import { KeyboardController } from '@/game/core/controllers';
+import { KeyboardController, RecordingController, TapeController } from '@/game/core/controllers';
 import { Keyboard, P1_KEYS, watchPad, watchPadButtons } from '@/game/core/input';
 import { saveProfile, type PlayerProfile } from '@/game/core/profile';
 import type { BossDef } from '@/game/data/bosses';
@@ -43,6 +43,12 @@ export default function BossView({
     if (!paused) setShowMoves(false);
   }, [paused]);
   const [hitboxes, setHitboxes] = useState(false);
+  /** 리플레이 재생 중 */
+  const [replaying, setReplaying] = useState(false);
+  const replayingRef = useRef(false);
+  replayingRef.current = replaying;
+  const replayRef = useRef<() => void>(() => {});
+  const skipReplayRef = useRef<() => void>(() => {});
   // 키보드와 화면 터치 버튼이 같은 입력을 쓴다
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
@@ -58,7 +64,14 @@ export default function BossView({
     const unlock = unlockAudioOnInput();
     startBgm('boss');
 
-    const battle = new BossBattle(boss, profile, new KeyboardController(kb, P1_KEYS, 0), Date.now() & 0xffff);
+    // 리플레이: 시작 때 프로필(레벨·피로 등)을 복사해 두고, 내 입력을 녹화한다. 엔진이 결정론적이라 같은 경기가 재현된다
+    const seed = Date.now() & 0xffff;
+    const snapshot = structuredClone(profile);
+    const rec = new RecordingController(new KeyboardController(kb, P1_KEYS, 0));
+    const battle = new BossBattle(boss, profile, rec, seed);
+    /** 지금 화면에 돌리는 전투 (리플레이 중이면 재생용) */
+    let cur = battle;
+    let replayEndAt = 0;
     const renderer = new GameRenderer(canvas, {
       looks: [playerLook(wornList(profile.wardrobe), profile.body), { kind: 'basic', color: boss.color }],
       scales: [1, boss.scale],
@@ -71,12 +84,13 @@ export default function BossView({
     window.addEventListener('resize', resize);
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Escape' && !battle.result) setPaused((p) => !p);
+      if (e.code === 'Escape' && replayingRef.current) skipReplayRef.current();
+      else if (e.code === 'Escape' && !battle.result) setPaused((p) => !p);
       if (e.code === 'Backquote') setHitboxes((h) => !h);
     };
     window.addEventListener('keydown', onKey);
     // 패드 Start = 일시정지
-    const unwatchPad = watchPadButtons({ start: () => setPaused((p) => !p) });
+    const unwatchPad = watchPadButtons({ start: () => (replayingRef.current ? skipReplayRef.current() : setPaused((p) => !p)) });
 
     let raf = 0;
     let last = performance.now();
@@ -85,6 +99,21 @@ export default function BossView({
     let lastBanner: string | null = null;
     let wasEnraged = false;
     let saved = false;
+    const backToBattle = () => {
+      cur = battle;
+      replayEndAt = 0;
+      lastBanner = battle.hud().banner;
+      lastHudKey = '';
+      setReplaying(false);
+    };
+    replayRef.current = () => {
+      // 복사본 프로필로 돌리므로 리플레이의 보상은 진짜 프로필에 들어가지 않는다
+      cur = new BossBattle(boss, structuredClone(snapshot), new TapeController(rec.tape), seed);
+      replayEndAt = 0;
+      lastBanner = null;
+      setReplaying(true);
+    };
+    skipReplayRef.current = backToBattle;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       const dt = Math.min(now - last, 250) / 1000;
@@ -92,7 +121,7 @@ export default function BossView({
       last = now;
       let steps = 0;
       while (acc >= FRAME_MS && steps < 5) {
-        if (!pausedRef.current) battle.step();
+        if (!pausedRef.current) cur.step();
         acc -= FRAME_MS;
         steps++;
       }
@@ -102,14 +131,22 @@ export default function BossView({
         saveProfile(profile);
       }
 
-      renderer.sync(battle, hitboxRef.current, makeClock(battle.frame, acc / FRAME_MS, battle.hitstop > 0, dt));
-      const h = battle.hud();
+      renderer.sync(cur, hitboxRef.current, makeClock(cur.frame, acc / FRAME_MS, cur.hitstop > 0, dt));
+      let h = cur.hud();
+      if (cur !== battle) {
+        // 리플레이 중엔 결과 창을 띄우지 않고, 끝나면 잠깐 보여 준 뒤 원래 결과로
+        if (cur.result) {
+          if (!replayEndAt) replayEndAt = now;
+          else if (now - replayEndAt > 2500) backToBattle();
+        }
+        h = { ...h, result: null };
+      }
       const key = JSON.stringify(h);
       if (key !== lastHudKey) {
         if (h.banner !== lastBanner) {
           if (h.phase === 'intro' && h.banner === boss.name) playCue('round');
           else if (h.banner === 'FIGHT!') playCue('fight');
-          else if (h.banner === 'VICTORY') {
+          else if (h.banner?.startsWith('VICTORY')) {
             playCue('ko');
             window.setTimeout(() => playCue('win'), 700);
           } else if (h.banner === 'DEFEAT' || h.banner === 'TIME OVER') playCue('lose');
@@ -151,12 +188,26 @@ export default function BossView({
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       <canvas ref={canvasRef} className="block h-full w-full" />
-      {hud && <BossHud hud={hud} onRetry={onRetry} onExit={onExit} touch={touch} portrait={portrait} />}
+      {hud && <BossHud hud={hud} onRetry={onRetry} onExit={onExit} onReplay={() => replayRef.current()} touch={touch} portrait={portrait} />}
 
-      {touch && !paused && hud && !hud.result && <TouchControls kb={kb} map={P1_KEYS} />}
+      {replaying && (
+        <>
+          <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded bg-black/60 px-3 py-1 text-sm font-black tracking-widest text-red-400">
+            <span className="animate-pulse">●</span> REPLAY
+          </div>
+          <button
+            onClick={() => skipReplayRef.current()}
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-5 py-2 text-sm font-bold text-white hover:bg-black/75"
+          >
+            ⏭ 건너뛰기{!touch && ' (Esc)'}
+          </button>
+        </>
+      )}
+
+      {touch && !paused && !replaying && hud && !hud.result && <TouchControls kb={kb} map={P1_KEYS} />}
       <RotateHint touch={touch} />
 
-      {!hud?.result && (
+      {!hud?.result && !replaying && (
         <div className="absolute right-4 top-24 flex gap-2 whitespace-nowrap text-xs">
           <SoundToggle compact={touch} />
           <MusicToggle compact={touch} />

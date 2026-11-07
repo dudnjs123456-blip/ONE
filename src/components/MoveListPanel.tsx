@@ -2,6 +2,7 @@
 
 import { PLAYER_MOVE_LIST, playerStartup } from '@/game/data/moves';
 import { punishableMoves } from '@/game/core/punishCheck';
+import { COMBOS, type ComboDef } from '@/game/data/combos';
 
 const LEVEL: Record<string, [string, string]> = {
   high: ['상단', 'text-sky-300'],
@@ -13,7 +14,8 @@ export { notationArrows } from '@/game/data/notation';
 import { notationArrows } from '@/game/data/notation';
 
 /** 경기 중 일시정지 메뉴에서 여는 기술표 */
-export default function MoveListPanel({ onClose }: { onClose: () => void }) {
+/** @param onDemo 있으면(연습 모드) 추천 콤보마다 "시연" 버튼 */
+export default function MoveListPanel({ onClose, onDemo }: { onClose: () => void; onDemo?: (c: ComboDef) => void }) {
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-3" onClick={onClose}>
       <div
@@ -63,6 +65,26 @@ export default function MoveListPanel({ onClose }: { onClose: () => void }) {
               })()}
             </tbody>
           </table>
+
+          <div className="mt-4 text-sm font-bold">추천 콤보</div>
+          <ul className="mt-1 space-y-1.5 text-sm">
+            {COMBOS.map((c) => (
+              <li key={c.name} className="rounded bg-white/5 px-3 py-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                  <span className="font-bold">{c.name}</span>
+                  <span className="whitespace-nowrap font-mono text-amber-300">{notationArrows(c.notation)}</span>
+                </div>
+                {onDemo && (
+                  <button onClick={() => onDemo(c)} className="mt-1 rounded bg-amber-500/80 px-2 py-0.5 text-[11px] font-bold text-black hover:bg-amber-400">
+                    ▶ 시연
+                  </button>
+                )}
+                <div className="text-[11px] text-white/55">
+                  {c.hits}HIT · {c.tip}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </div>

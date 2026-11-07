@@ -22,7 +22,8 @@
     "test:weather": "tsx scripts/weather-sim.ts",
     "test:mp": "tsx scripts/mp-sim.ts",
     "test:share": "tsx scripts/share-sim.ts",
-    "test:fish": "tsx scripts/fish-sim.ts"
+    "test:fish": "tsx scripts/fish-sim.ts",
+    "test:karaoke": "tsx scripts/karaoke-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

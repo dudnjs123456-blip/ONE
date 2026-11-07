@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { saveProfile, type PlayerProfile } from '@/game/core/profile';
+import { EMPTY_RECORD, addResult, loadRecord, loadStreak, rankOf, type CpuRecord, type Streak } from '@/game/core/cpuRecord';
 import { CPU_REWARD, FIRST_WIN_MULT, grantCpuReward } from '@/game/core/cpuReward';
 import { FRAME_MS } from '@/game/core/constants';
 import { makeClock } from '@/game/render/clock';
@@ -16,8 +17,15 @@ import {
   type CpuLevel,
   type CpuStyle,
   type DummyMode,
+  DemoController,
+  InputLogController,
+  RecordingController,
+  TapeController,
+  trimTape,
+  type InputLogEntry,
 } from '@/game/core/controllers';
-import { Keyboard, P1_KEYS, P2_KEYS, watchPad, watchPadButtons } from '@/game/core/input';
+import type { ComboDef } from '@/game/data/combos';
+import { Keyboard, NEUTRAL_INPUT, P1_KEYS, P2_KEYS, watchPad, watchPadButtons, type RelInput } from '@/game/core/input';
 import { Match, type HudState, type MatchMode } from '@/game/core/match';
 import { GameRenderer, VERSUS_THEMES } from '@/game/render/renderer';
 import Hud from './Hud';
@@ -25,6 +33,7 @@ import TouchControls, { useIsTouch } from './TouchControls';
 import RotateHint, { usePortrait } from './RotateHint';
 import MoveListPanel from './MoveListPanel';
 import TrainingTasks from './TrainingTasks';
+import InputLogPanel from './InputLogPanel';
 import SoundToggle from './SoundToggle';
 import VibrationToggle from './VibrationToggle';
 import MusicToggle from './MusicToggle';
@@ -33,46 +42,11 @@ import { playCue, unlockAudioOnInput } from '@/game/render/sfx';
 import { attachZoomControls } from './zoomControls';
 
 const LEVEL_KEY = 'ironfist.cpuLevel';
-const RECORD_KEY = 'ironfist.cpuRecord';
-type CpuRecord = Record<CpuLevel, { w: number; l: number }>;
-const EMPTY_RECORD: CpuRecord = { easy: { w: 0, l: 0 }, normal: { w: 0, l: 0 }, hard: { w: 0, l: 0 } };
-/** VS CPU 난이도별 전적 (이 브라우저에만 저장) */
-function loadRecord(): CpuRecord {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECORD_KEY) ?? 'null');
-    if (v && typeof v === 'object') return { ...EMPTY_RECORD, ...v };
-  } catch {}
-  return EMPTY_RECORD;
-}
-const STREAK_KEY = 'ironfist.cpuStreak';
-type Streak = { cur: number; best: number };
-/** VS CPU 연승 (난이도 상관없이 이어진다, 이 브라우저에만) */
-function loadStreak(): Streak {
-  try {
-    const v = JSON.parse(localStorage.getItem(STREAK_KEY) ?? 'null');
-    if (v && typeof v.cur === 'number' && typeof v.best === 'number') return v;
-  } catch {}
-  return { cur: 0, best: 0 };
-}
-function addStreak(won: boolean): Streak {
-  const s = loadStreak();
-  const cur = won ? s.cur + 1 : 0;
-  const next = { cur, best: Math.max(s.best, cur) };
-  try {
-    localStorage.setItem(STREAK_KEY, JSON.stringify(next));
-  } catch {}
-  return next;
-}
+/** 허수아비 녹화 길이 (5초) */
+const RECORD_FRAMES = 300;
+/** 무대 이름 (라운드 시작 때 보여줌) */
+const THEME_LABEL: Record<string, string> = { dojo: '도장', dusk: '노을', snow: '눈밤' };
 
-function addResult(level: CpuLevel, won: boolean): CpuRecord {
-  const r = loadRecord();
-  const cur = r[level] ?? { w: 0, l: 0 };
-  const next = { ...r, [level]: { w: cur.w + (won ? 1 : 0), l: cur.l + (won ? 0 : 1) } };
-  try {
-    localStorage.setItem(RECORD_KEY, JSON.stringify(next));
-  } catch {}
-  return next;
-}
 function savedLevel(): CpuLevel {
   try {
     const v = localStorage.getItem(LEVEL_KEY);
@@ -81,7 +55,7 @@ function savedLevel(): CpuLevel {
   return 'normal';
 }
 
-function setup(mode: MatchMode, kb: Keyboard, level: CpuLevel, dummy: TrainingDummyController): { controllers: [Controller, Controller]; names: [string, string] } {
+function setup(mode: MatchMode, kb: Keyboard, level: CpuLevel, dummy: TrainingDummyController): { controllers: [Controller, Controller]; names: [string, string]; styleLabel?: string; demo?: DemoController; log?: InputLogController; practice?: RecordingController } {
   // 키보드 + 게임패드 (1P = 첫 번째 패드, 2P = 두 번째 패드)
   const p1 = new KeyboardController(kb, P1_KEYS, 0);
   switch (mode) {
@@ -94,18 +68,94 @@ function setup(mode: MatchMode, kb: Keyboard, level: CpuLevel, dummy: TrainingDu
       return {
         controllers: [p1, new CpuController(Date.now() & 0xffff, 0, level, style)],
         names: ['PLAYER 1', `CPU (${CPU_LEVELS[level].label}·${CPU_STYLES[style].label})`],
+        styleLabel: CPU_STYLES[style].label,
       };
     }
     case 'training':
-      return { controllers: [p1, dummy], names: ['PLAYER 1', 'DUMMY'] };
+    {
+      // 연습: 기술표의 콤보 "시연"을 재생할 수 있게 감싼다
+      // 허수아비 녹화: 평소엔 꺼 두었다가 ● 녹화 때만 내 입력을 모은다
+      const practice = new RecordingController(p1);
+      practice.enabled = false;
+      practice.limit = RECORD_FRAMES;
+      const demo = new DemoController(practice);
+      // 입력 기록 (화면 왼쪽에 방금 누른 방향·버튼과 프레임 수)
+      const log = new InputLogController(demo);
+      return { controllers: [log, dummy], names: ['PLAYER 1', 'DUMMY'], demo, log, practice };
+    }
   }
 }
 
 
 export default function GameView({ mode, onExit, profile }: { mode: MatchMode; onExit: () => void; profile?: PlayerProfile }) {
   const [reward, setReward] = useState(0);
+  const demoRef = useRef<DemoController | null>(null);
+  const [demoing, setDemoing] = useState(false);
+  const [inputLog, setInputLog] = useState<InputLogEntry[]>([]);
+  const [replaying, setReplaying] = useState(false);
+  /** 늘리면 새 경기를 만든다 (VS CPU "다음 경기": 새 CPU 성격 · 새 무대) */
+  const [matchSeq, setMatchSeq] = useState(0);
+  /** 이번 경기로 오른 랭크 (없으면 null) */
+  const [rankUp, setRankUp] = useState<string | null>(null);
+  /** 경기를 처음부터 (리플레이 녹화도 처음부터) */
+  const restartMatch = () => {
+    matchRef.current?.restart();
+    recRef.current?.forEach((r) => r.reset());
+  };
+  const replayingRef = useRef(false);
+  /** 리플레이 재생 속도 (0 = 멈춤) */
+  const [replaySpeed, setReplaySpeed] = useState(1);
+  const replaySpeedRef = useRef(1);
+  replaySpeedRef.current = replaySpeed;
+  /** 멈춤 ↔ 마지막 속도 */
+  const lastSpeedRef = useRef(1);
+  const toggleReplayPause = () =>
+    setReplaySpeed((v) => {
+      if (v) lastSpeedRef.current = v;
+      return v ? 0 : lastSpeedRef.current;
+    });
+  replayingRef.current = replaying;
+  const recRef = useRef<RecordingController[] | null>(null);
+  const replayRef = useRef<() => void>(() => {});
+  const skipReplayRef = useRef<() => void>(() => {});
+  const [showInputs, setShowInputs] = useState(() => {
+    try {
+      return localStorage.getItem('ironfist.inputLog') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  /** 추천 콤보 시연: 알맞은 거리에 세우고, 허수아비는 잠깐 가드 없이 다가오게 한 뒤 입력을 재생 */
+  const playCombo = (c: ComboDef) => {
+    const m = matchRef.current;
+    const demo = demoRef.current;
+    if (!m || !demo) return;
+    const dash = c.steps[0].dir === 6 && c.steps[0].buttons.length === 0;
+    const dist = dash ? 2.0 : 0.85;
+    m.fighters[0].reset(-dist / 2, 0, 1, 0);
+    m.fighters[1].reset(dist / 2, 0, -1, 0);
+    const prev = dummy.mode;
+    dummy.mode = 'open';
+    const inputs: RelInput[] = [];
+    for (const st of c.steps) {
+      inputs.push({ dir: st.dir, buttons: [1, 2, 3, 4].map((b) => st.buttons.includes(b)) as RelInput['buttons'] });
+      for (let i = 0; i < st.wait; i++) inputs.push(NEUTRAL_INPUT);
+    }
+    demo.play(inputs);
+    setDemoing(true);
+    window.setTimeout(() => {
+      if (dummy.mode === 'open') dummy.mode = prev;
+      // 시연 기록(마지막 공격·최대 콤보)이 과제로 세지지 않게 처음 상태로 되돌린 뒤 과제 확인을 다시 켠다
+      restartMatch();
+      // 화면 표시가 되돌린 상태로 한 번 갱신된 뒤에 켠다 (바로 켜면 직전 시연 기록이 잠깐 남아 있음)
+      window.setTimeout(() => setDemoing(false), 300);
+    }, (inputs.length / 60) * 1000 + 1200);
+    setShowMoves(false);
+    setPaused(false);
+  };
+  const [subtitle, setSubtitle] = useState<string | null>(null);
   const [streak, setStreak] = useState<Streak>({ cur: 0, best: 0 });
-  useEffect(() => setStreak(loadStreak()), []);
+  useEffect(() => setStreak(loadStreak(profileRef.current)), []);
   // 경기 중 프로필이 새로 바뀌어도(클라우드 동기화 등) 경기를 다시 시작하지 않도록 ref 로 최신 값만 읽는다
   const profileRef = useRef(profile);
   profileRef.current = profile;
@@ -125,16 +175,55 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
   const [record, setRecord] = useState<CpuRecord>(EMPTY_RECORD);
   useEffect(() => {
     setFocusLevel(savedLevel());
-    setRecord(loadRecord());
+    setRecord(loadRecord(profileRef.current));
   }, []);
   // 키보드와 화면 터치 버튼이 같은 입력을 쓴다
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
   const portrait = usePortrait();
   // 연습 모드 허수아비 (행동은 경기 도중에도 바꿀 수 있다)
-  const [dummy] = useState(() => new TrainingDummyController());
-  const [dummyMode, setDummyMode] = useState<DummyMode>('stand');
+  const [dummy] = useState(() => {
+    // 처음엔 '가드 안 함' — 처음 온 사람도 바로 기술·콤보를 맞혀 볼 수 있게
+    const d = new TrainingDummyController();
+    d.mode = 'noguard';
+    return d;
+  });
+  const [dummyMode, setDummyMode] = useState<DummyMode>('noguard');
   const [dummyOpen, setDummyOpen] = useState(false);
+  /** 허수아비 녹화: 지금 녹화 중이면 남은 초 */
+  const practiceRef = useRef<RecordingController | null>(null);
+  const [recLeft, setRecLeft] = useState<number | null>(null);
+  const recTimer = useRef(0);
+  const beforeRec = useRef<DummyMode>('noguard');
+  const stopRecording = () => {
+    window.clearInterval(recTimer.current);
+    setRecLeft(null);
+    const rec = practiceRef.current;
+    if (!rec) return;
+    rec.enabled = false;
+    const tape = trimTape(rec.tape);
+    // 아무것도 안 눌렀으면 녹화 전 허수아비 모드로 되돌린다
+    if (!tape.length) return changeDummy(beforeRec.current);
+    dummy.setTape(tape);
+    changeDummy('playback');
+  };
+  const startRecording = () => {
+    const rec = practiceRef.current;
+    if (!rec) return;
+    rec.reset();
+    rec.enabled = true;
+    beforeRec.current = dummy.mode;
+    changeDummy('stand'); // 녹화하는 동안 허수아비는 가만히
+    const until = performance.now() + (RECORD_FRAMES / 60) * 1000;
+    setRecLeft(Math.ceil(RECORD_FRAMES / 60));
+    window.clearInterval(recTimer.current);
+    recTimer.current = window.setInterval(() => {
+      const left = (until - performance.now()) / 1000;
+      if (left <= 0) stopRecording();
+      else setRecLeft(Math.ceil(left));
+    }, 100);
+  };
+  useEffect(() => () => window.clearInterval(recTimer.current), []);
   const changeDummy = (m: DummyMode) => {
     dummy.mode = m;
     setDummyMode(m);
@@ -152,27 +241,49 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
     const unlock = unlockAudioOnInput();
     startBgm('fight');
 
-    const { controllers, names } = setup(mode, kb, level, dummy);
-    const match = new Match(mode, controllers, names);
+    const { controllers, names, styleLabel, demo, log, practice } = setup(mode, kb, level, dummy);
+    practiceRef.current = practice ?? null;
+    demoRef.current = demo ?? null;
+    let logSeen = -1;
+    let logAt = 0;
+    // 대전은 양쪽 입력을 녹화해 두었다가 경기 뒤 리플레이로 다시 보여 준다 (엔진이 결정론적이라 입력만으로 재현)
+    const recs = mode === 'training' ? null : ([new RecordingController(controllers[0]), new RecordingController(controllers[1])] as const);
+    recRef.current = recs ? [...recs] : null;
+    const match = new Match(mode, recs ? [recs[0], recs[1]] : controllers, names);
     matchRef.current = match;
+    /** 지금 화면에 돌리는 경기 (리플레이 중이면 재생용 경기) */
+    let cur = match;
+    let replayEndAt = 0;
 
     // 대전은 경기마다 무대 색을 바꾼다 (연습은 늘 기본 도장)
     // 시험용: 주소 뒤에 ?arena=snow 처럼 붙이면 그 무대로 고정
     const forced = new URLSearchParams(window.location.search).get('arena') as (typeof VERSUS_THEMES)[number] | null;
     const theme = forced && VERSUS_THEMES.includes(forced) ? forced : mode === 'training' ? 'dojo' : VERSUS_THEMES[Math.floor(Math.random() * VERSUS_THEMES.length)];
     const renderer = new GameRenderer(canvas, { theme });
+    // 라운드 시작 문구 아래에 무대·CPU 성격을 알려준다
+    setSubtitle(mode === 'training' ? null : `${THEME_LABEL[theme]} 무대${styleLabel ? ` · CPU ${styleLabel}` : ''}`);
     const detachZoom = attachZoomControls(renderer, 0.35, 1.8);
     const resize = () => renderer.resize(canvas.clientWidth, canvas.clientHeight);
     resize();
     window.addEventListener('resize', resize);
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Escape') setPaused((p) => !p);
+      if (e.code === 'Escape') {
+        // 리플레이 중 Esc = 건너뛰기
+        if (replayingRef.current) skipReplayRef.current();
+        else setPaused((p) => !p);
+      }
+      // 리플레이 중: Space 멈춤·재생, 1·2·3 = 0.5배·1배·2배
+      if (replayingRef.current && !e.repeat) {
+        if (e.code === 'Space') toggleReplayPause();
+        const sp = { Digit1: 0.5, Digit2: 1, Digit3: 2 }[e.code];
+        if (sp) setReplaySpeed(sp);
+      }
       if (e.code === 'Backquote') setHitboxes((h) => !h);
     };
     window.addEventListener('keydown', onKey);
     // 패드 Start = 일시정지
-    const unwatchPad = watchPadButtons({ start: () => setPaused((p) => !p) });
+    const unwatchPad = watchPadButtons({ start: () => (replayingRef.current ? skipReplayRef.current() : setPaused((p) => !p)) });
 
     // 고정 타임스텝: 화면 주사율과 무관하게 로직은 항상 60fps 로 진행
     let raf = 0;
@@ -181,43 +292,75 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
     let lastHudKey = '';
     let lastBanner: string | null = null;
     let rageOn = [false, false];
+    const backToMatch = () => {
+      cur = match;
+      replayEndAt = 0;
+      lastBanner = match.hud().banner; // 원래 경기의 경기 종료 처리를 다시 하지 않게
+      lastHudKey = '';
+      setReplaying(false);
+    };
+    replayRef.current = () => {
+      if (!recs) return;
+      cur = new Match(mode, [new TapeController(recs[0].tape), new TapeController(recs[1].tape)], names);
+      replayEndAt = 0;
+      lastBanner = null;
+      setPaused(false);
+      lastSpeedRef.current = 1;
+      setReplaySpeed(1);
+      setReplaying(true);
+    };
+    skipReplayRef.current = backToMatch;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
-      const dt = Math.min(now - last, 250) / 1000;
+      // 리플레이는 속도 조절 (느리게 보면 애니메이션도 같이 느려진다)
+      const dt = (Math.min(now - last, 250) / 1000) * (cur !== match ? replaySpeedRef.current : 1);
       acc += dt * 1000;
       last = now;
       let steps = 0;
       while (acc >= FRAME_MS && steps < 5) {
-        if (!pausedRef.current) match.step();
+        if (!pausedRef.current) cur.step();
         acc -= FRAME_MS;
         steps++;
       }
       if (steps === 5) acc = 0;
 
-      renderer.sync(match, hitboxRef.current, makeClock(match.frame, acc / FRAME_MS, match.hitstop > 0, dt));
-      const h = match.hud();
+      renderer.sync(cur, hitboxRef.current, makeClock(cur.frame, acc / FRAME_MS, cur.hitstop > 0, dt));
+      const h = cur.hud();
+      // 리플레이가 끝나면 잠깐 보여 준 뒤 결과 화면으로
+      if (cur !== match && h.phase === 'matchEnd') {
+        if (!replayEndAt) replayEndAt = now;
+        else if (now - replayEndAt > 2500) backToMatch();
+      }
       const key = JSON.stringify(h);
       if (key !== lastHudKey) {
         if (h.banner !== lastBanner) {
           if (h.banner?.startsWith('ROUND')) playCue('round');
           else if (h.banner === 'FIGHT!') playCue('fight');
           else if (h.banner === 'K.O.') playCue('ko');
+          else if (h.banner?.includes('PERFECT')) playCue('win');
+          else if (h.phase === 'matchEnd' && cur !== match) playCue('win');
           else if (h.phase === 'matchEnd') {
             const lost = mode === 'cpu' && h.fighters[1].wins > h.fighters[0].wins;
             playCue(lost ? 'lose' : 'win');
             // 무승부(같은 승수)는 기록하지 않는다
-            const firstWin = loadRecord()[level].w === 0;
-            if (mode === 'cpu' && h.fighters[0].wins !== h.fighters[1].wins) {
-              setRecord(addResult(level, !lost));
-              setStreak(addStreak(!lost));
+            const prof = profileRef.current;
+            const firstWin = loadRecord(prof)[level].w === 0;
+            const decided = mode === 'cpu' && h.fighters[0].wins !== h.fighters[1].wins;
+            setRankUp(null);
+            if (decided) {
+              const before = rankOf(loadRecord(prof)).index;
+              const res = addResult(level, !lost, prof);
+              setRecord(res.record);
+              setStreak(res.streak);
+              const after = rankOf(res.record);
+              setRankUp(after.index > before ? `${after.icon} ${after.name}` : null);
             }
             // 이기면 골드 (필드·보스처럼 프로필에 더하고 저장 → 로그인했으면 클라우드에도)
-            const prof = profileRef.current;
             if (mode === 'cpu' && !lost && h.fighters[0].wins > h.fighters[1].wins && prof) {
-              const gold = grantCpuReward(prof, level, firstWin);
-              saveProfile(prof);
-              setReward(gold);
+              setReward(grantCpuReward(prof, level, firstWin));
             } else setReward(0);
+            // 전적·연승·골드를 한 번에 저장
+            if (decided && prof) saveProfile(prof);
           }
           lastBanner = h.banner;
         }
@@ -228,6 +371,12 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
         rageOn = h.fighters.map((f) => f.rage);
         lastHudKey = key;
         setHud(h);
+      }
+      // 입력 기록은 바뀌었을 때만, 1초에 20번까지 그린다
+      if (log && log.version !== logSeen && now - logAt > 50) {
+        logSeen = log.version;
+        logAt = now;
+        setInputLog(log.log.map((e) => ({ ...e })));
       }
     };
     raf = requestAnimationFrame(loop);
@@ -244,7 +393,7 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
       renderer.dispose();
       matchRef.current = null;
     };
-  }, [mode, level, kb, dummy]);
+  }, [mode, level, kb, dummy, matchSeq]);
 
   const chooseLevel = (lv: CpuLevel) => {
     try {
@@ -290,7 +439,7 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
   }, [level]);
 
   // 일시정지 메뉴·경기 종료: 패드 A = 계속하기(종료 화면에선 다시 시작), B = 메인 메뉴
-  const menuOpen = !!level && (paused || hud?.phase === 'matchEnd');
+  const menuOpen = !!level && !replaying && (paused || hud?.phase === 'matchEnd');
   useEffect(() => {
     if (!menuOpen) return;
     // 메뉴가 뜬 직후엔 무시 (경기 중 연타하던 A·B 가 바로 메뉴를 누르지 않게)
@@ -300,7 +449,7 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
       0: () => {
         if (!ready()) return;
         if (paused) setPaused(false);
-        else matchRef.current?.restart();
+        else restartMatch();
       },
       1: () => ready() && onExit(),
     });
@@ -309,9 +458,11 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       <canvas ref={canvasRef} className="block h-full w-full" />
-      {hud && level && <Hud hud={hud} raised={touch} />}
+      {hud && level && <Hud hud={hud} raised={touch} subtitle={subtitle} />}
 
-      {mode === 'training' && level && hud && !paused && <TrainingTasks hud={hud} compact={touch} portrait={portrait} />}
+      {mode === 'training' && level && !touch && showInputs && inputLog.length > 0 && <InputLogPanel log={inputLog} />}
+
+      {mode === 'training' && level && hud && !paused && <TrainingTasks hud={hud} compact={touch} portrait={portrait} ignore={demoing} />}
 
       {mode === 'training' && level && (
         <div className={`absolute left-1/2 -translate-x-1/2 text-xs ${touch ? 'top-28' : 'top-20'}`}>
@@ -320,6 +471,12 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
             className="rounded bg-black/60 px-3 py-1.5 text-white/85 hover:bg-black/80"
           >
             허수아비: <span className="font-bold text-amber-300">{DUMMY_MODES.find((d) => d.id === dummyMode)?.label}</span> ▾
+          </button>
+          <button
+            onClick={() => (recLeft !== null ? stopRecording() : startRecording())}
+            className={`ml-1 rounded px-3 py-1.5 font-bold ${recLeft !== null ? 'animate-pulse bg-red-600 text-white' : 'bg-black/60 text-red-300 hover:bg-black/80'}`}
+          >
+            {recLeft !== null ? `■ 녹화 중 ${recLeft}초` : '● 녹화'}
           </button>
           {dummyOpen && (
             <div className="mt-1 w-64 rounded-lg border border-white/15 bg-zinc-900/95 p-1 text-white">
@@ -340,12 +497,30 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
 
       {level && <RotateHint touch={touch} />}
 
-      {touch && level && !paused && hud?.phase !== 'matchEnd' && <TouchControls kb={kb} map={P1_KEYS} />}
+      {touch && level && !paused && !replaying && hud?.phase !== 'matchEnd' && <TouchControls kb={kb} map={P1_KEYS} />}
 
       {!level && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-4">
           <div className="w-full max-w-xl rounded-lg border border-white/20 bg-zinc-900/95 p-6 text-white">
             <div className="mb-1 text-center text-xl font-bold">VS CPU 난이도</div>
+            {(() => {
+              const rk = rankOf(record);
+              return (
+                <div className="mb-1 text-center text-sm">
+                  <span className="font-bold text-amber-300">
+                    {rk.icon} {rk.name}
+                  </span>
+                  <span className="text-xs text-white/55">
+                    {' '}
+                    · {rk.points}점{rk.next ? ` (다음 「${rk.next.name}」까지 ${rk.next.need}점)` : ' · 최고 랭크!'}
+                  </span>
+                  <span className="hidden text-xs text-white/40 sm:inline">
+                    {' '}
+                    · 이기면 쉬움 1·보통 2·어려움 3점
+                  </span>
+                </div>
+              );
+            })()}
             {streak.best > 0 && (
               <div className="mb-1 text-center text-xs text-amber-200/80">
                 🔥 지금 {streak.cur}연승 · 최고 {streak.best}연승
@@ -390,16 +565,59 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
         >
           {touch ? '판정' : '판정 표시'} {hitboxes ? 'ON' : 'OFF'}{!touch && ' (`)'}
         </button>
+        {mode === 'training' && !touch && (
+          <button
+            onClick={() =>
+              setShowInputs((v) => {
+                try {
+                  localStorage.setItem('ironfist.inputLog', v ? '0' : '1');
+                } catch {}
+                return !v;
+              })
+            }
+            className="rounded bg-white/10 px-3 py-1.5 text-white/80 hover:bg-white/20"
+          >
+            입력 기록 {showInputs ? 'ON' : 'OFF'}
+          </button>
+        )}
         <SoundToggle compact={touch} />
           <MusicToggle compact={touch} />
-        <button onClick={() => setPaused(true)} className="rounded bg-white/10 px-3 py-1.5 text-white/80 hover:bg-white/20">
-          일시정지{!touch && ' (Esc)'}
-        </button>
+        {!replaying && (
+          <button onClick={() => setPaused(true)} className="rounded bg-white/10 px-3 py-1.5 text-white/80 hover:bg-white/20">
+            일시정지{!touch && ' (Esc)'}
+          </button>
+        )}
       </div>
 
-      {level && (paused || hud?.phase === 'matchEnd') && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div className="flex w-64 flex-col gap-3 rounded-lg border border-white/20 bg-zinc-900/90 p-6 text-white">
+      {replaying && (
+        <>
+          <div className="pointer-events-none absolute left-1/2 top-20 -translate-x-1/2 rounded bg-black/60 px-3 py-1 text-sm font-black tracking-widest text-red-400">
+            <span className="animate-pulse">●</span> REPLAY
+          </div>
+          <div className="absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-black/55 p-1 text-sm font-bold text-white">
+            <button onClick={toggleReplayPause} className="rounded-full px-3 py-1.5 hover:bg-white/15" title={touch ? undefined : 'Space'}>
+              {replaySpeed ? '⏸' : '▶'}
+            </button>
+            {[0.5, 1, 2].map((v, i) => (
+              <button
+                key={v}
+                onClick={() => setReplaySpeed(v)}
+                className={`rounded-full px-3 py-1.5 tabular-nums ${replaySpeed === v ? 'bg-sky-500 text-black' : 'hover:bg-white/15'}`}
+                title={touch ? undefined : String(i + 1)}
+              >
+                {v}x
+              </button>
+            ))}
+            <button onClick={() => skipReplayRef.current()} className="rounded-full px-3 py-1.5 hover:bg-white/15">
+              ⏭ 건너뛰기{!touch && ' (Esc)'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {level && !replaying && (paused || hud?.phase === 'matchEnd') && (
+        <div className="absolute inset-0 flex items-center justify-center overflow-y-auto bg-black/60 py-2">
+          <div className="m-auto flex w-64 flex-col gap-3 rounded-lg border border-white/20 bg-zinc-900/90 p-6 text-white">
             <div className="mb-2 text-center text-xl font-bold">{paused ? '일시정지' : '경기 종료'}</div>
             {!paused && hud && mode !== 'training' && (
               <div className="-mt-2 mb-1 rounded bg-black/40 px-3 py-2 text-xs leading-5">
@@ -413,20 +631,78 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
                     {streak.cur > 0 ? `🔥 ${streak.cur}연승` : '연승이 끊겼어요'} · 최고 {streak.best}연승
                   </div>
                 )}
-                <div className="mb-0.5 text-white/50">최대 콤보</div>
-                {hud.fighters.map((f, i) => (
-                  <div key={i} className="flex justify-between">
-                    <span className={i === 0 ? 'text-red-300' : 'text-blue-300'}>{f.name}</span>
-                    <span className="tabular-nums">
-                      {hud.bestCombo[i].hits >= 2 ? `${hud.bestCombo[i].hits}HIT · ${hud.bestCombo[i].damage}` : '—'}
-                    </span>
-                  </div>
-                ))}
+                {rankUp && mode === 'cpu' && <div className="mb-1 animate-pulse text-center text-sm font-black text-amber-300">🎉 랭크 업! {rankUp}</div>}
+                {hud.perfects[0] > 0 && <div className="mb-1 text-center font-bold text-sky-300">✨ 퍼펙트 {hud.perfects[0]}라운드</div>}
+                {/* 경기 통계: 왼쪽 나 · 오른쪽 상대. 더 잘한 쪽은 밝게 */}
+                <table className="w-full tabular-nums">
+                  <thead>
+                    <tr className="text-[11px]">
+                      <th />
+                      <th className="text-right font-bold text-red-300">{mode === 'versus' ? '1P' : '나'}</th>
+                      <th className="text-right font-bold text-blue-300">{mode === 'versus' ? '2P' : '상대'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(
+                      [
+                        ['준 데미지', (i: 0 | 1) => hud.stats[i].damage, (i: 0 | 1) => String(hud.stats[i].damage)],
+                        ['맞힌 횟수', (i: 0 | 1) => hud.stats[i].hits, (i: 0 | 1) => String(hud.stats[i].hits)],
+                        ['카운터', (i: 0 | 1) => hud.stats[i].counters, (i: 0 | 1) => String(hud.stats[i].counters)],
+                        ['최대 콤보', (i: 0 | 1) => hud.bestCombo[i].hits * 1000 + hud.bestCombo[i].damage, (i: 0 | 1) => (hud.bestCombo[i].hits >= 2 ? `${hud.bestCombo[i].hits}HIT·${hud.bestCombo[i].damage}` : '—')],
+                        ['막은 공격', (i: 0 | 1) => hud.stats[i].guards, (i: 0 | 1) => String(hud.stats[i].guards)],
+                        ['벽꽝', (i: 0 | 1) => hud.wallSplats[1 - i], (i: 0 | 1) => String(hud.wallSplats[1 - i])],
+                        ['잡기 풀기', (i: 0 | 1) => hud.stats[i].throwBreaks, (i: 0 | 1) => String(hud.stats[i].throwBreaks)],
+                      ] as [string, (i: 0 | 1) => number, (i: 0 | 1) => string][]
+                    ).map(([label, val, show]) => {
+                      const a = val(0);
+                      const b = val(1);
+                      // 둘 다 0 인 줄은 숨긴다 (폰 화면에서 창이 너무 길어지지 않게)
+                      if (!a && !b && label !== '준 데미지') return null;
+                      return (
+                        <tr key={label}>
+                          <td className="whitespace-nowrap text-white/50">{label}</td>
+                          <td className={`text-right ${a > b ? 'font-bold text-white' : 'text-white/60'}`}>{show(0)}</td>
+                          <td className={`text-right ${b > a ? 'font-bold text-white' : 'text-white/60'}`}>{show(1)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
             {paused && (
               <button onClick={() => setPaused(false)} className="rounded bg-amber-500 py-2 font-bold text-black hover:bg-amber-400">
                 계속하기
+              </button>
+            )}
+            {!paused && mode === 'cpu' && (
+              <button
+                onClick={() => {
+                  setPaused(false);
+                  setHud(null);
+                  setReward(0);
+                  setMatchSeq((n) => n + 1);
+                }}
+                className="rounded bg-amber-500 py-2 font-bold text-black hover:bg-amber-400"
+              >
+                다음 경기 ▶ <span className="text-xs font-normal">(새 상대·무대)</span>
+              </button>
+            )}
+            {/* 연승 중이면 한 단계 위 난이도를 권한다 */}
+            {!paused && mode === 'cpu' && streak.cur >= 3 && level !== 'hard' && (
+              <button
+                onClick={() => {
+                  setReward(0);
+                  chooseLevel(level === 'easy' ? 'normal' : 'hard');
+                }}
+                className="rounded border border-amber-400/70 py-2 text-sm font-bold text-amber-200 hover:bg-amber-500/20"
+              >
+                🔥 {streak.cur}연승! {CPU_LEVELS[level === 'easy' ? 'normal' : 'hard'].label} 난이도 도전
+              </button>
+            )}
+            {!paused && mode !== 'training' && (
+              <button onClick={() => replayRef.current()} className="rounded bg-sky-600 py-2 font-bold hover:bg-sky-500">
+                ▶ 리플레이 보기
               </button>
             )}
             <button onClick={() => setShowMoves(true)} className="rounded bg-white/10 py-2 hover:bg-white/20">
@@ -435,7 +711,7 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
             <VibrationToggle />
             <button
               onClick={() => {
-                matchRef.current?.restart();
+                restartMatch();
                 setPaused(false);
               }}
               className="rounded bg-white/10 py-2 hover:bg-white/20"
@@ -460,7 +736,7 @@ export default function GameView({ mode, onExit, profile }: { mode: MatchMode; o
           </div>
         </div>
       )}
-      {showMoves && level && (paused || hud?.phase === 'matchEnd') && <MoveListPanel onClose={() => setShowMoves(false)} />}
+      {showMoves && level && (paused || hud?.phase === 'matchEnd') && <MoveListPanel onClose={() => setShowMoves(false)} onDemo={mode === 'training' ? playCombo : undefined} />}
     </div>
   );
 }

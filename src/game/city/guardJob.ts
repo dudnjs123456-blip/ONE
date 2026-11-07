@@ -8,14 +8,12 @@ import { CORRIDOR, LOBBY, type CityWorld, type Speech } from './cityWorld';
 import type { WorkEntry } from './calendar';
 
 /**
- * 아파트 경비 근무 (실제 20분 = 게임 8시간).
+ * 아파트 경비 근무 (실제 20분).
  * 행복빌라 1층 로비의 경비 데스크에 앉아, 현관 ↔ 엘리베이터를 오가는 사람을 확인(E)한다.
  * 대부분은 인사하고 지나가고, 가끔 먹을 걸 챙겨주고, 낮은 확률로 강도가 들어와 싸우게 된다.
  */
 const JOB = JOB_BY_ID.aptGuard;
 export const GUARD_SHIFT_FRAMES = JOB.shiftMinutes * 60 * 60;
-/** 근무 중엔 시계가 느리게 간다: 실제 20분 = 게임 8시간 */
-export const GUARD_MINUTES_PER_FRAME = (JOB.gameHours * 60) / GUARD_SHIFT_FRAMES;
 /** 다음 사람이 오기까지 (프레임) */
 const VISIT_GAP: [number, number] = [14 * 60, 30 * 60];
 const ROBBER_CHANCE = 0.06;
@@ -122,7 +120,6 @@ export interface NetJobScene {
 
 export class GuardShift {
   readonly job = JOB;
-  readonly minutesPerFrame = GUARD_MINUTES_PER_FRAME;
   frames = 0;
   checked = 0;
   missed = 0;
@@ -418,6 +415,8 @@ export class GuardShift {
     }
 
     if (!frozen) for (const v of [...this.people]) this.stepPerson(v);
+    // 경직 중엔 그 자리에 딱 멈춰 보이게 (옛 위치와 지금 위치 사이를 오가며 떨리지 않게)
+    else for (const v of this.people) v.f.snapshot();
     // 자동 체크: 데스크 앞에 멈춘 사람을 잠깐 뒤 알아서 확인
     if (this.autoActive) {
       for (const v of this.people) if (v.kind === 'visitor' && v.phase === 'wait' && v.waitFrames >= AUTO_CHECK_DELAY) this.checkVisitor(v);

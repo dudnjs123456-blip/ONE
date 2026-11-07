@@ -15,7 +15,7 @@ export interface SyncState {
 const PUSH_DELAY_MS = 2000;
 
 /** 서버 save(jsonb) 에 넣는 생활 데이터 (컬럼으로 따로 두는 레벨·골드·보스 기록 제외) */
-const SAVE_KEYS = ['inventory', 'life', 'jobs', 'time', 'workLog', 'fridge', 'gear', 'casino', 'npcs', 'home', 'pets', 'petShop', 'wardrobe'] as const;
+const SAVE_KEYS = ['inventory', 'life', 'jobs', 'time', 'clockV', 'workLog', 'fridge', 'gear', 'casino', 'npcs', 'home', 'pets', 'petShop', 'wardrobe', 'cpu'] as const;
 
 /** 어느 쪽이 더 최근 기록인가: 저장 시각이 있으면 시각, 없으면 (level, exp) 진행도 */
 function newer(a: PlayerProfile, b: PlayerProfile) {

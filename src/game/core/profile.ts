@@ -13,11 +13,13 @@ export interface PlayerProfile {
   /** 아이템 id → 개수 (data/items.ts) */
   inventory: Record<string, number>;
   /** 생활 수치 (0~100, 높을수록 피곤하고 배고프다) */
-  life: { fatigue: number; hunger: number; /** 도시에서 남은 체력 (없으면 가득) */ hp?: number };
+  life: { fatigue: number; hunger: number; /** 도시에서 남은 체력 (없으면 가득) */ hp?: number; /** 자는 중이면 잠든 실제 시각 (ms). 창을 닫아도 계속 잔다 */ sleepAt?: number };
   /** 일자리 id → 근무 기록 */
   jobs?: Record<string, { shifts: number; earned: number }>;
   /** 도시의 날짜(며칠째)와 시각(분) — 다시 켜도 이어진다 */
   time?: { day: number; minutes: number };
+  /** 2 = 실제 시각 시계로 옮긴 뒤 (예전 근무 기록 날짜를 한 번 맞췄다) */
+  clockV?: number;
   /** 장비 (가방 + 낀 장비 8칸) */
   gear?: import('../data/equipment').GearState;
   /** 코디 옷 (겉모습만, 옷가게) */
@@ -26,6 +28,8 @@ export interface PlayerProfile {
   body?: import('../render/looks').BodyType;
   /** 마지막으로 저장한 시각 (ms). 기기 두 대의 기록이 다르면 최신 쪽을 쓴다 */
   savedAt?: number;
+  /** VS CPU 난이도별 전적과 연승 (계정에 저장 → 다른 기기에서도 이어진다) */
+  cpu?: { record: Record<string, { w: number; l: number }>; streak: { cur: number; best: number } };
   /** 카지노 기록 */
   casino?: { played: number; won: number; lost: number; best: number };
   /** 집 냉장고에 넣어둔 음식 */

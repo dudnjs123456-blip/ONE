@@ -189,7 +189,7 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
   flyingKnee: {
     name: '날아 무릎 (띄우기)', notation: '2+4', input: { dir: 'n', button: 2, with: 4 },
     startup: 16, active: 4, recovery: 26, damage: 18, level: 'mid', lunge: 0.08,
-    range: 1.15, tracking: 0.12, onBlock: -15, onHit: 0, pushback: 0.15, launch: 0.16, anim: 'kneeR',
+    range: 1.15, tracking: 0.12, onBlock: -15, onHit: 0, pushback: 0.15, launch: 0.19, anim: 'kneeR',
   },
 
   // ───── 보스 전용 (input: null → 플레이어는 못 씀, AI 가 직접 발동) ─────
@@ -224,6 +224,12 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
     name: '꼬리 쓸기', notation: 'BOSS', input: null,
     startup: 18, active: 4, recovery: 28, damage: 25, level: 'low', crouching: true,
     range: 1.8, tracking: 0.9, onBlock: -18, onHit: 0, pushback: 0.3, launch: 0.07, anim: 'tailSweep',
+  },
+  bossGrab: {
+    // 가드만 굳히는 플레이어를 뚫는 잡기. 상단이라 앉으면 피하고, 잡히는 순간 1·2 로 풀 수 있다
+    name: '붙잡아 내던지기 (가드 불가)', notation: 'BOSS', input: null,
+    startup: 18, active: 3, recovery: 34, damage: 30, level: 'high', unblockable: true,
+    range: 1.0, tracking: 0.2, onBlock: -20, onHit: 0, pushback: 0.6, launch: 0.07, anim: 'clawR',
   },
   bossCharge: {
     name: '돌진', notation: 'BOSS', input: null,

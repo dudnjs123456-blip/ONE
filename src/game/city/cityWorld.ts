@@ -16,7 +16,7 @@ import { COSMETIC_BY_ID, ensureWardrobe, wornList, type CosmeticDef, type Cosmet
 import { JOB_BY_ID, ROBBER_TIERS } from '../data/jobs';
 import { GuardShift, LOBBY_PATH, type LobbyPerson, type NetJobScene, type ShiftEnd } from './guardJob';
 import { unitPlace, villaFloor } from './villa';
-import { SeniorAI } from './senior';
+import { SeniorAI, type NetSenior } from './senior';
 import { roadSolids, stopLines, vehicleLight, type Light, type Rect as RoadRect } from './traffic';
 import { PetCare } from './pets';
 import { PenSim, petGoodsStock, petStock, storeLayout, type ClothesCorner, type StockPet, type StoreLayout } from './store';
@@ -24,6 +24,7 @@ import { PET_BY_ID, PET_GOOD_BY_ID, PET_SHOP_NAME, coatOf } from '../data/pets';
 import { FishingSession, type FishPhase, type FishResult, type FishScene } from './fishing';
 import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
 import { weatherAt, type WeatherState } from './weather';
+import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt } from './worldClock';
 
 export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store';
 
@@ -207,9 +208,20 @@ const SOFA_FRAMES = 45;
 
 /** 잠자기 단계별 길이 (프레임) */
 const SLEEP_LIE = 90;
-const SLEEP_FRAMES = 420; // 밤이 흘러가는 연출 7초
 const SLEEP_WAKE = 75;
-const WAKE_MINUTES = 7 * 60;
+/** 이만큼 자면 저절로 깬다 (실제 시간) */
+export const SLEEP_MAX_MS = 12 * 3_600_000;
+/** 자는 동안: 2시간이면 피로 100 이 풀리고, 30분이면 체력이 다 차고, 배고픔은 12시간에 100 오른다 */
+const SLEEP_FATIGUE_PER_MS = 100 / (2 * 3_600_000);
+const SLEEP_HP_PER_MS = 1 / (30 * 60_000);
+const SLEEP_HUNGER_PER_MS = 100 / (12 * 3_600_000);
+/** 잔 시간 글자: '7시간 20분' */
+export function sleptLabel(ms: number) {
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  return m >= 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m}분`;
+}
+/** 누운 뒤 이만큼(프레임)은 키를 눌러도 안 깬다 (눕자마자 깨지 않게) */
+const SLEEP_SETTLE = 60;
 /** 이만큼 피곤해야 잘 수 있다 */
 export const SLEEPY = 50;
 /** 배고픔·피로도가 100인 채로 이만큼 지나면 알아서 먹고 잔다 (실제 30초) */
@@ -274,6 +286,14 @@ export interface Npc {
   fight: number;
   /** 다음 공격까지 남은 프레임 */
   atkCd: number;
+  /** 도망치거나 덤비는 상대 (사람 id) */
+  foe: string;
+  /** 걷는 길: -1 = 산책로, -2 = 산책로 거꾸로, 그 밖엔 블록 번호 × 2 + (거꾸로면 1) */
+  route: number;
+  /** 동네를 계산하는 친구가 보낸 위치 (따라 그리는 쪽만) */
+  target?: { x: number; z: number; y: number; fx: number; fz: number };
+  /** 내가 방금 때렸다: 이 프레임까지는 받은 장면으로 모습을 덮어쓰지 않는다 (맞는 동작이 끊기지 않게) */
+  lockUntil?: number;
 }
 
 /** 머리 위에 잠깐 뜨는 글자 (말풍선, 주운 돈 등) */
@@ -319,6 +339,8 @@ export interface RemotePlayer {
   fish: NetFish | null;
   /** 친구 곁에 보이는 펫 */
   pets: NetPet[];
+  /** 마지막으로 소식(모습·동네 장면)이 온 프레임. 오래 끊기면 동네 계산을 맡지 않는다 */
+  seenAt: number;
 }
 
 /** 네트워크로 보내는 낚시 장면 */
@@ -400,7 +422,85 @@ export interface NetHit {
   z: number;
   fx: number;
   fz: number;
+  /** 행인을 때렸다 (그 행인 번호). 동네를 계산하는 친구에게 보낸다 */
+  t?: number;
+  /** 행인이 때렸다 (그 행인 번호). 동네를 계산하는 친구가 맞은 사람에게 보낸다 */
+  n?: number;
 }
+
+/** 동네 장면 속 행인 한 명 (nm 부터는 처음과 가끔만 보낸다) */
+export interface NetNpc {
+  i: number;
+  x: number;
+  z: number;
+  y: number;
+  fx: number;
+  fz: number;
+  s: FighterState;
+  f: number;
+  m: string | null;
+  hp: number;
+  ko: number;
+  fl: number;
+  pa: number;
+  fi: number;
+  fo: string;
+  /** 체력바를 보여 줄 남은 프레임 */
+  hs: number;
+  nx: number;
+  /** 신고까지 남은 프레임 (-1 = 안 함) */
+  ra: number;
+  ac: number;
+  nm?: string;
+  co?: number;
+  rt?: number;
+  sp?: number;
+  mh?: number;
+  w?: number;
+  br?: 0 | 1;
+}
+
+export interface NetPolice {
+  ph: PolicePhase;
+  /** 출동까지 남은 프레임 */
+  da: number;
+  sc: [number, number];
+  /** 경찰차 x, z, dx, dz, stopX, stopZ */
+  car: number[] | null;
+  o: { x: number; z: number; fx: number; fz: number; s: FighterState; f: number }[];
+  lf: number;
+  cf: number;
+  wa: string;
+}
+
+/** 한 사람에게만 가는 소식: 안내 글, 주운 돈·물건, 경찰에게 잡힘 */
+export interface TownNote {
+  to: string;
+  tx?: string;
+  s?: number;
+  nm?: string;
+  g?: number;
+  it?: string;
+  caught?: 1;
+}
+
+/** 동네 장면: 동네를 계산하는 사람(호스트)이 같은 곳의 친구들에게 보낸다 → 모두가 같은 행인·차·경찰·반장님을 본다 */
+export interface NetTown {
+  n: NetNpc[];
+  /** 차 위치·속도 (x, z, v 를 차 순서대로) */
+  c?: number[];
+  po: NetPolice;
+  se: NetSenior;
+  sp: (Speech & { r: string })[];
+  ev: { r: string; e: CombatEvent; by: string }[];
+  no: TownNote[];
+}
+
+/** 친구가 계산하는 행인을 때린 뒤 맞는 모습을 그대로 두는 시간 (호스트 처리가 돌아올 때까지) */
+const HIT_LOCK_FRAMES = 18;
+
+/** 이만큼(프레임) 소식이 없는 친구는 동네 계산을 맡지 않는다 */
+const TOWN_FRESH = 120;
 
 /** 친구에게 쓰러진 뒤 이 시간 안이면 '친구에게 당했다'로 친다 (프레임) */
 const PVP_MEMORY = 300;
@@ -418,6 +518,8 @@ export interface Police {
   /** 범인과 멀어진 채 지난 프레임 (따돌림 판정) */
   lostFrames: number;
   chaseFrames: number;
+  /** 쫓는 범인 (사람 id) */
+  wanted: string;
 }
 
 const OUCH = ['아야!', '뭐야?!', '왜 때려요!', '살려줘요!', '경찰 부를 거예요!', '미쳤어?!', '아악!'];
@@ -459,7 +561,7 @@ const DOOR_AFTER = 50;
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const WALK = 0.045; // 2.7 m/s
 const RUN = 0.1; // 6 m/s
-const MINUTES_PER_FRAME = 1 / 60; // 실제 1초 = 게임 1분
+const MINUTES_PER_FRAME = 1 / 3600; // 게임 시각 = 실제 시각 (1초 = 1초)
 
 /**
  * 서울 라이프: 도시를 걷고, 집에 들어가고, 주변에서 일이 벌어지는 일상 모드.
@@ -494,7 +596,15 @@ export class CityWorld {
   private storeDoor = '';
   /** 내 집 창문이 열려 있나 (집 안 창가에서 E) */
   homeWindowOpen = false;
-  police: Police = { phase: 'none', dispatchAt: 0, scene: { x: 0, z: 0 }, car: null, officers: [], lostFrames: 0, chaseFrames: 0 };
+  police: Police = { phase: 'none', dispatchAt: 0, scene: { x: 0, z: 0 }, car: null, officers: [], lostFrames: 0, chaseFrames: 0, wanted: '' };
+  private townWasHost = true;
+  /** 받은 동네 장면을 그리는 중이었다 (내가 계산을 맡게 되면 거기서 이어서) */
+  private townAdopt = false;
+  /** 동네 장면과 함께 보낼 말풍선·타격·개인 소식 */
+  private townOut = { sp: [] as (Speech & { r: string })[], ev: [] as { r: string; e: CombatEvent; by: string }[], no: [] as TownNote[] };
+  /** 이름·옷 색·걷는 길을 이미 보낸 행인 */
+  private sentNpcIds = new Set<number>();
+  private officerTargets: ({ x: number; z: number; y: number; fx: number; fz: number } | undefined)[] = [];
   /** 경찰에게 잡힌 프레임 (null = 안 잡힘) */
   caughtAt: number | null = null;
   /** 행인에게 맞아 쓰러진 프레임 (null = 멀쩡함) */
@@ -511,6 +621,8 @@ export class CityWorld {
   tvRequest = false;
   /** 카지노 입구에서 E → 화면이 카지노 창을 연다 */
   casinoRequest = false;
+  /** 코인노래방 입구에서 E → 노래방 방 열기 */
+  karaokeRequest = false;
   /** 펫샵 창을 열어 달라 (UI 가 읽고 끈다) */
   petShopRequest = false;
   /** 펫샵 놀이터에서 고른 아이 (UI 가 분양 창을 연다) */
@@ -608,7 +720,8 @@ export class CityWorld {
   /** 걸어서 못 들어가는 차도 (횡단보도만 뚫려 있다) */
   private roadRects: RoadRect[] = [];
   /** 잠자는 중 (침대로 걸어감 → 눕기 → 밤이 흐름 → 일어나기). 그동안 조작 불가 */
-  sleep: { phase: SleepPhase; at: number; wp: number; total: number; done: number; f0: number; h0: number; hp0: number } | null = null;
+  /** 잠: since = 잠든 실제 시각(ms), last = 회복을 마지막으로 계산한 시각(ms), auto = 12시간이 넘어 저절로 깸 */
+  sleep: { phase: SleepPhase; at: number; wp: number; since: number; last: number; auto?: boolean } | null = null;
   /** 지도 클릭 자동 이동 */
   autopilot: { path: { x: number; z: number }[]; i: number; label: string } | null = null;
 
@@ -648,6 +761,53 @@ export class CityWorld {
     this.keeper = new Fighter(898, 'npc', { canBlock: false });
   }
 
+  /**
+   * 동네 시계 (서버 시각 ms 를 돌려준다). 있으면 날짜·시각은 모두 이걸로 정해진다:
+   * 모든 사람이 같은 시각·같은 날씨를 보고, 잠자기·근무로 혼자 시간을 빨리 감지 않는다.
+   * 없으면 (헤드리스 시험) 프레임마다 혼자 흐르는 시계.
+   */
+  private sharedClock: (() => number) | null = null;
+
+  attachSharedClock(now: () => number) {
+    this.sharedClock = now;
+    this.syncClock();
+    this.moveOldWorkLog();
+  }
+
+  /**
+   * 예전(각자 흐르던 시계) 근무 기록 날짜는 실제 날짜와 맞지 않는다.
+   * 미래 날짜에 있는 기록은 순서는 그대로 두고, 가장 최근 기록이 오늘에 오도록 한 번만 당긴다.
+   */
+  private moveOldWorkLog() {
+    const pr = this.profile;
+    if (pr.clockV === 2) return;
+    pr.clockV = 2;
+    const log = pr.workLog;
+    const days = log ? Object.keys(log).map(Number).filter(Number.isFinite) : [];
+    const last = days.length ? Math.max(...days) : 0;
+    if (log && last > this.day) {
+      const shift = this.day - last;
+      const moved: NonNullable<typeof log> = {};
+      for (const d of days) {
+        const k = String(Math.max(1, d + shift));
+        moved[k] = [...(moved[k] ?? []), ...log[String(d)]];
+      }
+      pr.workLog = moved;
+    }
+    saveProfile(pr);
+  }
+
+  get clockShared() {
+    return this.sharedClock !== null;
+  }
+
+  private syncClock() {
+    if (!this.sharedClock) return;
+    const t = gameTimeAt(this.sharedClock());
+    this.day = t.day;
+    this.minutes = t.minutes;
+  }
+
   get clock(): string {
     const h = Math.floor(this.minutes / 60) % 24;
     const m = Math.floor(this.minutes % 60);
@@ -671,6 +831,8 @@ export class CityWorld {
   /** HUD 용 경찰 상황 한 줄 */
   get policeStatus(): string | null {
     const p = this.police;
+    // 경찰이 쫓는 사람에게만 (다른 사람은 경찰차·경찰만 본다)
+    if (p.wanted !== this.myId) return null;
     switch (p.phase) {
       case 'dispatched':
         return `🚨 신고 접수 — 경찰 출동까지 ${Math.ceil((p.dispatchAt - this.frame) / 60)}초 (현장을 벗어나면 피할 수 있다)`;
@@ -686,16 +848,20 @@ export class CityWorld {
   step() {
     this.frame++;
     this.stepRemotes();
-    this.minutes += this.sleep?.phase === 'sleep' ? this.sleepMinutes() : this.job ? this.job.minutesPerFrame : MINUTES_PER_FRAME;
-    if (this.minutes >= 1440) {
-      this.minutes -= 1440;
-      this.day++;
+    // 시계는 누구도 빨리 감지 않는다 (잠자기·근무 중에도 실제 시각대로)
+    if (this.sharedClock) this.syncClock();
+    else {
+      this.minutes += MINUTES_PER_FRAME;
+      if (this.minutes >= 1440) {
+        this.minutes -= 1440;
+        this.day++;
+      }
     }
 
     // 잡혔으면 잠깐 멈췄다가 집 앞에서 다시 시작
     if (this.caughtAt !== null) {
       if (this.frame - this.caughtAt >= CAUGHT_FRAMES) this.restart();
-      this.stepCars();
+      this.stepTown(false, false);
       return;
     }
 
@@ -706,10 +872,7 @@ export class CityWorld {
       p.freeMove = null;
       p.feed(NEUTRAL_INPUT);
       p.tick({ opponent: p, awayX: 0, awayZ: -1 });
-      if (this.location === 'city') {
-        this.stepCars();
-        this.stepNpcs();
-      }
+      this.stepTown(false, false);
       if (this.frame - this.downedAt >= KO_FRAMES) this.wakeAfterKO();
       return;
     }
@@ -730,7 +893,7 @@ export class CityWorld {
       this.stepAutoDesk(inp);
     }
     if (this.seat) this.stepSeat(inp);
-    // 자는 동안의 피로·배고픔은 sleepMinutes 가 밤 시간에 맞춰 바꾼다
+    // 자는 동안의 피로·배고픔·체력은 sleepRecover 가 실제 잔 시간만큼 바꾼다
     const { slow, canRun } = sleeping ? { slow: 1, canRun: true } : this.tickLife(inp.run && !!inp.move);
     // 피곤하거나 배고프면 느려지고, 한계(100)면 달릴 수 없다
     p.runSpeed = (inp.run && canRun ? RUN : WALK) * slow;
@@ -780,23 +943,12 @@ export class CityWorld {
     } else if (inp.interact && this.nearby) this.interact(this.nearby);
     if (this.toast && this.frame > this.toast.until) this.toast = null;
 
-    if (this.location === 'city') {
-      this.stepCars();
-      if (!frozen) {
-        this.stepNpcs();
-        this.hitNpcs();
-      }
-    } else if (looking) {
-      // 집에서 창밖을 보는 동안에도 바깥 도시는 계속 움직인다 (때리기 판정은 밖에서만)
-      this.stepCars();
-      this.stepNpcs();
-    }
-    if (!frozen) this.stepPolice();
+    // 행인·차·경찰·반장님: 모두가 같은 장면을 보도록 한 사람이 계산한다
+    this.stepTown(frozen, true);
     if (this.job) {
       const end = this.job.step(frozen);
       if (end) this.endJob(end);
     }
-    this.stepSenior();
     if (p.hp <= 0 && this.downedAt === null) this.knockedDown();
     this.profile.life.hp = p.hp;
     const t = (this.profile.time ??= { day: this.day, minutes: this.minutes });
@@ -886,11 +1038,14 @@ export class CityWorld {
     if (this.job) this.endJob('down');
     this.autopilot = null;
     this.dialog = null;
-    for (const n of this.npcs) {
-      if (n.fight > 0) {
-        n.fight = 0;
-        n.flee = 0;
-        this.speech.push({ x: n.fighter.x, z: n.fighter.z, text: GLOAT[Math.floor(this.rng() * GLOAT.length)], color: '#ffb3b3' });
+    // 나에게 덤비던 사람들은 물러난다 (동네를 계산하는 쪽에서. 아니면 내가 쓰러진 걸 보고 알아서 물러난다)
+    if (this.isTownHost) {
+      for (const n of this.npcs) {
+        if (n.fight > 0 && n.foe === this.myId) {
+          n.fight = 0;
+          n.flee = 0;
+          this.townSay({ x: n.fighter.x, z: n.fighter.z, text: GLOAT[Math.floor(this.rng() * GLOAT.length)], color: '#ffb3b3' });
+        }
       }
     }
     const pvp = this.lastPvp && this.frame - this.lastPvp.frame < PVP_MEMORY ? this.lastPvp.name : null;
@@ -900,7 +1055,7 @@ export class CityWorld {
   /** 집 침대 옆에서 깨어난다: 체력 일부만, 지갑에서 돈이 좀 빠져 있다 */
   private wakeAfterKO() {
     this.downedAt = null;
-    this.clearPolice();
+    if (this.isTownHost && this.police.wanted === this.myId) this.clearPolice();
     // 친구에게 쓰러졌으면 돈은 잃지 않는다
     const pvp = this.lastPvp !== null && this.frame - this.lastPvp.frame < PVP_MEMORY + KO_FRAMES;
     this.lastPvp = null;
@@ -908,7 +1063,8 @@ export class CityWorld {
     this.profile.gold -= lost;
     this.moveTo('home', HOME.bed.path[1].x, HOME.bed.path[1].z, 0, 1);
     this.player.hp = Math.round(this.player.maxHp * 0.35);
-    this.npcs = this.npcs.map(() => this.makeNpc());
+    // 혼자면 행인도 새로 (친구와 같이 보는 거리는 그대로)
+    if (this.isTownHost && !this.othersInCity()) this.npcs = this.npcs.map(() => this.makeNpc());
     saveProfile(this.profile);
     this.say(`🛏️ 집에서 눈을 떴다… (체력 35%${lost ? `, 지갑에서 ${lost}G 가 사라졌다` : ''})`, 4);
   }
@@ -934,11 +1090,32 @@ export class CityWorld {
    * 허공을 향해 눌러도 근처 사람에게 향한다. 앞쪽에 있는 사람을 조금 더 우선한다.
    */
   private aimSerial = 0;
+  private aimTarget: Fighter | null = null;
+
+  /**
+   * 공격을 시작하면 가까운 상대 쪽으로 몸을 돌리고, 기술이 나가기 직전(발동 프레임)까지 그 상대를 계속 바라본다.
+   * 상대가 조금 움직여도 헛치지 않고 확실하게 맞는다
+   */
   private autoAim() {
     const p = this.player;
-    if (p.moveSerial === this.aimSerial) return;
-    this.aimSerial = p.moveSerial;
-    if (p.state !== 'attack') return;
+    if (p.moveSerial !== this.aimSerial) {
+      this.aimSerial = p.moveSerial;
+      this.aimTarget = p.state === 'attack' ? this.pickAim() : null;
+    }
+    const t = this.aimTarget;
+    const m = p.move;
+    if (!t || p.state !== 'attack' || !m || p.frame > m.startup || t.hp <= 0 || t.state === 'ko') return;
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-4 || len > AIM_RANGE) return;
+    p.fx = dx / len;
+    p.fz = dz / len;
+  }
+
+  /** 공격할 상대 고르기: 정면에 가까운 쪽을 더 쳐 준다 */
+  private pickAim(): Fighter | null {
+    const p = this.player;
     const cands: Fighter[] = [];
     if (this.location === 'city') {
       for (const n of this.npcs) if (n.koFrames < 0) cands.push(n.fighter);
@@ -965,73 +1142,102 @@ export class CityWorld {
         best = f;
       }
     }
-    if (!best) return;
-    const dx = best.x - p.x;
-    const dz = best.z - p.z;
-    const len = Math.hypot(dx, dz);
-    p.fx = dx / len;
-    p.fz = dz / len;
+    return best;
   }
 
-  /** 플레이어 공격이 행인·경찰에게 맞는지 */
+  /**
+   * 내 공격이 행인·경찰에게 맞는지.
+   * 동네를 계산하는 사람(호스트)이면 바로 처리하고, 아니면 맞는 모습만 먼저 보여 주고 호스트에게 알린다 (호스트가 같은 계산으로 처리)
+   */
   private hitNpcs() {
     const p = this.player;
+    const host = this.isTownHost;
+    const me = this.myId;
     let stop = 0;
     const targets: { f: Fighter; npc: Npc | null }[] = [
       ...this.npcs.map((n) => ({ f: n.fighter, npc: n })),
       ...this.police.officers.map((f) => ({ f, npc: null })),
     ];
     for (const { f, npc } of targets) {
-      // 서로 겹치지 않게 (때리려고 붙어도 밀려난다)
+      // 서로 겹치지 않게 (남이 계산하는 사람이면 내가 밀려난다)
       const dx = f.x - p.x;
       const dz = f.z - p.z;
       const d = Math.hypot(dx, dz);
       const min = FIGHTER_RADIUS * 1.6;
       if (d < min && d > 1e-6 && f.state !== 'ko') {
-        f.x += (dx / d) * (min - d);
-        f.z += (dz / d) * (min - d);
+        // 서로 반씩 밀려난다 (남이 계산하는 사람이면 내가 다 비켜 준다)
+        const k = host ? (min - d) / 2 : min - d;
+        if (host) {
+          f.x += (dx / d) * k;
+          f.z += (dz / d) * k;
+        }
+        p.x -= (dx / d) * k;
+        p.z -= (dz / d) * k;
       }
       const h = detectHit(p, f);
       if (!h) continue;
+      const remaining = totalFrames(h.mv) - p.frame + 1;
       const out = applyHit(h);
       this.events.push(out.event);
+      if (host) this.shareEvent(out.event, me);
       stop = Math.max(stop, Math.min(out.hitstop, 5));
       if (!npc) {
-        this.speech.push({ x: f.x, z: f.z, text: '공무집행방해야!', color: '#8fc7ff' });
+        this.townSay({ x: f.x, z: f.z, text: '공무집행방해야!', color: '#8fc7ff' });
         continue;
       }
-      npc.hpShowUntil = Math.max(npc.hpShowUntil, this.frame + 240);
-      npc.pause = 0;
       this.lastCombatFrame = this.frame;
-      if (f.hp <= 0 && npc.koFrames < 0) this.knockOut(npc);
-      else if (npc.koFrames < 0 && npc.brave) {
-        // 반격: 도망 대신 덤빈다 (처음 맞았을 때만 한마디)
-        if (npc.fight <= 0) this.speech.push({ x: f.x, z: f.z, text: ANGRY[Math.floor(this.rng() * ANGRY.length)], color: '#ff9d7a' });
-        npc.fight = NPC_FIGHT_FRAMES;
-        npc.flee = 0;
-      } else if (npc.koFrames < 0) {
-        npc.flee = NPC_FLEE_FRAMES;
-        this.speech.push({ x: f.x, z: f.z, text: OUCH[Math.floor(this.rng() * OUCH.length)] });
-        // 맞은 사람도 도망가면서 신고할 수 있다
-        if (npc.reportAt < 0 && this.rng() < 0.5) npc.reportAt = this.frame + 150 + Math.floor(this.rng() * 150);
+      npc.hpShowUntil = Math.max(npc.hpShowUntil, this.frame + 240);
+      if (host) this.npcStruck(npc, me);
+      else {
+        npc.lockUntil = this.frame + HIT_LOCK_FRAMES;
+        const q = (v: number) => Math.round(v * 100) / 100;
+        this.outbox.push({ to: this.townHostId, t: f.index, m: h.mv.id, counter: h.counter, remaining, power: p.power, x: q(p.x), z: q(p.z), fx: q(p.fx), fz: q(p.fz) });
       }
-      this.witness(f.x, f.z, npc);
     }
     if (stop) this.hitstop = stop;
   }
 
-  /** 체력을 다 깎았다: 쓰러지고, 지갑의 돈(가끔 소지품)을 줍는다 */
-  private knockOut(n: Npc) {
+  /** (호스트) 행인이 맞았다: 쓰러지거나, 덤비거나, 도망치며 신고한다. by = 때린 사람 */
+  private npcStruck(npc: Npc, by: string) {
+    const f = npc.fighter;
+    npc.hpShowUntil = Math.max(npc.hpShowUntil, this.frame + 240);
+    npc.pause = 0;
+    if (f.hp <= 0 && npc.koFrames < 0) this.knockOut(npc, by);
+    else if (npc.koFrames < 0 && npc.brave) {
+      // 반격: 도망 대신 덤빈다 (처음 맞았을 때만 한마디)
+      if (npc.fight <= 0) this.townSay({ x: f.x, z: f.z, text: ANGRY[Math.floor(this.rng() * ANGRY.length)], color: '#ff9d7a' });
+      npc.fight = NPC_FIGHT_FRAMES;
+      npc.flee = 0;
+      npc.foe = by;
+    } else if (npc.koFrames < 0) {
+      npc.flee = NPC_FLEE_FRAMES;
+      npc.foe = by;
+      this.townSay({ x: f.x, z: f.z, text: OUCH[Math.floor(this.rng() * OUCH.length)] });
+      // 맞은 사람도 도망가면서 신고할 수 있다
+      if (npc.reportAt < 0 && this.rng() < 0.5) npc.reportAt = this.frame + 150 + Math.floor(this.rng() * 150);
+    }
+    this.witness(f.x, f.z, npc, by);
+  }
+
+  /** 체력을 다 깎았다: 쓰러지고, 때린 사람이 지갑의 돈(가끔 소지품)을 줍는다 */
+  private knockOut(n: Npc, by: string) {
     n.koFrames = 0;
     n.flee = 0;
     n.reportAt = -1;
     const f = n.fighter;
+    this.townSay({ x: f.x, z: f.z, text: `+${n.wallet} G`, color: '#ffd54a' });
+    const item = this.rng() < 0.35 ? ITEM_IDS[Math.floor(this.rng() * ITEM_IDS.length)] : undefined;
+    if (by === this.myId) this.gainLoot(n.name, n.wallet, item);
+    else this.note({ to: by, nm: n.name, g: n.wallet, it: item });
+  }
+
+  /** 쓰러뜨린 행인의 지갑을 줍는다 */
+  private gainLoot(name: string, gold: number, itemId?: string) {
     const pr = this.profile;
-    pr.gold += n.wallet;
-    let msg = `${n.name}의 지갑에서 ${n.wallet}G 를 주웠다`;
-    this.speech.push({ x: f.x, z: f.z, text: `+${n.wallet} G`, color: '#ffd54a' });
-    if (this.rng() < 0.35) {
-      const item = ITEMS[ITEM_IDS[Math.floor(this.rng() * ITEM_IDS.length)]];
+    pr.gold += gold;
+    let msg = `${name}의 지갑에서 ${gold}G 를 주웠다`;
+    const item = itemId && (ITEM_IDS as readonly string[]).includes(itemId) ? ITEMS[itemId as (typeof ITEM_IDS)[number]] : undefined;
+    if (item) {
       pr.inventory[item.id] = (pr.inventory[item.id] ?? 0) + 1;
       msg += ` · ${item.icon} ${item.name} 획득`;
     }
@@ -1084,58 +1290,90 @@ export class CityWorld {
         return;
       }
       case 'lie':
-        if (t >= SLEEP_LIE) next('sleep');
-        return;
-      case 'sleep':
-        if (t >= SLEEP_FRAMES) {
-          const life = this.profile.life;
-          life.fatigue = 0;
-          life.hunger = Math.min(100, s.h0 + 15);
+        if (t >= SLEEP_LIE) {
+          next('sleep');
+          s.since = s.last = this.nowMs();
+          this.profile.life.sleepAt = s.since;
           saveProfile(this.profile);
-          next('wake');
         }
         return;
+      case 'sleep': {
+        this.sleepRecover();
+        // 직접 깨우기 전까지 계속 잔다: 아무 키(이동·E·공격·점프)나 누르면 일어난다. 12시간이 넘으면 저절로
+        const raw = t >= SLEEP_SETTLE ? this.input.read(this) : null;
+        const acted = !!raw && (!!raw.move || raw.interact || !!raw.jump || !!raw.buttons?.some(Boolean));
+        const long = this.nowMs() - s.since >= SLEEP_MAX_MS;
+        if (acted || long) {
+          s.auto = long;
+          next('wake');
+          delete this.profile.life.sleepAt;
+          saveProfile(this.profile);
+        } else if (this.frame % 600 === 0) saveProfile(this.profile);
+        return;
+      }
       case 'wake':
         if (t >= SLEEP_WAKE) {
           this.sleep = null;
           this.placePlayer(HOME.bed.path[1].x, HOME.bed.path[1].z, 0, 1);
-          this.say(`☀️ 푹 잤다! 피로가 풀렸다. ${this.day}일째 아침 ${this.clock}`, 3.5);
+          const slept = sleptLabel(Math.min(s.last, this.nowMs()) - s.since);
+          this.say(`☀️ ${s.auto ? '12시간을 자고 저절로 깼다' : '잘 잤다!'} (${slept} 잠) · 피로도 ${Math.round(this.profile.life.fatigue)} · ${this.clock}`, 4);
         }
         return;
     }
   }
 
-  /** 자는 동안 이번 프레임에 흐를 시간(분). 천천히 시작해 한밤에 빨리, 아침에 다시 천천히 */
-  private sleepMinutes(): number {
+  /** 지금 실제 시각 (ms). 동네 시계가 없으면(헤드리스 시험) 게임 시각에서 거꾸로 계산 */
+  nowMs(): number {
+    return this.sharedClock ? this.sharedClock() : CLOCK_EPOCH + ((this.day - 1) * 1440 + this.minutes) * MS_PER_GAME_MINUTE;
+  }
+
+  /** 잔 시간만큼 회복 (12시간까지만 친다). 창을 닫았다 와도 그동안 잔 만큼 한 번에 */
+  private sleepRecover() {
     const s = this.sleep!;
-    const u = Math.min(1, (this.frame - s.at) / SLEEP_FRAMES);
-    const e = u * u * (3 - 2 * u);
-    const target = s.total * e;
-    const d = target - s.done;
-    s.done = target;
+    const now = Math.min(this.nowMs(), s.since + SLEEP_MAX_MS);
+    const dt = now - s.last;
+    if (dt <= 0) return;
+    s.last = now;
     const life = this.profile.life;
-    life.fatigue = s.f0 * (1 - e);
-    life.hunger = Math.min(100, s.h0 + 15 * e);
-    // 자는 동안 체력도 가득 찬다
+    life.fatigue = Math.max(0, life.fatigue - dt * SLEEP_FATIGUE_PER_MS);
+    life.hunger = Math.min(100, life.hunger + dt * SLEEP_HUNGER_PER_MS);
     const p = this.player;
-    p.hp = Math.round(s.hp0 + (p.maxHp - s.hp0) * e);
-    return d;
+    p.hp = Math.min(p.maxHp, Math.round(p.hp + p.maxHp * dt * SLEEP_HP_PER_MS));
+  }
+
+  /** 새로 들어왔을 때: 자다가 나갔으면 침대에서 계속 잔다 (12시간이 넘었으면 일어나는 중으로) */
+  resumeSleep() {
+    const at = this.profile.life.sleepAt;
+    if (typeof at !== 'number' || !Number.isFinite(at)) return;
+    const path = HOME.bed.path;
+    const end = path[path.length - 1];
+    this.homeOwner = null;
+    this.moveTo('home', end.x, end.z, -1, 0);
+    this.sleep = { phase: 'sleep', at: this.frame - 60, wp: path.length - 1, since: at, last: at };
+    this.sleepRecover();
+    if (this.nowMs() - at >= SLEEP_MAX_MS) {
+      this.sleep.auto = true;
+      this.sleep.phase = 'wake';
+      this.sleep.at = this.frame;
+      delete this.profile.life.sleepAt;
+      saveProfile(this.profile);
+    }
   }
 
   /** 렌더러·HUD 용 잠자기 연출 값. rest: 0 = 서 있음 → 1 = 누움, blanket: 이불 덮임, dark: 불 꺼짐, night: 밤 진행도 */
-  get sleepView(): { phase: SleepPhase; rest: number; blanket: number; dark: number; night: number } | null {
+  get sleepView(): { phase: SleepPhase; rest: number; blanket: number; dark: number; night: number; slept: number } | null {
     const s = this.sleep;
     if (!s) return null;
     const t = this.frame - s.at;
     switch (s.phase) {
       case 'walk':
-        return { phase: 'walk', rest: 0, blanket: 0, dark: 0, night: 0 };
+        return { phase: 'walk', rest: 0, blanket: 0, dark: 0, night: 0, slept: 0 };
       case 'lie':
-        return { phase: 'lie', rest: Math.min(1, t / SLEEP_LIE), blanket: 0, dark: Math.max(0, (t - SLEEP_LIE + 20) / 20), night: 0 };
+        return { phase: 'lie', rest: Math.min(1, t / SLEEP_LIE), blanket: 0, dark: Math.max(0, (t - SLEEP_LIE + 20) / 20), night: 0, slept: 0 };
       case 'sleep':
-        return { phase: 'sleep', rest: 1, blanket: Math.min(1, t / 40), dark: 1, night: Math.min(1, t / SLEEP_FRAMES) };
+        return { phase: 'sleep', rest: 1, blanket: Math.min(1, t / 40), dark: 1, night: Math.min(1, (this.nowMs() - s.since) / SLEEP_MAX_MS), slept: this.nowMs() - s.since };
       case 'wake':
-        return { phase: 'wake', rest: Math.max(0, 1 - Math.max(0, t - 15) / (SLEEP_WAKE - 15)), blanket: Math.max(0, 1 - t / 15), dark: Math.max(0, 1 - t / 25), night: 1 };
+        return { phase: 'wake', rest: Math.max(0, 1 - Math.max(0, t - 15) / (SLEEP_WAKE - 15)), blanket: Math.max(0, 1 - t / 15), dark: Math.max(0, 1 - t / 25), night: 1, slept: s.last - s.since };
     }
   }
 
@@ -1241,8 +1479,8 @@ export class CityWorld {
     return { ok: true, message: `${item.icon} ${item.name} 냠냠 (${effect}) — "${thanks}"` };
   }
 
-  /** 근처에서 본 사람들 중 일부가 잠시 뒤 신고한다 */
-  private witness(x: number, z: number, victim: Npc) {
+  /** 근처에서 본 사람들 중 일부가 잠시 뒤 신고한다. by = 때린 사람 (경찰이 그 사람을 쫓는다) */
+  private witness(x: number, z: number, victim: Npc, by: string) {
     this.lastCrimeFrame = this.frame;
     for (const n of this.npcs) {
       if (n === victim || n.koFrames >= 0 || n.reportAt >= 0 || n.flee > 0 || n.fight > 0) continue;
@@ -1250,30 +1488,32 @@ export class CityWorld {
       if (d > WITNESS_RANGE) continue;
       if (n.brave && d < JOIN_RANGE && this.rng() < JOIN_CHANCE) {
         n.fight = NPC_FIGHT_FRAMES;
+        n.foe = by;
         n.pause = 0;
         n.hpShowUntil = this.frame + NPC_FIGHT_FRAMES;
-        this.speech.push({ x: n.fighter.x, z: n.fighter.z, text: JOIN[Math.floor(this.rng() * JOIN.length)], color: '#ff9d7a' });
+        this.townSay({ x: n.fighter.x, z: n.fighter.z, text: JOIN[Math.floor(this.rng() * JOIN.length)], color: '#ff9d7a' });
         continue;
       }
       if (this.rng() < 0.45) {
         n.reportAt = this.frame + 120 + Math.floor(this.rng() * 180);
         n.pause = n.reportAt - this.frame + 60; // 멈춰서 전화한다
-        this.speech.push({ x: n.fighter.x, z: n.fighter.z, text: CALL[Math.floor(this.rng() * CALL.length)], color: '#c8e6ff' });
+        this.townSay({ x: n.fighter.x, z: n.fighter.z, text: CALL[Math.floor(this.rng() * CALL.length)], color: '#c8e6ff' });
       }
     }
     this.police.scene = { x, z };
+    this.police.wanted = by;
   }
 
   // ───────────────────────── 경찰 ─────────────────────────
 
   private report(n: Npc) {
     const pol = this.police;
-    this.speech.push({ x: n.fighter.x, z: n.fighter.z, text: '경찰에 신고했어요!', color: '#c8e6ff' });
+    this.townSay({ x: n.fighter.x, z: n.fighter.z, text: '경찰에 신고했어요!', color: '#c8e6ff' });
     if (pol.phase === 'none' || pol.phase === 'leaving') {
       this.clearPolice();
       pol.phase = 'dispatched';
       pol.dispatchAt = this.frame + DISPATCH_DELAY;
-      this.say('📞 누군가 112에 신고했다!', 3);
+      this.tell(pol.wanted, '📞 누군가 112에 신고했다!', 3);
     }
   }
 
@@ -1306,9 +1546,11 @@ export class CityWorld {
     return best!;
   }
 
+  /** (호스트) 경찰: 신고 → 출동 → 범인(나든 친구든)이 현장 근처면 추격 → 잡거나 놓친다 */
   private stepPolice() {
     const pol = this.police;
-    const p = this.player;
+    // 쫓는 사람 (거리에 없으면 null: 집에 숨었거나 나갔다)
+    const p = this.folkFighter(pol.wanted);
     switch (pol.phase) {
       case 'none':
         break;
@@ -1327,10 +1569,10 @@ export class CityWorld {
         c.z += c.dz * step;
         if (remain > 0.01) break;
         // 도착: 범인이 아직 현장 근처면 추격, 아니면 철수
-        const near = this.location === 'city' && Math.hypot(p.x - pol.scene.x, p.z - pol.scene.z) < POLICE_SEARCH_RADIUS;
+        const near = !!p && Math.hypot(p.x - pol.scene.x, p.z - pol.scene.z) < POLICE_SEARCH_RADIUS;
         if (!near) {
           pol.phase = 'leaving';
-          this.say('🚓 경찰이 왔지만 범인을 찾지 못했다', 3);
+          this.tell(pol.wanted, '🚓 경찰이 왔지만 범인을 찾지 못했다', 3);
           break;
         }
         for (let k = 0; k < 2; k++) {
@@ -1339,34 +1581,35 @@ export class CityWorld {
           pol.officers.push(o);
         }
         pol.phase = 'chasing';
-        this.say('🚨 경찰이 도착했다! 도망쳐!', 2.5);
+        this.tell(pol.wanted, '🚨 경찰이 도착했다! 도망쳐!', 2.5);
         break;
       }
       case 'chasing': {
+        // 내가 잡혀서 끌려가는 중: 경찰은 그대로 서 있는다
+        if (pol.wanted === this.myId && this.caughtAt !== null) break;
         pol.chaseFrames++;
         let nearest = Infinity;
         for (const o of pol.officers) {
           o.snapshot();
-          const dx = p.x - o.x;
-          const dz = p.z - o.z;
-          const d = Math.hypot(dx, dz);
+          const dx = p ? p.x - o.x : 0;
+          const dz = p ? p.z - o.z : 0;
+          const d = p ? Math.hypot(dx, dz) : Infinity;
           nearest = Math.min(nearest, d);
-          o.freeMove = this.location === 'city' && d > 0.5 ? { x: dx, z: dz } : null;
+          o.freeMove = p && d > 0.5 ? { x: dx, z: dz } : null;
           o.feed(NEUTRAL_INPUT);
           o.tick({ opponent: o, awayX: 0, awayZ: -1 });
           this.collideFighter(o, 'city');
-          if (this.location === 'city' && d < CATCH_RANGE && o.isActionable) {
-            this.caughtAt = this.frame;
-            this.say('🚔 경찰에게 잡혔습니다', 3);
+          if (p && d < CATCH_RANGE && o.isActionable) {
+            this.policeCatch(pol.wanted);
             return;
           }
         }
         // 집에 숨거나, 충분히 멀어지거나, 1분이 지나면 포기
-        pol.lostFrames = this.location === 'home' || nearest > LOSE_DISTANCE ? pol.lostFrames + 1 : 0;
+        pol.lostFrames = !p || nearest > LOSE_DISTANCE ? pol.lostFrames + 1 : 0;
         if (pol.lostFrames > 180 || pol.chaseFrames > 3600) {
           pol.phase = 'leaving';
           pol.officers = [];
-          this.say('경찰을 따돌렸다!', 3);
+          this.tell(pol.wanted, '경찰을 따돌렸다!', 3);
         }
         break;
       }
@@ -1382,14 +1625,27 @@ export class CityWorld {
     }
   }
 
+  /** 경찰이 범인을 잡았다. 친구면 그 친구에게 알리고 경찰은 돌아간다 */
+  private policeCatch(id: string) {
+    if (id === this.myId) {
+      this.caughtAt = this.frame;
+      this.say('🚔 경찰에게 잡혔습니다', 3);
+      return;
+    }
+    this.note({ to: id, caught: 1 });
+    this.police.phase = 'leaving';
+    this.police.officers = [];
+  }
+
   /** 경찰에게 잡힌 뒤: 집 앞에서 다시 시작 (행인·경찰 초기화) */
   private restart() {
     this.caughtAt = null;
-    this.clearPolice();
+    if (this.isTownHost) this.clearPolice();
     this.location = 'city';
     this.locationChangedAt = this.frame;
     this.placePlayer(this.map.home.x, this.map.home.z + 1, 0, 1);
-    this.npcs = this.npcs.map(() => this.makeNpc());
+    // 혼자면 행인도 새로 (친구와 같이 보는 거리는 그대로)
+    if (this.isTownHost && !this.othersInCity()) this.npcs = this.npcs.map(() => this.makeNpc());
     this.hitstop = 0;
     this.say('집 앞에서 다시 시작합니다', 3);
   }
@@ -1437,6 +1693,15 @@ export class CityWorld {
     pr.casino ??= { played: 0, won: 0, lost: 0, best: 0 };
     pr.casino.played++;
     pr.casino.lost += amount;
+    saveProfile(pr);
+    return true;
+  }
+
+  /** 코인노래방: 곡 값 내기 (돈이 모자라면 false) / 음수면 돌려받기 */
+  karaokePay(amount: number): boolean {
+    const pr = this.profile;
+    if (amount > 0 && pr.gold < amount) return false;
+    pr.gold -= amount;
     saveProfile(pr);
     return true;
   }
@@ -2056,12 +2321,9 @@ export class CityWorld {
           this.say(`😐 아직 졸리지 않다 (피로도 ${SLEEPY} 이상부터 잘 수 있어요 · 지금 ${Math.round(this.profile.life.fatigue)})`, 3);
           return;
         }
-        // 다음 날 아침 7시까지 잔다: 침대 옆으로 가서 눕고, 밤이 빠르게 흘러간다
-        const m = this.minutes;
-        const total = m < WAKE_MINUTES ? WAKE_MINUTES - m : 1440 - m + WAKE_MINUTES;
-        const life = this.profile.life;
+        // 침대 옆으로 가서 눕고, 직접 깨우거나 12시간이 될 때까지 계속 잔다 (시간은 모두와 같이 흐른다)
         this.autopilot = null;
-        this.sleep = { phase: 'walk', at: this.frame, wp: 0, total, done: 0, f0: life.fatigue, h0: life.hunger, hp0: this.player.hp };
+        this.sleep = { phase: 'walk', at: this.frame, wp: 0, since: this.nowMs(), last: this.nowMs() };
         this.toast = null;
         return;
       }
@@ -2124,6 +2386,10 @@ export class CityWorld {
     }
     if (poi.id === 'casino') {
       this.casinoRequest = true;
+      return;
+    }
+    if (poi.kind === 'shop' && poi.label === '코인노래방') {
+      this.karaokeRequest = true;
       return;
     }
     // 펫샵 · 음식점: 문을 열고 가게 안으로 들어간다
@@ -2945,7 +3211,7 @@ export class CityWorld {
     if (!r) {
       const f = new Fighter(this.remoteIndex++, name, { canBlock: false });
       f.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
-      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, pets: [] };
+      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, pets: [], seenAt: -99999 };
       this.remotes.set(id, r);
       this.say(`👋 ${name} 님이 접속했어요`, 3);
     }
@@ -3104,6 +3370,7 @@ export class CityWorld {
     const f = r.fighter;
     const wasUp = f.hp > 0;
     const moved = r.room !== s.r || !r.target;
+    r.seenAt = this.frame;
     r.room = s.r;
     r.level = s.lv ?? r.level;
     r.target = { x: s.x, z: s.z, y: s.y, fx: s.fx, fz: s.fz };
@@ -3237,19 +3504,29 @@ export class CityWorld {
     if (stop) this.hitstop = Math.max(this.hitstop, stop);
   }
 
-  /** 친구에게 맞았다: 혼자 할 때와 같은 계산으로 내 체력에서 뺀다 */
+  /**
+   * 맞았다: 혼자 할 때와 같은 계산으로 내 체력에서 뺀다.
+   * - 친구에게 맞음 (같은 곳에 있을 때)
+   * - 행인에게 맞음 (동네를 계산하는 친구가 알려 줌, 거리에 있을 때)
+   * - (내가 동네를 계산 중이면) 친구가 행인을 때렸다는 소식
+   */
   receiveRemoteHit(from: string, h: NetHit) {
+    if (h.t !== undefined) {
+      this.npcHitByRemote(from, h);
+      return;
+    }
     const r = this.remotes.get(from);
     const mv = MOVES[h.m];
     const p = this.player;
-    if (!r || !mv || r.room !== this.roomKey) return;
+    const byNpc = h.n !== undefined;
+    if (!r || !mv || (byNpc ? this.location !== 'city' : r.room !== this.roomKey)) return;
     if (this.sleep || this.downedAt !== null || this.caughtAt !== null || p.hp <= 0 || p.isInvulnerable()) return;
     // 맞으면 의자에서 일어나고, 대화·자동 이동은 끊긴다
     this.seat = null;
     this.dialog = null;
     this.npcChat = null;
     this.autopilot = null;
-    const att = r.fighter;
+    const att = byNpc ? (this.npcs.find((n) => n.fighter.index === h.n)?.fighter ?? new Fighter(h.n!, 'npc', { canBlock: false })) : r.fighter;
     att.x = h.x;
     att.z = h.z;
     att.fx = h.fx;
@@ -3259,9 +3536,356 @@ export class CityWorld {
     att.moveHits.length = 0;
     const out = applyHit({ att, def: p, mv, blocked: false, counter: h.counter });
     this.events.push(out.event);
-    this.hitstop = Math.max(this.hitstop, Math.min(out.hitstop, 5));
+    this.hitstop = Math.max(this.hitstop, Math.min(out.hitstop, 4));
     this.lastCombatFrame = this.frame;
-    this.lastPvp = { name: r.name, frame: this.frame };
+    if (!byNpc) this.lastPvp = { name: r.name, frame: this.frame };
+  }
+
+  /** (호스트) 친구가 행인을 때렸다: 같은 계산으로 행인 체력을 깎고, 반응(도망·반격·신고·경찰)도 똑같이 */
+  private npcHitByRemote(from: string, h: NetHit) {
+    const r = this.remotes.get(from);
+    const mv = MOVES[h.m];
+    const npc = this.npcs.find((n) => n.fighter.index === h.t);
+    if (!r || !mv || !npc || npc.koFrames >= 0 || !this.isTownHost) return;
+    const att = r.fighter;
+    att.x = h.x;
+    att.z = h.z;
+    att.fx = h.fx;
+    att.fz = h.fz;
+    att.power = h.power;
+    att.frame = totalFrames(mv) + 1 - h.remaining;
+    att.moveHits.length = 0;
+    const out = applyHit({ att, def: npc.fighter, mv, blocked: false, counter: h.counter });
+    if (this.location === 'city') this.events.push(out.event);
+    this.shareEvent(out.event, from);
+    this.npcStruck(npc, from);
+  }
+
+  // ───────────────────────── 같이 보는 동네 (행인·차·신호·경찰·박 반장) ─────────────────────────
+
+  /** 나를 가리키는 id (접속 안 했으면 'me') */
+  get myId(): string {
+    return this.netId ?? 'me';
+  }
+
+  private fresh(r: RemotePlayer) {
+    return this.frame - r.seenAt < TOWN_FRESH;
+  }
+
+  /**
+   * 동네(행인·차·경찰·박 반장)를 계산하는 사람: 지금 접속해 있는 사람 중 id 가 가장 작은 사람.
+   * 나머지는 그 사람이 보낸 장면을 그대로 따라 그린다 → 모두가 같은 상황을 본다.
+   * 창을 내려 두어 소식이 끊긴 사람은 빠지고, 다음 사람이 받은 장면에서 이어서 계산한다.
+   */
+  get townHostId(): string {
+    let best = this.myId;
+    if (!this.netId) return best;
+    for (const r of this.remotes.values()) if (this.fresh(r) && r.id < best) best = r.id;
+    return best;
+  }
+
+  get isTownHost(): boolean {
+    return this.townHostId === this.myId;
+  }
+
+  /** 거리에 나와 있는 친구가 있나 */
+  othersInCity(): boolean {
+    for (const r of this.remotes.values()) if (r.room === 'city' && this.fresh(r)) return true;
+    return false;
+  }
+
+  /** 동네 장면을 받아야 하는 친구가 있나 (거리·빌라 로비·복도) */
+  townWatchers(): boolean {
+    for (const r of this.remotes.values()) if (this.fresh(r) && (r.room === 'city' || r.room === 'lobby' || /^c\d/.test(r.room))) return true;
+    return false;
+  }
+
+  /** 보낼 개인 소식이 남았나 */
+  get townNotesPending(): boolean {
+    return this.townOut.no.length > 0;
+  }
+
+  /** 거리에 있는 사람 (행인이 덤비고 경찰이 잡을 수 있는 사람). 없으면 null */
+  private folkFighter(id: string): Fighter | null {
+    if (id === this.myId) return this.location === 'city' && this.downedAt === null && this.caughtAt === null && !this.sleep ? this.player : null;
+    const r = this.remotes.get(id);
+    return r && r.room === 'city' && this.fresh(r) && r.fighter.hp > 0 ? r.fighter : null;
+  }
+
+  /** 차가 멈춰 줘야 하는 사람들 (나와 거리의 친구들) */
+  private carFolk(): Fighter[] {
+    const out: Fighter[] = [];
+    if (this.location === 'city') out.push(this.player);
+    for (const r of this.remotes.values()) if (r.room === 'city' && this.fresh(r)) out.push(r.fighter);
+    return out;
+  }
+
+  /** 이번 프레임 동네 진행: 호스트는 계산하고, 나머지는 받은 장면을 따라간다 */
+  private stepTown(frozen: boolean, canHit: boolean) {
+    // 먼저 모두의 직전 위치를 찍어 둔다. 타격 경직으로 이번 프레임에 안 움직이는 사람도
+    // 화면이 옛 위치와 지금 위치 사이를 오가며 떨리지 않고 그 자리에 딱 멈춘다 (필드 사냥과 같은 방식)
+    for (const n of this.npcs) n.fighter.snapshot();
+    for (const o of this.police.officers) o.snapshot();
+    const host = this.isTownHost;
+    if (host && (this.townAdopt || !this.townWasHost)) this.adoptTown();
+    this.townWasHost = host;
+    const city = this.location === 'city';
+    const watching = city || this.lookingOut;
+    const others = this.othersInCity();
+    // 내 타격 경직으로 거리가 잠깐 멈추는 건 혼자일 때만
+    const hold = frozen && !others;
+    if (host) {
+      if (watching || others) {
+        this.stepCars();
+        if (!hold) this.stepNpcs();
+      }
+      if (canHit && city && !frozen) this.hitNpcs();
+      if (!hold) this.stepPolice();
+      this.stepSenior();
+    } else {
+      if (watching) this.stepCarsMirror();
+      this.stepTownMirror();
+      if (canHit && city && !frozen) this.hitNpcs();
+      this.seniorAI.pushPlayer(this.player);
+    }
+  }
+
+  /** 내가 계산을 맡게 됐다: 지금까지 받아 그리던 장면에서 이어서 계산한다 */
+  private adoptTown() {
+    this.townAdopt = false;
+    for (const n of this.npcs) {
+      const t = n.target;
+      if (t) {
+        n.fighter.x = t.x;
+        n.fighter.z = t.z;
+        n.fighter.fx = t.fx;
+        n.fighter.fz = t.fz;
+      }
+      n.target = undefined;
+      if (!n.path.length) n.path = this.routePath(n.route) ?? [{ x: n.fighter.x, z: n.fighter.z }];
+      n.next = Math.max(0, Math.min(n.path.length - 1, n.next));
+      this.nextNpcId = Math.max(this.nextNpcId, n.fighter.index + 1);
+    }
+    this.police.officers.forEach((o, k) => {
+      const t = this.officerTargets[k];
+      if (t) {
+        o.x = t.x;
+        o.z = t.z;
+      }
+    });
+    this.officerTargets = [];
+    this.seniorAI.adopt();
+  }
+
+  /** 받은 장면을 따라 부드럽게 움직인다 (받는 사이에도 동작이 이어지게 프레임을 진행) */
+  private stepTownMirror() {
+    for (const n of this.npcs) {
+      const f = n.fighter;
+      f.snapshot();
+      f.frame++;
+      if (n.koFrames >= 0) n.koFrames++;
+      if (n.target && !(n.lockUntil !== undefined && this.frame < n.lockUntil)) this.follow(f, n.target);
+    }
+    const pol = this.police;
+    pol.officers.forEach((o, k) => {
+      o.snapshot();
+      o.frame++;
+      const t = this.officerTargets[k];
+      if (t) this.follow(o, t);
+    });
+    const c = pol.car;
+    if (c && pol.phase === 'arriving') {
+      const step = Math.min(POLICE_CAR_SPEED, Math.hypot(c.stopX - c.x, c.stopZ - c.z));
+      c.x += c.dx * step;
+      c.z += c.dz * step;
+    } else if (c && pol.phase === 'leaving') {
+      c.x += c.dx * POLICE_CAR_SPEED;
+      c.z += c.dz * POLICE_CAR_SPEED;
+    }
+    this.seniorAI.stepMirror();
+  }
+
+  /** 모두에게 보이는 말풍선. r = 어디서 (거리 'city', 로비 'lobby', 복도 'c3' …) */
+  townSay(s: Speech, r = 'city') {
+    if (this.roomKey === r) this.speech.push(s);
+    if (this.isTownHost && this.remotes.size) this.queue(this.townOut.sp, { ...s, r });
+  }
+
+  /** 타격 이펙트를 같은 곳의 친구에게도 (by 는 이미 자기 화면에 띄웠으니 빼고) */
+  private shareEvent(e: CombatEvent, by: string, r = 'city') {
+    if (this.isTownHost && this.remotes.size) this.queue(this.townOut.ev, { r, e, by });
+  }
+
+  /** 한 사람에게만 보이는 안내 */
+  private tell(id: string, text: string, seconds: number) {
+    if (id === this.myId) this.say(text, seconds);
+    else if (id) this.note({ to: id, tx: text, s: seconds });
+  }
+
+  private note(n: TownNote) {
+    if (this.remotes.has(n.to)) this.queue(this.townOut.no, n);
+  }
+
+  private queue<T>(arr: T[], v: T) {
+    arr.push(v);
+    if (arr.length > 40) arr.shift();
+  }
+
+  /** (호스트) 친구들에게 보낼 동네 장면. full = 이름·옷 색·걷는 길처럼 안 바뀌는 것까지, cars = 차 위치까지 */
+  netTown(full: boolean, cars: boolean): NetTown {
+    const q = (v: number) => Math.round(v * 100) / 100;
+    const now = this.frame;
+    if (this.sentNpcIds.size > 400) this.sentNpcIds.clear();
+    const n = this.npcs.map((n): NetNpc => {
+      const f = n.fighter;
+      const o: NetNpc = {
+        i: f.index, x: q(f.x), z: q(f.z), y: q(f.y), fx: q(f.fx), fz: q(f.fz), s: f.state, f: f.frame, m: f.move?.id ?? null, hp: Math.round(f.hp),
+        ko: n.koFrames, fl: n.flee, pa: n.pause, fi: n.fight, fo: n.foe, hs: Math.max(0, n.hpShowUntil - now), nx: n.next,
+        ra: n.reportAt < 0 ? -1 : Math.max(0, n.reportAt - now), ac: n.atkCd,
+      };
+      if (full || !this.sentNpcIds.has(f.index)) {
+        this.sentNpcIds.add(f.index);
+        Object.assign(o, { nm: n.name, co: n.color, rt: n.route, sp: Math.round(n.speed * 10000) / 10000, mh: f.maxHp, w: n.wallet, br: n.brave ? 1 : 0 });
+      }
+      return o;
+    });
+    const pol = this.police;
+    const c = pol.car;
+    const out: NetTown = {
+      n,
+      po: {
+        ph: pol.phase, da: Math.max(0, pol.dispatchAt - now), sc: [q(pol.scene.x), q(pol.scene.z)],
+        car: c ? [c.x, c.z, c.dx, c.dz, c.stopX, c.stopZ].map(q) : null,
+        o: pol.officers.map((o) => ({ x: q(o.x), z: q(o.z), fx: q(o.fx), fz: q(o.fz), s: o.state, f: o.frame })),
+        lf: pol.lostFrames, cf: pol.chaseFrames, wa: pol.wanted,
+      },
+      se: this.seniorAI.net(),
+      sp: this.townOut.sp.splice(0),
+      ev: this.townOut.ev.splice(0),
+      no: this.townOut.no.splice(0),
+    };
+    if (cars) out.c = this.cars.flatMap((c) => [q(c.x), q(c.z), Math.round(c.v * 1000) / 1000]);
+    return out;
+  }
+
+  /**
+   * 호스트가 보낸 동네 장면. mirror = 그대로 따라 그린다 (내가 호스트면 false: 나에게 온 소식만 처리)
+   */
+  applyTown(from: string, t: NetTown, mirror: boolean) {
+    const r = this.remotes.get(from);
+    if (r) r.seenAt = this.frame;
+    const me = this.myId;
+    for (const no of t.no ?? []) if (no.to === me) this.applyNote(no);
+    if (!mirror) return;
+    this.townAdopt = true;
+    // 행인
+    const old = new Map(this.npcs.map((n) => [n.fighter.index, n]));
+    const list: Npc[] = [];
+    for (const m of t.n ?? []) {
+      let n = old.get(m.i);
+      if (!n) {
+        if (m.nm === undefined) continue; // 이름·길을 아직 모른다: 다음 전체 장면에서
+        const f = new Fighter(m.i, 'npc', { runSpeed: m.sp ?? 0.035, maxHp: m.mh ?? 60, canBlock: false, power: 1.1 });
+        f.reset(m.x, m.z, m.fx, m.fz);
+        n = { fighter: f, name: m.nm, path: [], next: 0, speed: m.sp ?? 0.035, color: m.co ?? 0x5a5a5a, wallet: m.w ?? 20, pause: 0, flee: 0, hpShowUntil: 0, koFrames: -1, reportAt: -1, brave: !!m.br, fight: 0, atkCd: 30, foe: '', route: m.rt ?? 0 };
+      }
+      if (m.nm !== undefined) {
+        n.name = m.nm;
+        n.color = m.co ?? n.color;
+        n.wallet = m.w ?? n.wallet;
+        n.brave = !!m.br;
+        n.speed = m.sp ?? n.speed;
+        n.fighter.maxHp = m.mh ?? n.fighter.maxHp;
+        if (m.rt !== undefined && (m.rt !== n.route || !n.path.length)) {
+          n.route = m.rt;
+          n.path = this.routePath(m.rt) ?? [];
+        }
+      }
+      const f = n.fighter;
+      n.next = m.nx;
+      n.koFrames = m.ko;
+      n.flee = m.fl;
+      n.pause = m.pa;
+      n.fight = m.fi;
+      n.foe = m.fo;
+      n.atkCd = m.ac;
+      n.reportAt = m.ra < 0 ? -1 : this.frame + m.ra;
+      n.hpShowUntil = Math.max(n.hpShowUntil, m.hs > 0 ? this.frame + m.hs : 0);
+      n.target = { x: m.x, z: m.z, y: m.y, fx: m.fx, fz: m.fz };
+      list.push(n);
+      // 방금 내가 때린 사람: 맞는 동작이 끝날 때까지는 받은 모습으로 덮어쓰지 않는다
+      if (n.lockUntil !== undefined && this.frame < n.lockUntil) continue;
+      if (f.state !== m.s || (f.move?.id ?? null) !== m.m) {
+        f.state = m.s;
+        f.move = m.m ? (MOVES[m.m] ?? null) : null;
+        f.frame = m.f;
+      } else if (Math.abs(f.frame - m.f) > 6) f.frame = m.f;
+      f.hp = m.hp;
+      if (Math.hypot(f.x - m.x, f.z - m.z) > 6) {
+        f.x = m.x;
+        f.z = m.z;
+        f.snapshot();
+      }
+    }
+    this.npcs = list;
+    // 차: 차 순서(차로)는 모두 같다. 많이 어긋났으면 바로, 조금이면 부드럽게 맞춘다
+    const c = t.c;
+    if (Array.isArray(c)) {
+      for (let i = 0; i < this.cars.length && i * 3 + 2 < c.length; i++) {
+        const car = this.cars[i];
+        const x = c[i * 3];
+        const z = c[i * 3 + 1];
+        car.x = x;
+        car.z = z;
+        car.v = c[i * 3 + 2];
+      }
+    }
+    // 경찰
+    const po = t.po;
+    if (po) {
+      const pol = this.police;
+      pol.phase = po.ph;
+      pol.dispatchAt = this.frame + po.da;
+      pol.scene = { x: po.sc[0], z: po.sc[1] };
+      if (po.car) {
+        const [x, z, dx, dz, stopX, stopZ] = po.car;
+        const pc = pol.car;
+        if (pc && Math.hypot(pc.x - x, pc.z - z) < 8) Object.assign(pc, { x: pc.x + (x - pc.x) * 0.5, z: pc.z + (z - pc.z) * 0.5, dx, dz, stopX, stopZ });
+        else pol.car = { x, z, dx, dz, stopX, stopZ };
+      } else pol.car = null;
+      while (pol.officers.length < po.o.length) {
+        const k = pol.officers.length;
+        const o = new Fighter(900 + k, 'police', { runSpeed: OFFICER_SPEED, maxHp: 99999, canBlock: false });
+        o.reset(po.o[k].x, po.o[k].z, po.o[k].fx, po.o[k].fz);
+        pol.officers.push(o);
+      }
+      pol.officers.length = po.o.length;
+      this.officerTargets = po.o.map((o, k) => {
+        const f = pol.officers[k];
+        if (f.state !== o.s) {
+          f.state = o.s;
+          f.frame = o.f;
+        }
+        return { x: o.x, z: o.z, y: 0, fx: o.fx, fz: o.fz };
+      });
+      pol.lostFrames = po.lf;
+      pol.chaseFrames = po.cf;
+      pol.wanted = po.wa;
+    }
+    if (t.se) this.seniorAI.applyNet(t.se);
+    // 같은 곳에서 일어난 말풍선·타격 이펙트
+    for (const sp of t.sp ?? []) if (sp.r === this.roomKey) this.speech.push({ x: sp.x, z: sp.z, text: sp.text, color: sp.color });
+    for (const e of t.ev ?? []) if (e.r === this.roomKey && e.by !== me) this.events.push(e.e);
+  }
+
+  /** 나에게 온 소식: 주운 돈·물건, 경찰에게 잡힘, 안내 */
+  private applyNote(no: TownNote) {
+    if (typeof no.g === 'number' && no.g > 0 && no.g < 1000) this.gainLoot(no.nm ?? '행인', Math.round(no.g), no.it);
+    if (no.caught && this.caughtAt === null && this.location === 'city') {
+      this.caughtAt = this.frame;
+      this.say('🚔 경찰에게 잡혔습니다', 3);
+    }
+    if (no.tx) this.say(no.tx, no.s ?? 3);
   }
 
   // ───────────────────────── 충돌 ─────────────────────────
@@ -3370,17 +3994,16 @@ export class CityWorld {
     lane('x', EXPRESSWAY_Z, -1, -300, 300, 9, 3.5);
   }
 
-  /** 신호등 시계 (초). 모든 교차로가 같은 주기 */
+  /** 신호등 시계 (초). 모든 교차로가 같은 주기이고, 실제 시각을 따라서 모두에게 같은 신호가 켜진다 */
   get signalSeconds() {
-    return this.frame / 60;
+    return this.nowMs() / 1000;
   }
 
-  /** 차: 빨간불·노란불이면 정지선 앞에 서고, 앞차와 간격을 두고, 차도(횡단보도) 위의 플레이어 앞에서 멈춘다 */
+  /** 차: 빨간불·노란불이면 정지선 앞에 서고, 앞차와 간격을 두고, 차도(횡단보도) 위의 사람(나·친구) 앞에서 멈춘다 */
   private stepCars() {
     const sec = this.signalSeconds;
     const light: Record<'x' | 'z', Light> = { x: vehicleLight('x', sec), z: vehicleLight('z', sec) };
-    const p = this.player;
-    const playerOut = this.location === 'city';
+    const folk = this.carFolk();
     for (const c of this.cars) {
       const alongX = c.dx !== 0;
       const dir = alongX ? c.dx : c.dz;
@@ -3402,7 +4025,8 @@ export class CityWorld {
         const d = ((alongX ? o.x : o.z) - s) * dir;
         if (d > 0 && d < 30) room = Math.min(room, d - (o.kind === 'bus' || c.kind === 'bus' ? 9 : 6.5));
       }
-      if (playerOut && Math.abs((alongX ? p.z : p.x) - lat) < 1.8) {
+      for (const p of folk) {
+        if (Math.abs((alongX ? p.z : p.x) - lat) >= 1.8) continue;
         const d = ((alongX ? p.x : p.z) - s) * dir;
         if (d > 0 && d < 14) room = Math.min(room, d - 3.5);
       }
@@ -3421,41 +4045,72 @@ export class CityWorld {
     }
   }
 
-  /** 행인 한 명: 블록 둘레 인도를 따라 걷는다. 플레이어 근처(15m)에는 새로 나타나지 않는다 */
+  /** 받은 차: 받은 속도 그대로 달리다가, 다음 장면이 오면 그 자리로 (계산은 호스트가) */
+  private stepCarsMirror() {
+    for (const c of this.cars) {
+      c.x += c.dx * c.v;
+      c.z += c.dz * c.v;
+      const s2 = c.dx !== 0 ? c.x : c.z;
+      const dir = c.dx !== 0 ? c.dx : c.dz;
+      if (dir > 0 && s2 > c.to) {
+        if (c.dx !== 0) c.x = c.from;
+        else c.z = c.from;
+      } else if (dir < 0 && s2 < c.from) {
+        if (c.dx !== 0) c.x = c.to;
+        else c.z = c.to;
+      }
+    }
+  }
+
+  /** 걷는 길 번호 → 길 (산책로 또는 블록 둘레 인도) */
+  private routePath(route: number): { x: number; z: number }[] | null {
+    if (route < 0) {
+      const trail = this.map.trails[0];
+      if (!trail) return null;
+      return route === -1 ? [...trail.path] : [...trail.path].reverse();
+    }
+    const b = this.map.blocks[route >> 1];
+    if (!b) return null;
+    const m = CITY_CONST.SIDEWALK / 2;
+    const path = [
+      { x: b.x0 + m, z: b.z0 + m },
+      { x: b.x1 - m, z: b.z0 + m },
+      { x: b.x1 - m, z: b.z1 - m },
+      { x: b.x0 + m, z: b.z1 - m },
+    ];
+    return route & 1 ? path.reverse() : path;
+  }
+
+  /** 행인 한 명: 블록 둘레 인도를 따라 걷는다. 사람(나·친구) 근처(15m)에는 새로 나타나지 않는다 */
   makeNpc(): Npc {
-    const { SIDEWALK } = CITY_CONST;
     const outfit = [0x2b3a55, 0x6b4f3a, 0x8a2c2c, 0x3f6b4a, 0x5a5a5a, 0xc7a14a, 0x2f2f2f, 0x7a5c99];
     const blocks = this.map.blocks;
     let x = 0;
     let z = 0;
     let path: { x: number; z: number }[] = [];
     let next = 0;
+    let route = 0;
     const trail = this.map.trails[0];
     if (trail && this.rng() < 0.22) {
-      path = this.rng() < 0.5 ? [...trail.path] : [...trail.path].reverse();
+      route = this.rng() < 0.5 ? -1 : -2;
+      path = this.routePath(route)!;
       const start = Math.floor(this.rng() * path.length);
       x = path[start].x;
       z = path[start].z;
       next = (start + 1) % path.length;
     }
-    for (let tries = 0; tries < 20 && path.length === 0; tries++) {
-      const b = blocks[Math.floor(this.rng() * blocks.length)];
-      const m = SIDEWALK / 2;
-      path = [
-        { x: b.x0 + m, z: b.z0 + m },
-        { x: b.x1 - m, z: b.z0 + m },
-        { x: b.x1 - m, z: b.z1 - m },
-        { x: b.x0 + m, z: b.z1 - m },
-      ];
-      if (this.rng() < 0.5) path = path.reverse();
+    const near = [this.player, ...this.carFolk()];
+    for (let tries = 0; tries < 20 && !path.length; tries++) {
+      route = Math.floor(this.rng() * blocks.length) * 2 + (this.rng() < 0.5 ? 1 : 0);
+      const p = this.routePath(route)!;
       const start = Math.floor(this.rng() * 4);
-      const a = path[start];
-      const c = path[(start + 1) % 4];
+      const a = p[start];
+      const c = p[(start + 1) % 4];
       const u = this.rng();
       x = a.x + (c.x - a.x) * u;
       z = a.z + (c.z - a.z) * u;
       next = (start + 1) % 4;
-      if (Math.hypot(x - this.player.x, z - this.player.z) > 15) break;
+      if (tries === 19 || near.every((q) => Math.hypot(x - q.x, z - q.z) > 15)) path = p;
     }
     const jogging = path.length > 4 && this.rng() < 0.4;
     const f = new Fighter(this.nextNpcId++, 'npc', {
@@ -3483,19 +4138,21 @@ export class CityWorld {
       brave,
       fight: 0,
       atkCd: 30,
+      foe: '',
+      route,
     };
   }
 
-  /** 덤비는 행인: 플레이어에게 다가가 기술을 쓴다. 멀어지거나 집에 들어가면 그만둔다 */
+  /** 덤비는 행인: 때린 사람(나든 친구든)에게 다가가 기술을 쓴다. 멀어지거나 거리를 떠나면 그만둔다 */
   private stepFighterNpc(n: Npc) {
     const f = n.fighter;
-    const p = this.player;
-    const dx = p.x - f.x;
-    const dz = p.z - f.z;
-    const d = Math.hypot(dx, dz);
+    const t = this.folkFighter(n.foe);
+    const dx = t ? t.x - f.x : 0;
+    const dz = t ? t.z - f.z : 0;
+    const d = t ? Math.hypot(dx, dz) : Infinity;
     n.fight--;
     n.hpShowUntil = Math.max(n.hpShowUntil, this.frame + 30);
-    if (this.location !== 'city' || d > 18 || this.downedAt !== null || n.fight <= 0) {
+    if (!t || d > 18 || n.fight <= 0) {
       n.fight = 0;
       f.runSpeed = n.speed;
     }
@@ -3506,7 +4163,7 @@ export class CityWorld {
         f.runSpeed = NPC_FIGHT_SPEED;
         move = { x: dx, z: dz };
       } else if (--n.atkCd <= 0) {
-        // 플레이어를 보고 기술 하나
+        // 상대를 보고 기술 하나
         f.fx = dx / (d || 1);
         f.fz = dz / (d || 1);
         f.queueMove(NPC_MOVES[Math.floor(this.rng() * NPC_MOVES.length)]);
@@ -3520,17 +4177,29 @@ export class CityWorld {
     f.feed(NEUTRAL_INPUT);
     f.tick({ opponent: f, awayX: 0, awayZ: -1 });
     this.collideFighter(f, 'city');
-    // 플레이어에게 맞았나
-    if (this.location === 'city' && p.hp > 0 && !this.sleep) {
-      const h = detectHit(f, p);
-      if (h) {
-        const out = applyHit(h);
-        this.events.push(out.event);
-        this.hitstop = Math.max(this.hitstop, Math.min(out.hitstop, 4));
-        this.lastCombatFrame = this.frame;
-        this.autopilot = null;
-      }
+    // 상대에게 맞았나
+    if (!t || t.hp <= 0) return;
+    const h = detectHit(f, t);
+    if (!h) return;
+    if (n.foe === this.myId) {
+      const out = applyHit(h);
+      this.events.push(out.event);
+      this.shareEvent(out.event, this.myId);
+      this.hitstop = Math.max(this.hitstop, Math.min(out.hitstop, 4));
+      this.lastCombatFrame = this.frame;
+      this.autopilot = null;
+      return;
     }
+    // 친구가 맞았다: 내 화면엔 맞는 모습만, 친구에게 알려서 친구가 자기 체력에서 뺀다
+    const r = this.remotes.get(n.foe);
+    if (!r) return;
+    const remaining = totalFrames(h.mv) - f.frame + 1;
+    const out = applyHit(h);
+    if (this.location === 'city') this.events.push(out.event);
+    this.shareEvent(out.event, r.id);
+    r.hitLock = this.frame + 12;
+    const q = (v: number) => Math.round(v * 100) / 100;
+    this.outbox.push({ to: r.id, n: f.index, m: h.mv.id, counter: h.counter, remaining, power: f.power, x: q(f.x), z: q(f.z), fx: q(f.fx), fz: q(f.fz) });
   }
 
   private stepNpcs() {
@@ -3556,10 +4225,11 @@ export class CityWorld {
         return;
       }
       if (n.flee > 0) {
-        // 플레이어 반대쪽으로 뛰어서 도망
+        // 때린 사람 반대쪽으로 뛰어서 도망
         n.flee--;
         f.runSpeed = NPC_FLEE_SPEED;
-        move = { x: f.x - this.player.x || 1, z: f.z - this.player.z };
+        const foe = this.folkFighter(n.foe) ?? this.remotes.get(n.foe)?.fighter ?? this.player;
+        move = { x: f.x - foe.x || 1, z: f.z - foe.z };
         if (n.flee === 0) f.runSpeed = n.speed;
       } else if (n.pause > 0) n.pause--;
       else {

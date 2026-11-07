@@ -15,6 +15,8 @@ export type BossPhase = 'intro' | 'fight' | 'victory' | 'defeat';
 const ENRAGE_POWER = 1.25;
 const ENRAGE_BANNER_FRAMES = 100;
 const END_DELAY_FRAMES = 120;
+/** 퍼펙트 승리 골드 배율 */
+const PERFECT_GOLD = 1.5;
 
 export interface BossResult {
   win: boolean;
@@ -26,6 +28,8 @@ export interface BossResult {
   clearTime: number;
   /** 이 보스 최단 기록을 깼나 (처음 깬 경우는 false — 비교할 기록이 없으니) */
   newRecord?: boolean;
+  /** 한 대도 안 맞고 이겼나 (골드 +50%) */
+  perfect?: boolean;
 }
 
 export interface BossHudState {
@@ -46,15 +50,35 @@ export interface BossHudState {
   lastHit: HitInfo | null;
   /** 경기가 끝나고 연출이 지나면 결과 */
   result: BossResult | null;
+  /** 이번 보스전 통계 (플레이어 기준) */
+  stats: BossStats;
+}
+
+export interface BossStats {
+  /** 보스에게 실제로 깎은 체력 */
+  dealt: number;
+  /** 내가 실제로 잃은 체력 */
+  taken: number;
+  hits: number;
+  counters: number;
+  /** 보스 공격을 막은 횟수 */
+  guards: number;
+  bestCombo: number;
 }
 
 /** 보스 AI: 거리 조절 + 가중치 랜덤 패턴. 기술은 커맨드 없이 queueMove 로 직접 발동. */
+/** 플레이어가 이만큼 연속으로 막으면 가드 뚫기 기술을 섞는다 */
+const GUARD_BREAK_AFTER = 3;
+
 export class BossBrain implements Controller {
   private queue: RelInput[] = [];
   private cooldown: number;
   private rng: () => number;
   /** 고른 다음 패턴. 사거리에 들어갈 때까지 다가간 뒤 쓴다 */
   private planned: string | null = null;
+  /** 플레이어가 연속으로 막은 횟수 (맞으면 0). 쌓이면 하단·잡기로 가드를 뚫는다 */
+  private guardStreak = 0;
+  private lastOppState = '';
 
   constructor(
     private def: BossDef,
@@ -66,6 +90,11 @@ export class BossBrain implements Controller {
   }
 
   read({ self, opponent }: ControllerContext): RelInput {
+    if (opponent.state !== this.lastOppState) {
+      if (opponent.state === 'blockstun') this.guardStreak++;
+      else if (opponent.state === 'hitstun' || opponent.state === 'launched') this.guardStreak = 0;
+      this.lastOppState = opponent.state;
+    }
     if (this.queue.length) return this.queue.shift()!;
     if (!self.isActionable) return NEUTRAL_INPUT;
 
@@ -86,6 +115,11 @@ export class BossBrain implements Controller {
     }
 
     const pool = enraged ? [...this.def.moves, ...this.def.enrageMoves] : this.def.moves;
+    // 가드만 굳히면 (3번 연속 막힘) 하단 쓸기나 잡기로 뚫는다
+    if (!this.planned && this.guardStreak >= GUARD_BREAK_AFTER && this.rng() < 0.75) {
+      this.planned = this.rng() < 0.5 ? 'bossTail' : 'bossGrab';
+      this.guardStreak = 0;
+    }
     this.planned ??= this.pick(pool);
     const mv = MOVES[this.planned];
     // 돌진은 먼 거리에서도, 나머지는 사거리 안에 들어갈 때까지 걸어간다
@@ -123,6 +157,7 @@ export class BossBattle {
   enraged = false;
   timerFrames: number;
   lastHit: HitInfo | null = null;
+  private stats: BossStats = { dealt: 0, taken: 0, hits: 0, counters: 0, guards: 0, bestCombo: 0 };
   result: BossResult | null = null;
 
   private events: CombatEvent[] = [];
@@ -223,6 +258,7 @@ export class BossBattle {
       combo: this.comboShow && { hits: this.comboShow.hits, damage: this.comboShow.damage },
       lastHit: this.lastHit,
       result: this.phaseFrame > END_DELAY_FRAMES ? this.result : null,
+      stats: { ...this.stats },
     };
   }
 
@@ -238,8 +274,21 @@ export class BossBattle {
     const hits = [detectHit(a, b), detectHit(b, a)].filter((h): h is PendingHit => !!h);
     let stop = 0;
     for (const h of hits) {
+      const hpBefore = h.def.hp;
       const out = applyHit(h);
       this.events.push(out.event);
+      // 통계: 실제로 깎인 체력만 (KO 한 방의 넘친 데미지는 빼고)
+      const lost = Math.max(0, hpBefore - Math.max(0, h.def.hp));
+      const st = this.stats;
+      if (h.att === a) {
+        if (out.info.result !== 'block') {
+          st.dealt += lost;
+          st.hits++;
+          if (out.info.result === 'counter') st.counters++;
+          st.bestCombo = Math.max(st.bestCombo, h.def.combo);
+        }
+      } else if (out.info.result === 'block') st.guards++;
+      else st.taken += lost;
       if (h.att === a) {
         this.lastHit = out.info;
         if (h.def.combo >= 2) this.comboShow = { hits: h.def.combo, damage: h.def.comboDamage, frames: 90 };
@@ -265,7 +314,9 @@ export class BossBattle {
     if (b.hp <= 0) {
       const first = !this.profile.bossClears[this.boss.id];
       const exp = this.boss.reward.exp + (first ? this.boss.firstClearBonus.exp : 0);
-      const gold = this.boss.reward.gold + (first ? this.boss.firstClearBonus.gold : 0);
+      // 퍼펙트(한 대도 안 맞음): 골드 +50%
+      const perfect = p.hp >= p.maxHp;
+      const gold = Math.round((this.boss.reward.gold + (first ? this.boss.firstClearBonus.gold : 0)) * (perfect ? PERFECT_GOLD : 1));
       this.profile.bossClears[this.boss.id] = (this.profile.bossClears[this.boss.id] ?? 0) + 1;
       const clearTime = Math.round((this.boss.timeLimit - this.timerFrames / FPS) * 100) / 100;
       const best = this.profile.bossBest[this.boss.id];
@@ -277,6 +328,7 @@ export class BossBattle {
         win: true, exp, gold, firstClear: first, levelUps, newLevel: this.profile.level,
         clearTime: this.boss.timeLimit - this.timerFrames / FPS,
         newRecord,
+        perfect,
       };
       this.setPhase('victory');
     } else if (p.hp <= 0 || this.timerFrames <= 0) {
@@ -295,7 +347,7 @@ export class BossBattle {
       case 'fight':
         return this.enrageBanner > 0 ? '보스가 분노했습니다!' : null;
       case 'victory':
-        return 'VICTORY';
+        return this.result?.perfect ? 'VICTORY · PERFECT!' : 'VICTORY';
       case 'defeat':
         return this.timerFrames <= 0 ? 'TIME OVER' : 'DEFEAT';
     }

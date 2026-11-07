@@ -24,6 +24,8 @@ export default function FieldHud({
   portrait?: boolean;
 }) {
   const tall = touch && portrait;
+  // 폰 세로: 이번 사냥 요약이 보이면 내 정보 칸이 길어지므로 타겟·로그를 그만큼 내린다
+  const grown = tall && hud.session.kills > 0;
   const t = hud.target;
   return (
     <div className="pointer-events-none absolute inset-0 select-none text-white">
@@ -48,12 +50,23 @@ export default function FieldHud({
           <span className="w-16 text-right tabular-nums">{Math.floor((hud.exp / hud.expNext) * 100)}%</span>
         </div>
         <div className="mt-1 text-xs text-white/60">처치 {hud.kills}</div>
+        {hud.session.kills > 0 && (
+          <div className="mt-1 rounded bg-white/5 px-2 py-1 text-[11px] leading-4 text-white/75">
+            <span className="text-white/50">이번 사냥 {Math.floor(hud.session.seconds / 60)}분</span> · 처치 {hud.session.kills}
+            {hud.session.deaths > 0 && <span className="text-red-300"> · 사망 {hud.session.deaths}</span>}
+            <br />
+            <span className="text-lime-300">+{hud.session.exp.toLocaleString()} EXP</span> · <span className="text-amber-200">+{hud.session.gold.toLocaleString()} G</span>
+            {hud.session.seconds >= 60 && (
+              <span className="text-white/45"> (분당 {Math.round((hud.session.exp * 60) / hud.session.seconds)} EXP)</span>
+            )}
+          </div>
+        )}
         <LifeBars fatigue={hud.fatigue} hunger={hud.hunger} />
       </div>
 
       {/* 타겟 */}
       {t && (
-        <div className={`absolute left-1/2 top-4 -translate-x-1/2 rounded-lg border border-red-400/30 bg-black/50 px-3 py-2 backdrop-blur-sm ${tall ? '!left-4 top-[13.5rem] w-60 !translate-x-0' : touch ? 'w-60' : 'w-80'}`}>
+        <div className={`absolute left-1/2 top-4 -translate-x-1/2 rounded-lg border border-red-400/30 bg-black/50 px-3 py-2 backdrop-blur-sm ${tall ? `!left-4 w-60 !translate-x-0 ${grown ? 'top-[15rem]' : 'top-[13.5rem]'}` : touch ? 'w-60' : 'w-80'}`}>
           <div className="mb-1 flex justify-between text-sm font-bold">
             <span>
               <span className="text-red-300">Lv.{t.level}</span> {t.name}
@@ -67,7 +80,7 @@ export default function FieldHud({
       )}
 
       {/* 로그 */}
-      <div className={`absolute w-72 space-y-0.5 text-xs ${tall ? 'left-4 top-[18.5rem]' : touch ? 'left-1/2 top-24 -translate-x-1/2' : 'bottom-28 left-4'}`}>
+      <div className={`absolute w-72 space-y-0.5 text-xs ${tall ? (grown ? 'left-4 top-[20rem]' : 'left-4 top-[18.5rem]') : touch ? 'left-1/2 top-24 -translate-x-1/2' : 'bottom-28 left-4'}`}>
         {(touch ? hud.log.slice(-2) : hud.log).map((l) => (
           <div key={l.id} className="rounded bg-black/40 px-2 py-0.5 text-white/85">
             {l.text}

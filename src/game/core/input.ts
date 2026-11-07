@@ -79,16 +79,44 @@ export const P2_KEYS: KeyMap = {
 const isGameKey = (code: string) =>
   [P1_KEYS, P2_KEYS].some((m) => m.up === code || m.down === code || m.left === code || m.right === code || m.buttons.includes(code) || !!m.jump?.includes(code));
 
+/** 읽히지 않은 채 뗀 키를 이 시간 뒤엔 반드시 뗀다 (여러 프레임 넉넉히) */
+const LATE_RELEASE_MS = 120;
+
 export class Keyboard {
   private pressed = new Set<string>();
 
+  // 실제 키도 터치 버튼과 같이: 화면이 잠깐 멈춰 게임이 읽기 전에 손을 뗀 아주 짧은 탭도 한 번은 읽힌다
   private onDown = (e: KeyboardEvent) => {
-    if (isGameKey(e.code)) e.preventDefault();
-    this.pressed.add(e.code);
+    if (!isGameKey(e.code)) {
+      // 게임 키가 아닌 키(달리기 등 설정 키)는 예전처럼 바로
+      this.pressed.add(e.code);
+      return;
+    }
+    e.preventDefault();
+    // 꾹 누르고 있을 때 반복 이벤트: 눌린 상태만 유지 (창 전환 뒤 다시 잡을 때)
+    if (e.repeat) {
+      this.pressed.add(e.code);
+      return;
+    }
+    this.setVirtual(e.code, true);
   };
   private onUp = (e: KeyboardEvent) => {
-    if (isGameKey(e.code)) e.preventDefault();
-    this.pressed.delete(e.code);
+    if (!isGameKey(e.code)) {
+      this.pressed.delete(e.code);
+      return;
+    }
+    e.preventDefault();
+    this.setVirtual(e.code, false);
+    // 게임이 read 로 읽지 않는 키(달리기 등 has 로만 보는 키)가 눌린 채 남지 않게 잠시 뒤엔 반드시 뗀다
+    if (this.lateRelease.has(e.code)) {
+      const code = e.code;
+      setTimeout(() => {
+        if (this.lateRelease.delete(code)) {
+          this.unread.delete(code);
+          this.pressed.delete(code);
+        }
+      }, LATE_RELEASE_MS);
+    }
   };
   private onBlur = () => {
     this.pressed.clear();
@@ -108,7 +136,7 @@ export class Keyboard {
     target.removeEventListener('blur', this.onBlur);
   }
 
-  /** 화면 터치로 눌렀지만 아직 게임이 한 번도 읽지 않은 키 (아주 짧은 탭도 놓치지 않게) */
+  /** 눌렀지만 아직 게임이 한 번도 읽지 않은 키 (아주 짧은 탭도 놓치지 않게) */
   private unread = new Set<string>();
   /** 읽히기 전에 손을 뗀 키: 다음 read 뒤에 뗀다 */
   private lateRelease = new Set<string>();

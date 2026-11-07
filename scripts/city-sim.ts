@@ -11,6 +11,15 @@ import { dateOfDay, dayOfDate, shortDay } from '../src/game/city/calendar';
 import { CITY_CONST } from '../src/game/city/cityMap';
 import { crosswalks, vehicleLight, walkLight } from '../src/game/city/traffic';
 
+/** 시험용: 시계를 ms 만큼 앞으로 (실제로 몇 시간을 돌릴 수 없으니) */
+function skip(w: CityWorld, ms: number) {
+  w.minutes += ms / 60_000;
+  while (w.minutes >= 1440) {
+    w.minutes -= 1440;
+    w.day++;
+  }
+}
+
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`);
   if (!ok) process.exitCode = 1;
@@ -179,7 +188,12 @@ check('cars drive (most of them, some wait at red lights)', moved > w.cars.lengt
   const red = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
   red.player.reset(red.map.home.x, red.map.home.z, 0, 1);
   // 남북 빨간불이 한참 이어진 때 (주기 14초쯤)
-  while (red.signalSeconds < 36 + 14) red.step();
+  // 차가 정지선까지 올 시간을 준 뒤, 빨간불이 14초쯤 이어진 때까지
+  let redFor = 0;
+  for (let i = 0; i < 60 * 200 && !(i > 36 * 60 && redFor >= 14 * 60); i++) {
+    red.step();
+    redFor = vehicleLight('z', red.signalSeconds) === 'red' ? redFor + 1 : 0;
+  }
   check('north-south is red then', vehicleLight('z', red.signalSeconds) === 'red');
   const waiting = red.cars.filter((c) => c.dz !== 0 && c.v < 0.01 && c.stops.some((l) => { const d = (l - c.z) * c.dz; return d >= 0 && d < 1.5; })).length;
   check('cars stop at the stop line on red', waiting > 0, `(${waiting} waiting)`);
@@ -504,25 +518,46 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   w.player.reset(3.6, -0.5, 0, 1);
   c = { move: null, run: false, interact: true };
   w.step(); // 침대
-  c = { move: { x: 1, z: 0 }, run: false, interact: false }; // 자는 동안 방향키는 무시된다
-  const day0 = w.minutes < 7 * 60 ? w.day - 1 : w.day; // 새벽에 자면 같은 날 아침에 일어난다
+  c = { move: { x: 1, z: 0 }, run: false, interact: false }; // 침대로 가서 눕는 동안 방향키는 무시된다
   const phases = new Set<string>();
-  let minutesBack = 0;
-  let prevMin = w.minutes + w.day * 1440;
   let lieX = 0;
-  for (let i = 0; i < 60 * 20 && w.sleep; i++) {
+  for (let i = 0; i < 60 * 20 && w.sleep?.phase !== 'sleep'; i++) {
     w.step();
     phases.add(w.sleep?.phase ?? 'done');
     if (w.sleep?.phase === 'lie') lieX = w.player.x;
-    const now = w.minutes + w.day * 1440;
-    if (now < prevMin) minutesBack++;
-    prevMin = now;
   }
   c = { move: null, run: false, interact: false };
+  const abs0 = w.day * 1440 + w.minutes;
+  for (let i = 0; i < 60 * 10; i++) w.step();
+  // 시간은 실제처럼 흐르고(10초), 깨우지 않으면 계속 잔다
+  const slept10 = w.day * 1440 + w.minutes - abs0;
+  check('keeps sleeping until woken', w.sleep?.phase === 'sleep' && !!life.sleepAt, `(${w.sleep?.phase})`);
+  check('clock runs at real speed while asleep', Math.abs(slept10 - 10 / 60) < 0.01, `(${slept10.toFixed(3)}분)`);
+  // 2시간 자면 피로가 다 풀린다 (그래도 계속 잔다)
+  skip(w, 2 * 3_600_000);
+  w.step();
+  check('2 hours of sleep clears fatigue', life.fatigue < 1 && w.sleep?.phase === 'sleep', `(피로 ${life.fatigue.toFixed(1)})`);
+  // 아무 키나 누르면 일어난다
+  c = { move: { x: 1, z: 0 }, run: false, interact: false };
+  w.step();
+  c = { move: null, run: false, interact: false };
+  for (let i = 0; i < 60 * 5 && w.sleep; i++) {
+    w.step();
+    phases.add(w.sleep?.phase ?? 'done');
+  }
   check('sleep walks to bed, lies down, wakes', ['walk', 'lie', 'sleep', 'wake'].every((ph) => phases.has(ph)) && w.sleep === null, `(${[...phases].join('→')})`);
   check('bedside reached before lying', Math.abs(lieX - 1.95) < 0.05, `(x=${lieX.toFixed(2)})`);
-  check('night passes to 7am next day', w.day === day0 + 1 && w.minutes >= 7 * 60 && w.minutes < 7 * 60 + 5 && minutesBack === 0, `(${w.day}일째 ${w.clock})`);
-  check('sleep restores fatigue', w.location === 'home' && life.fatigue < 1, `(피로 ${life.fatigue.toFixed(1)})`);
+  check('wake clears saved sleep', w.location === 'home' && life.sleepAt === undefined && /잘 잤다/.test(w.toast?.text ?? ''), `(${w.toast?.text})`);
+  // 12시간이 넘으면 저절로 깬다
+  life.fatigue = 90;
+  w.player.reset(3.6, -0.5, 0, 1);
+  c = { move: null, run: false, interact: true };
+  w.step();
+  c = { move: null, run: false, interact: false };
+  for (let i = 0; i < 60 * 20 && w.sleep?.phase !== 'sleep'; i++) w.step();
+  skip(w, 12 * 3_600_000 + 60_000);
+  for (let i = 0; i < 60 * 5 && w.sleep; i++) w.step();
+  check('wakes by itself after 12 hours', w.sleep === null && /12시간/.test(w.toast?.text ?? ''), `(${w.toast?.text})`);
 }
 
 // ───── 13) 아파트 단지 산책 공원 ─────
@@ -631,8 +666,14 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   w.step();
   c = { move: null, run: false, interact: false };
   for (let i = 0; i < 200 && w.doorway; i++) w.step(); // 현관 문 여닫는 동안
-  for (let i = 0; i < 60 * 20 && w.sleep; i++) w.step();
-  check('sleep fully restores HP', p.hp === p.maxHp, `(${p.hp}/${p.maxHp})`);
+  for (let i = 0; i < 60 * 20 && w.sleep?.phase !== 'sleep'; i++) w.step();
+  skip(w, 31 * 60_000);
+  w.step();
+  check('30 minutes of sleep fully restores HP', p.hp === p.maxHp, `(${p.hp}/${p.maxHp})`);
+  c = { move: null, run: false, interact: true };
+  w.step();
+  c = { move: null, run: false, interact: false };
+  for (let i = 0; i < 60 * 5 && w.sleep; i++) w.step();
 }
 
 // ───── 16) 일자리: 아파트 경비 (행복빌라 1층 로비 데스크) ─────
@@ -782,7 +823,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
     }
     check('full 20-min shift pays base + bonus', !w.job && prof.gold >= 150 + job.checked * 2 - 1 && prof.jobs?.aptGuard?.shifts === 1, `(확인 ${job.checked}명, 선물 ${job.gifts}, ${prof.gold}G, 피로 ${prof.life.fatigue.toFixed(0)})`);
     const passed = w.day * 1440 + w.minutes - startAbs;
-    check('20 real minutes = 8 game hours', Math.abs(passed - 480) < 2, `(${passed.toFixed(1)}분)`);
+    check('20-minute shift = 20 game minutes (clock is real time)', Math.abs(passed - 20) < 0.5, `(${passed.toFixed(1)}분)`);
     const entry = prof.workLog?.[String(startDay)]?.[0];
     check('work day logged for calendar', entry?.result === 'done' && entry.pay > 0 && entry.checked === job.checked, `(${startDay}일째 ${entry?.pay}G)`);
     const w2 = new CityWorld({ read: () => box.c }, prof);
@@ -877,6 +918,8 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
     let slept = false;
     for (let i = 0; i < 60 * 300 && !(slept && !w.sleep); i++) {
       w.step();
+      // 잠들면 12시간 뒤로 (저절로 깬다)
+      if (!slept && w.sleep?.phase === 'sleep') skip(w, 12 * 3_600_000 + 60_000);
       slept ||= w.sleep?.phase === 'sleep';
     }
     check('auto-sleep walks home, sleeps, wakes', slept && !w.sleep && w.location === 'home' && prof.life.fatigue < 1, `(피로 ${prof.life.fatigue.toFixed(0)}, ${w.clock})`);

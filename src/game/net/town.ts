@@ -1,5 +1,5 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import type { CityWorld, NetHit, NetState } from '../city/cityWorld';
+import type { CityWorld, NetHit, NetState, NetTown } from '../city/cityWorld';
 import { saveProfile } from '../core/profile';
 import type { Account } from './auth';
 import { getSupabase } from './supabase';
@@ -17,6 +17,8 @@ const PING_MS = 3000;
 const JOB_MS = 100;
 /** TV 를 켜 둔 집에 친구가 같이 있으면 이 간격으로 재생 위치를 맞춘다 */
 const TV_MS = 3000;
+/** 동네(행인·차·경찰·박 반장)를 계산하는 사람이 장면을 보내는 간격 (초당 8번). 차는 2번에 1번, 이름·길 같은 건 8번에 1번 */
+const TOWN_MS = 125;
 
 interface Meta {
   name: string;
@@ -50,6 +52,8 @@ export class TownLink {
   private claimTimer: ReturnType<typeof setTimeout> | null = null;
   private lastJob = 0;
   private lastTv = 0;
+  private lastTown = 0;
+  private townN = 0;
   /** 내 방에 같이 있는 친구들 (새로 들어오면 TV 상태를 바로 보낸다) */
   private roomMates = '';
 
@@ -80,6 +84,13 @@ export class TownLink {
       .on('broadcast', { event: 'job' }, ({ payload }) => {
         const m = payload as { id: string; sc: NetJobScene };
         if (m.id !== me && m.sc && Array.isArray(m.sc.p)) this.world.applyRemoteJob(m.id, { p: m.sc.p.slice(0, 8), sp: m.sc.sp ?? [], ev: m.sc.ev ?? [] });
+      })
+      .on('broadcast', { event: 'town' }, ({ payload }) => {
+        const m = payload as { id: string; t: NetTown };
+        if (m.id === me || !m.t || !Array.isArray(m.t.n)) return;
+        // 내가 계산을 맡고 있으면 나에게 온 소식만 (창을 내려 둔 사이엔 받은 장면을 따라 둔다)
+        const hidden = typeof document !== 'undefined' && document.hidden;
+        this.world.applyTown(m.id, m.t, hidden || !this.world.isTownHost);
       })
       .on('broadcast', { event: 'tv' }, ({ payload }) => {
         const m = payload as { from: string; tv: TvNet };
@@ -140,6 +151,7 @@ export class TownLink {
     }
     this.sendJob(now);
     this.sendTv(now);
+    this.sendTown(now);
     // 옷을 갈아입었거나 가게에서 입어 보는 중이면 접속 정보도 새로 (친구 화면의 내 옷)
     if (this.trackedUnit && this.trackedUnit !== this.lookKey()) void this.claimHome();
     if (now - this.lastPing >= PING_MS) {
@@ -178,6 +190,17 @@ export class TownLink {
     const sc = job.netScene();
     const inBuilding = [...this.world.remotes.values()].some((r) => r.room === 'lobby' || /^cd/.test(r.room));
     if (inBuilding) void this.ch?.send({ type: 'broadcast', event: 'job', payload: { id: this.acc.userId, sc } });
+  }
+
+  /** 동네를 내가 계산하고 있고, 거리·빌라에 친구가 있으면 지금 장면을 보낸다 */
+  private sendTown(now: number) {
+    const w = this.world;
+    if (now - this.lastTown < TOWN_MS || !w.isTownHost) return;
+    if (!w.townWatchers() && !w.townNotesPending) return;
+    this.lastTown = now;
+    this.townN++;
+    const t = w.netTown(this.townN % 8 === 1, this.townN % 2 === 1);
+    void this.ch?.send({ type: 'broadcast', event: 'town', payload: { id: this.acc.userId, t } });
   }
 
   /** TV: 내가 바꿨거나, 새 친구가 방에 들어왔거나, 몇 초마다 (켜져 있을 때) 같은 방 친구에게 보낸다 */

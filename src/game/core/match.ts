@@ -36,7 +36,21 @@ export interface HudState {
   bestCombo: [{ hits: number; damage: number }, { hits: number; damage: number }];
   /** 양쪽이 당한 벽꽝 횟수 (이 경기) */
   wallSplats: [number, number];
+  /** 양쪽 퍼펙트 라운드 수 (이 경기) */
+  perfects: [number, number];
+  /** 양쪽 경기 통계 (이 경기): 준 데미지 · 맞힌 횟수 · 카운터 · 막은 횟수 · 잡기 풀기 */
+  stats: [MatchStats, MatchStats];
 }
+
+export interface MatchStats {
+  damage: number;
+  hits: number;
+  counters: number;
+  guards: number;
+  throwBreaks: number;
+}
+
+const emptyStats = (): MatchStats => ({ damage: 0, hits: 0, counters: 0, guards: 0, throwBreaks: 0 });
 
 /**
  * 한 판의 전체 게임 상태. 순수 로직이라 렌더러/DOM 과 무관하며,
@@ -56,6 +70,10 @@ export class Match {
   camNz = 1;
   roundWinner: 0 | 1 | 'draw' | null = null;
   roundEndKind: 'ko' | 'time' | null = null;
+  /** 이번 라운드를 무피해로 이겼나 */
+  roundPerfect = false;
+  /** 이 경기에서 양쪽이 낸 퍼펙트 라운드 수 */
+  perfects: [number, number] = [0, 0];
   lastHit: HitInfo | null = null;
 
   private events: MatchEvent[] = [];
@@ -63,6 +81,7 @@ export class Match {
   private calm: [number, number] = [0, 0];
   private bestCombo: HudState['bestCombo'] = [{ hits: 0, damage: 0 }, { hits: 0, damage: 0 }];
   private wallSplats: [number, number] = [0, 0];
+  private stats: [MatchStats, MatchStats] = [emptyStats(), emptyStats()];
 
   constructor(
     readonly mode: MatchMode,
@@ -78,6 +97,8 @@ export class Match {
     this.wins = [0, 0];
     this.bestCombo = [{ hits: 0, damage: 0 }, { hits: 0, damage: 0 }];
     this.wallSplats = [0, 0];
+    this.stats = [emptyStats(), emptyStats()];
+    this.perfects = [0, 0];
     this.round = 1;
     this.startRound();
   }
@@ -149,6 +170,8 @@ export class Match {
       lastHit: this.lastHit,
       bestCombo: this.bestCombo,
       wallSplats: this.wallSplats,
+      perfects: this.perfects,
+      stats: this.stats,
     };
   }
 
@@ -168,6 +191,7 @@ export class Match {
     this.timerFrames = ROUND_TIME * FPS;
     this.hitstop = 0;
     this.roundWinner = null;
+    this.roundPerfect = false;
     this.roundEndKind = null;
     this.lastHit = null;
     this.comboShow = null;
@@ -179,15 +203,32 @@ export class Match {
     this.phaseFrame = 0;
   }
 
+  /** 경기 통계 쌓기 */
+  private countStats(att: 0 | 1, info: HitInfo, dealt: number) {
+    const def = (1 - att) as 0 | 1;
+    if (info.result === 'block') {
+      if (info.name === '잡기 풀기!') this.stats[def].throwBreaks++;
+      else this.stats[def].guards++;
+      return;
+    }
+    const s = this.stats[att];
+    s.damage += dealt;
+    s.hits++;
+    if (info.result === 'counter') s.counters++;
+  }
+
   private resolveHits() {
     const [a, b] = this.fighters;
     // 양쪽 판정을 먼저 모두 계산한 뒤 적용 → 상쇄(트레이드)가 가능
     const hits = [detectHit(a, b), detectHit(b, a)].filter((h): h is PendingHit => !!h);
     let stop = 0;
     for (const h of hits) {
+      const hpBefore = h.def.hp;
       const out = applyHit(h);
       this.events.push(out.event);
       this.lastHit = out.info;
+      // 준 데미지는 실제로 깎인 체력만 (KO 한 방의 넘친 데미지는 빼고)
+      this.countStats(h.att.index as 0 | 1, out.info, Math.max(0, hpBefore - Math.max(0, h.def.hp)));
       if (h.def.combo >= 2) {
         this.comboShow = { side: h.att.index as 0 | 1, hits: h.def.combo, damage: h.def.comboDamage, frames: 90 };
         const best = this.bestCombo[h.att.index as 0 | 1];
@@ -230,6 +271,9 @@ export class Match {
       else winner = a.hp === b.hp ? 'draw' : a.hp > b.hp ? 0 : 1;
 
       this.roundWinner = winner;
+      // 퍼펙트: 이긴 쪽이 이 라운드에 한 대도 안 맞음
+      this.roundPerfect = winner !== 'draw' && this.fighters[winner].hp >= this.fighters[winner].maxHp;
+      if (this.roundPerfect && winner !== 'draw') this.perfects[winner]++;
       if (winner === 'draw') {
         this.wins[0]++;
         this.wins[1]++;
@@ -255,7 +299,8 @@ export class Match {
         return null;
       case 'roundEnd':
         if (this.phaseFrame < 80) return this.roundEndKind === 'ko' ? 'K.O.' : 'TIME UP';
-        return this.roundWinner === 'draw' ? 'DRAW' : `${this.fighters[this.roundWinner!].name} WIN`;
+        if (this.roundWinner === 'draw') return 'DRAW';
+        return `${this.fighters[this.roundWinner!].name} WIN${this.roundPerfect ? ' · PERFECT!' : ''}`;
       case 'matchEnd': {
         const [w0, w1] = this.wins;
         if (w0 === w1) return 'DRAW GAME';

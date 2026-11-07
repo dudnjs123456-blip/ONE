@@ -58,6 +58,9 @@ const press = (dir: Dir, button?: 1 | 2 | 3 | 4): RelInput => ({
   buttons: button ? (NO_BUTTONS.map((_, i) => i === button - 1) as Buttons) : NO_BUTTONS,
 });
 
+/** 띄운 상대가 이 높이(m)보다 낮으면 곧 떨어지니 공중 콤보를 넣지 않는다 */
+const JUGGLE_MIN_HEIGHT = 0.35;
+
 const CPU_ATTACKS: [Dir, 1 | 2 | 3 | 4][] = [
   [5, 1], [5, 2], [5, 3], [5, 4], [3, 1], [3, 2], [6, 2], [2, 4], [1, 3],
 ];
@@ -177,8 +180,13 @@ export class CpuController implements Controller {
     if (t.punish > 0 && oppAtWall && opponent.state === 'hitstun' && dist < 1.0) {
       this.queue.push(press(3, 2), press(3));
       this.hold(5, 10);
-    } else if (opponent.state === 'launched' && dist < 1.5) {
-      this.attack(this.rng() < 0.5 ? [5, 1] : [5, 3]);
+    } else if (opponent.state === 'launched' && dist < 1.8) {
+      // 공중 콤보: 다시 움직일 수 있게 되면 곧바로 원투 (멀면 다가가고, 바닥 직전이면 포기)
+      if (opponent.y < JUGGLE_MIN_HEIGHT || dist > 1.1) this.hold(dist > 1.0 ? 6 : 5, 1);
+      else {
+        this.queue.push(press(5, 1), ...Array<RelInput>(5).fill(press(5)), press(5, 2));
+        this.hold(5, 14);
+      }
     } else if (t.punish > 0 && oppAtWall && dist < 1.1 && r < a && this.rng() < 0.4) {
       this.attack([6, 2]);
     } else if (opponent.state === 'knockdown' || opponent.state === 'getup') {
@@ -219,15 +227,28 @@ export class CpuController implements Controller {
   }
 }
 
-export type DummyMode = 'stand' | 'crouch' | 'random' | 'punish' | 'cpu';
+/** open: 가드 없이 다가오기 (콤보 시연용, 메뉴엔 없음) */
+export type DummyMode = 'noguard' | 'stand' | 'crouch' | 'random' | 'punish' | 'cpu' | 'open' | 'playback';
 
 export const DUMMY_MODES: { id: DummyMode; label: string; desc: string }[] = [
+  { id: 'noguard', label: '가드 안 함', desc: '가만히 서서 다 맞음 (콤보·기술 연습)' },
   { id: 'stand', label: '서서 가드', desc: '상·중단은 막고 하단은 맞음' },
   { id: 'crouch', label: '앉아 가드', desc: '하단은 막고 상단은 헛침, 중단은 맞음' },
   { id: 'random', label: '랜덤 가드', desc: '공격마다 서거나 앉아서 막음 (중단·하단 섞기 연습)' },
   { id: 'punish', label: '가드 후 반격', desc: `막은 뒤 빈틈이 있으면 잽(${PUNISH_FRAMES}F)·하단엔 중단 잽으로 반격 (기술이 안전한지 확인)` },
   { id: 'cpu', label: 'CPU', desc: '보통 난이도 CPU 처럼 움직임' },
+  { id: 'playback', label: '녹화 재생', desc: '● 녹화로 저장한 내 동작을 허수아비가 나를 향해 반복 (막기·반격 연습)' },
 ];
+
+/** 녹화 앞뒤의 아무것도 안 누른 프레임을 잘라낸다 */
+export function trimTape(tape: RelInput[]): RelInput[] {
+  const idle = (i: RelInput) => i.dir === 5 && !i.buttons.some(Boolean) && !i.jump;
+  let a = 0;
+  let b = tape.length;
+  while (a < b && idle(tape[a])) a++;
+  while (b > a && idle(tape[b - 1])) b--;
+  return tape.slice(a, b);
+}
 
 /** 연습 모드 허수아비: 행동을 바꿀 수 있다 */
 export class TrainingDummyController implements Controller {
@@ -238,12 +259,44 @@ export class TrainingDummyController implements Controller {
   private crouchNow = false;
   private punishChecked = -1;
   private queue: RelInput[] = [];
+  /** 녹화 재생: 이 입력들을 처음부터 끝까지, 잠깐 쉬었다가 다시 */
+  private tape: RelInput[] = [];
+  private at = 0;
+  private gap = 0;
+
+  setTape(t: RelInput[]) {
+    this.tape = t;
+    this.at = 0;
+    this.gap = 30;
+  }
+  get hasTape() {
+    return this.tape.length > 0;
+  }
 
   read(ctx: ControllerContext): RelInput {
     const { self, opponent } = ctx;
+    // '가드 안 함' 일 때만 막지 못하게 (다른 모드로 바꾸면 다시 막는다)
+    self.canBlock = this.mode !== 'noguard';
     switch (this.mode) {
+      case 'noguard':
+        return NEUTRAL_INPUT;
+      case 'playback': {
+        if (!this.tape.length) return NEUTRAL_INPUT;
+        if (this.gap > 0) {
+          this.gap--;
+          return NEUTRAL_INPUT;
+        }
+        const i = this.tape[this.at++];
+        if (this.at >= this.tape.length) {
+          this.at = 0;
+          this.gap = 45; // 한 번 끝나면 0.75초 쉬고 다시
+        }
+        return i;
+      }
       case 'stand':
         return NEUTRAL_INPUT;
+      case 'open':
+        return press(6);
       case 'crouch':
         return press(2);
       case 'cpu':
@@ -271,5 +324,85 @@ export class TrainingDummyController implements Controller {
         return om && om.level === 'low' && !opponent.moveHits.includes(self) ? press(1) : NEUTRAL_INPUT;
       }
     }
+  }
+}
+
+/** 평소엔 안쪽 컨트롤러를 따르다가, 시연 입력이 들어오면 그것부터 재생한다 (연습 모드 콤보 시연) */
+export class DemoController implements Controller {
+  private queue: RelInput[] = [];
+  constructor(private inner: Controller) {}
+  get playing() {
+    return this.queue.length > 0;
+  }
+  play(inputs: RelInput[]) {
+    this.queue = [...inputs];
+  }
+  read(ctx: ControllerContext): RelInput {
+    return this.queue.shift() ?? this.inner.read(ctx);
+  }
+}
+
+/** 입력 기록 한 줄: 같은 입력이 이어진 프레임 수 */
+export interface InputLogEntry {
+  dir: Dir;
+  /** 누르고 있는 버튼 (예: [1, 2]) */
+  buttons: number[];
+  frames: number;
+}
+
+/** 안쪽 컨트롤러의 입력을 그대로 넘기면서 최근 입력을 기록한다 (연습 모드 입력 표시) */
+export class InputLogController implements Controller {
+  /** 최신이 앞 */
+  log: InputLogEntry[] = [];
+  /** 기록이 바뀔 때마다 1 씩 (화면 갱신 판단용) */
+  version = 0;
+  constructor(
+    private inner: Controller,
+    private max = 24,
+  ) {}
+  read(ctx: ControllerContext): RelInput {
+    const i = this.inner.read(ctx);
+    const buttons = i.buttons.flatMap((b, k) => (b ? [k + 1] : []));
+    const top = this.log[0];
+    if (top && top.dir === i.dir && top.buttons.join() === buttons.join()) {
+      top.frames = Math.min(top.frames + 1, 999);
+    } else {
+      this.log.unshift({ dir: i.dir, buttons, frames: 1 });
+      if (this.log.length > this.max) this.log.length = this.max;
+    }
+    this.version++;
+    return i;
+  }
+  clear() {
+    this.log = [];
+    this.version++;
+  }
+}
+
+/** 안쪽 컨트롤러의 입력을 프레임마다 녹화한다 (리플레이용). 엔진이 결정론적이라 입력만 있으면 경기를 그대로 재현할 수 있다 */
+export class RecordingController implements Controller {
+  tape: RelInput[] = [];
+  /** false 면 녹화하지 않고 그대로 넘기기만 한다 */
+  enabled = true;
+  /** 녹화 최대 길이 (프레임, 0 = 제한 없음) */
+  limit = 0;
+  constructor(private inner: Controller) {}
+  read(ctx: ControllerContext): RelInput {
+    const i = this.inner.read(ctx);
+    if (!this.enabled || (this.limit && this.tape.length >= this.limit)) return i;
+    this.tape.push({ dir: i.dir, buttons: [...i.buttons] as Buttons, ...(i.jump ? { jump: true } : {}) });
+    return i;
+  }
+  reset() {
+    this.tape = [];
+  }
+}
+
+/** 녹화한 입력을 그대로 다시 넣는다 (다 쓰면 중립) */
+export class TapeController implements Controller {
+  private at = 0;
+  constructor(private tape: readonly RelInput[]) {}
+  read(): RelInput {
+    return this.tape[this.at++] ?? { dir: 5, buttons: [false, false, false, false] };
   }
 }
