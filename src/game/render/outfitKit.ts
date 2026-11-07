@@ -9,8 +9,15 @@ import { addOutline, toonGradient } from './lookFx';
  * 모델 치수(머리 크기·눈 높이·등 위치)는 처음에 정점으로 재서, 모델이 바뀌어도 대충 맞게 붙는다.
  */
 
-/** 다시 칠하는 옷 재질 이름 (VRoid 표준 이름의 앞부분) */
-const CLOTH_MAT: Partial<Record<CosmeticSlot, string>> = { top: 'Tops_', bottom: 'Bottoms_', shoes: 'Shoes_' };
+/**
+ * 다시 칠하는 옷 재질 이름 (VRoid 표준 이름의 앞부분). 앞에 있는 이름부터 찾고, 없으면 다음 이름.
+ * 원피스(Onepiece_)를 입은 모델은 상의·하의 둘 다 원피스를 칠한다 (둘 다 입으면 상의 색이 이긴다).
+ */
+const CLOTH_MAT: [CosmeticSlot, string[]][] = [
+  ['top', ['Tops_', 'Onepiece_']],
+  ['bottom', ['Bottoms_', 'Onepiece_']],
+  ['shoes', ['Shoes_']],
+];
 
 type ClothMat = THREE.Material & {
   color?: THREE.Color;
@@ -18,8 +25,13 @@ type ClothMat = THREE.Material & {
   shadeMultiplyTexture?: THREE.Texture | null;
 };
 
+/** 옷 재질 한 조각 (조각마다 그림이 달라서 따로 칠하고 따로 되돌린다) */
 interface ClothPart {
-  mats: ClothMat[];
+  mat: ClothMat;
+  /** 이 조각을 칠할 수 있는 부위 (앞쪽이 우선) */
+  slots: CosmeticSlot[];
+  /** 지금 칠해진 코디 id ('' = 원래 옷) */
+  cur: string;
   origMap: THREE.Texture | null;
   origShade: THREE.Texture | null;
   origColor: THREE.Color;
@@ -61,25 +73,32 @@ const matName = (m: THREE.Material) => m.name.replace(/^[A-Z]\d{2}_\d{3}_(\d{2}_
 const textureCache = new Map<string, THREE.Texture>();
 
 export class OutfitDresser {
-  private parts = new Map<CosmeticSlot, ClothPart>();
+  private parts: ClothPart[] = [];
   private m: Metrics | null = null;
   private acc = new Map<CosmeticSlot, { id: string; obj: THREE.Object3D }>();
-  private cloth = new Map<CosmeticSlot, string>();
   private own: THREE.Texture[] = [];
 
   constructor(private vrm: VRM) {
-    for (const [slot, prefix] of Object.entries(CLOTH_MAT) as [CosmeticSlot, string][]) {
-      const mats: ClothMat[] = [];
-      vrm.scene.traverse((o) => {
-        const mesh = o as THREE.Mesh;
-        if (!mesh.isMesh || mesh.userData.isOutline) return;
-        for (const mt of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-          if (matName(mt).startsWith(prefix) && !(mt as { isOutline?: boolean }).isOutline && !mats.includes(mt as ClothMat)) mats.push(mt as ClothMat);
+    const all: ClothMat[] = [];
+    vrm.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData.isOutline) return;
+      for (const mt of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        if (!(mt as { isOutline?: boolean }).isOutline && !all.includes(mt as ClothMat)) all.push(mt as ClothMat);
+      }
+    });
+    for (const [slot, prefixes] of CLOTH_MAT) {
+      const prefix = prefixes.find((pf) => all.some((mt) => matName(mt).startsWith(pf)));
+      if (!prefix) continue;
+      for (const mat of all) {
+        if (!matName(mat).startsWith(prefix)) continue;
+        let part = this.parts.find((pt) => pt.mat === mat);
+        if (!part) {
+          part = { mat, slots: [], cur: '', origMap: mat.map ?? null, origShade: mat.shadeMultiplyTexture ?? null, origColor: mat.color?.clone() ?? new THREE.Color(1, 1, 1), shade: null };
+          this.parts.push(part);
         }
-      });
-      if (!mats.length) continue;
-      const m0 = mats[0];
-      this.parts.set(slot, { mats, origMap: m0.map ?? null, origShade: m0.shadeMultiplyTexture ?? null, origColor: m0.color?.clone() ?? new THREE.Color(1, 1, 1), shade: null });
+        part.slots.push(slot);
+      }
     }
     try {
       this.m = measure(vrm);
@@ -95,12 +114,13 @@ export class OutfitDresser {
       const c = COSMETIC_BY_ID[id];
       if (c) want.set(c.slot, c);
     }
-    for (const slot of ['top', 'bottom', 'shoes'] as CosmeticSlot[]) {
-      const c = want.get(slot);
-      if ((this.cloth.get(slot) ?? '') === (c?.id ?? '')) continue;
-      this.paint(slot, c ?? null);
-      if (c) this.cloth.set(slot, c.id);
-      else this.cloth.delete(slot);
+    for (const part of this.parts) {
+      // 이 조각을 칠할 수 있는 부위 중 실제로 입은 첫 코디
+      const slot = part.slots.find((sl) => want.has(sl));
+      const c = slot ? want.get(slot)! : null;
+      if (part.cur === (c?.id ?? '')) continue;
+      this.paint(part, c);
+      part.cur = c?.id ?? '';
     }
     for (const slot of ['hat', 'glasses', 'bag'] as CosmeticSlot[]) {
       const c = want.get(slot);
@@ -125,30 +145,25 @@ export class OutfitDresser {
   }
 
   /** 옷 재질 다시 칠하기 (null = 원래대로) */
-  private paint(slot: CosmeticSlot, c: CosmeticDef | null) {
-    const part = this.parts.get(slot);
-    if (!part) return;
+  private paint(part: ClothPart, c: CosmeticDef | null) {
+    const mt = part.mat;
     if (!c) {
-      for (const mt of part.mats) {
-        if (part.origMap) mt.map = part.origMap;
-        if (part.origShade) mt.shadeMultiplyTexture = part.origShade;
-        mt.color?.copy(part.origColor);
-      }
+      if (part.origMap) mt.map = part.origMap;
+      if (part.origShade) mt.shadeMultiplyTexture = part.origShade;
+      mt.color?.copy(part.origColor);
       return;
     }
     const src = part.origMap;
     let tex: THREE.Texture | null = null;
     if (src?.image) {
       part.shade ??= readShade(src.image as CanvasImageSource & { width: number; height: number });
-      if (part.shade) tex = this.dyed(`${slot}|${c.id}`, src, part.shade, c);
+      if (part.shade) tex = this.dyed(`${src.uuid}|${c.id}`, src, part.shade, c);
     }
-    for (const mt of part.mats) {
-      if (tex) {
-        mt.map = tex;
-        if (part.origShade) mt.shadeMultiplyTexture = tex;
-        mt.color?.setRGB(1, 1, 1);
-      } else mt.color?.setHex(c.color);
-    }
+    if (tex) {
+      mt.map = tex;
+      if (part.origShade) mt.shadeMultiplyTexture = tex;
+      mt.color?.setRGB(1, 1, 1);
+    } else mt.color?.setHex(c.color);
   }
 
   /** 밝기 그림 × 옷 색(무늬) → 새 그림 */
