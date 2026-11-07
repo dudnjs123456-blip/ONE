@@ -11,6 +11,15 @@ import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine 
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
+import { SONG_PRICE } from './karaoke';
+
+/** 코인노래방 사장님 한마디 (카운터에서 E) */
+const KARAOKE_TALK = [
+  `한 곡에 ${SONG_PRICE}G예요~ 방 안 노래방 기계에서 노래 고르면 바로 결제돼요!`,
+  '빈 방 아무 데나 들어가세요~ 1번부터 4번까지 다 비었어요!',
+  '탬버린 흔들면 점수가 좀 더 잘 나온대요~ 🔔',
+  '30초 넘게 부르면 점수 나와요! 100점 나오면 사진 찍어 가세요~',
+];
 import { MOVES, totalFrames, type MoveDef } from '../data/moves';
 import { EQUIPS, ensureGear, playerStats } from '../data/equipment';
 import { COSMETIC_BY_ID, ensureWardrobe, wornList, type CosmeticDef, type CosmeticSlot } from '../data/fashion';
@@ -629,8 +638,10 @@ export class CityWorld {
   tvRequest = false;
   /** 카지노 입구에서 E → 화면이 카지노 창을 연다 */
   casinoRequest = false;
-  /** 코인노래방 입구에서 E → 노래방 방 열기 */
+  /** 코인노래방 방의 노래방 기계 앞에서 E → 노래 고르기 창 열기 */
   karaokeRequest = false;
+  /** 지금 노래 부르는 코인노래방 방 번호 (창 제목에 쓴다) */
+  karaokeRoom: number | null = null;
   /** 버스정류장에서 E → 행선지 고르기 창 */
   busRequest = false;
   /** PC방에서 E → 게임 고르기 창 */
@@ -2560,12 +2571,8 @@ export class CityWorld {
       this.pcRoomRequest = true;
       return;
     }
-    if (poi.kind === 'shop' && poi.label === '코인노래방') {
-      this.karaokeRequest = true;
-      return;
-    }
     // 펫샵 · 음식점: 문을 열고 가게 안으로 들어간다
-    if (poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop' || (poi.kind === 'shop' && SHOPS[poi.label])) {
+    if (poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop' || poi.id === 'karaoke' || (poi.kind === 'shop' && SHOPS[poi.label])) {
       const L = storeLayout(poi.label);
       // 가게 문은 건물 앞면 (POI 는 문에서 1.2m 앞). 북쪽을 보는 가게는 문이 POI 의 남쪽
       const s = poi.facing === -1 ? -1 : 1;
@@ -2607,7 +2614,9 @@ export class CityWorld {
     this.moveTo('store', 0, L.room.z1 - 0.35, 0, -1);
     const s = SHOPS[sign];
     const hi =
-      L.kind === 'fishing'
+      L.kind === 'karaoke'
+        ? ['어서 오세요~ 빈 방 아무 데나 들어가서 부르세요! 🎤', '어서 와요~ 한 곡 ' + SONG_PRICE + 'G, 방 안 기계에서 바로 결제돼요!', '오늘 4번방 마이크 새로 갈았어요~ 마음껏 부르세요!'][Math.floor(this.rng() * 3)]
+        : L.kind === 'fishing'
         ? ['어서 와요~ 오늘 한강 물 좋아요! 🎣', '왔어요? 어제 누가 저기서 메기 대물을 걸었대요!', '미끼는 냉장고에, 낚싯대는 벽에! 잡은 고기는 계산대로 가져와요~'][Math.floor(this.rng() * 3)]
         : L.kind === 'clothes'
         ? ['어서 오세요~ 스타일 하우스예요! 편하게 둘러보세요 ✨', '신상 들어왔어요! 탈의실에서 입어보셔도 돼요~'][Math.floor(this.rng() * 2)]
@@ -2619,7 +2628,7 @@ export class CityWorld {
           ? s.greetings[Math.floor(this.rng() * s.greetings.length)]
           : '어서 오세요!';
     this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: hi });
-    this.say(`🚪 ${sign}에 들어왔다`, 2);
+    this.say(L.kind === 'karaoke' ? `🎤 계단을 올라 2층 ${sign}에 들어왔다` : `🚪 ${sign}에 들어왔다`, 2);
   }
 
   /** 옷가게: 전투 장비 사기 (가방으로) */
@@ -2997,7 +3006,7 @@ export class CityWorld {
           // 가게를 등지고 인도에 선다 (북쪽을 보는 가게면 북쪽으로)
           const s = back.f === -1 ? -1 : 1;
           this.moveTo('city', back.x, back.z - 0.85 * s, 0, s);
-          this.say(L.kind === 'pet' ? '🐾 또 놀러 와요~' : '또 오세요~', 1.5);
+          this.say(L.kind === 'pet' ? '🐾 또 놀러 와요~' : L.kind === 'karaoke' ? '🎤 계단을 내려왔다 — 또 놀러 오세요~' : '또 오세요~', 1.5);
         },
         close: this.storeDoor,
         out: back,
@@ -3012,6 +3021,15 @@ export class CityWorld {
       this.wardrobeRequest = true;
       this.say('🚪 탈의실 커튼을 쳤다', 1.5);
       return;
+    }
+    if (L.kind === 'karaoke') {
+      if (id.startsWith('store:sing:')) {
+        this.karaokeRoom = Number(id.slice(11)) || null;
+        this.karaokeRequest = true;
+      } else if (id === 'store:counter') {
+        this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: KARAOKE_TALK[Math.floor(this.rng() * KARAOKE_TALK.length)] });
+      }
+      if (id !== 'store:exit') return;
     }
     if (L.kind === 'fishing') {
       if (id === 'store:counter') this.fishingShopRequest = 'all';

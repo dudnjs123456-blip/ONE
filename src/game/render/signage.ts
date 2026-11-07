@@ -18,6 +18,7 @@ const SUB: Record<string, string> = {
   분식천국: 'KIMBAP · RAMYEON',
   PC방: 'GAMING LOUNGE · 24H',
   코인노래방: 'COIN KARAOKE',
+  네일샵: 'NAIL & CARE',
   약국: 'PHARMACY',
   헤어살롱: 'HAIR & NAIL',
   꽃집: 'FLOWER SHOP',

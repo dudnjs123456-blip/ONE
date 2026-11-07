@@ -288,7 +288,7 @@ export default function KaraokePanel({ world, onClose }: { world: CityWorld; onC
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-gradient-to-br from-[#1a0630] via-[#12051f] to-[#05121f] text-white">
       <div className="flex items-center gap-2 border-b border-fuchsia-400/30 px-3 py-2">
-        <div className="text-lg font-black tracking-wide text-fuchsia-300 drop-shadow-[0_0_8px_#e879f9]">🎤 코인노래방</div>
+        <div className="text-lg font-black tracking-wide text-fuchsia-300 drop-shadow-[0_0_8px_#e879f9]">🎤 코인노래방{world.karaokeRoom ? ` · ${world.karaokeRoom}번방` : ''}</div>
         <span className="hidden text-xs text-white/50 sm:inline">
           한 곡 {SONG_PRICE} G · 최고 {best || '-'}점
         </span>

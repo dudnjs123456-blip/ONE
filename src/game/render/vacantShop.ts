@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { Building } from "../city/cityMap";
+import { KARAOKE_NAME, stairDoorSpan, type Building } from "../city/cityMap";
 import { PET_BY_ID, PET_SHOP_NAME } from "../data/pets";
 import { CLOTHES_SHOP_NAME } from "../data/fashion";
 import { FISHING_SHOP_NAME } from "../data/fishing";
@@ -276,8 +276,10 @@ function petSignTexture(aspect: number) {
     g.textAlign = "center";
     g.textBaseline = "middle";
     g.font = `900 ${Math.round(H * 0.5)}px ${FONT}`;
+    const fit = Math.min(1, (W * 0.72) / g.measureText(PET_SHOP_NAME).width);
+    g.font = `900 ${Math.round(H * 0.5 * fit)}px ${FONT}`;
     g.fillText(PET_SHOP_NAME, W * 0.56, H * 0.46);
-    g.font = `700 ${Math.round(H * 0.17)}px ${FONT}`;
+    g.font = `700 ${Math.round(H * 0.17 * Math.max(fit, 0.7))}px ${FONT}`;
     g.fillStyle = "#fff7c2";
     g.fillText("분양 · 용품 · 미용", W * 0.56, H * 0.84);
     paw(g, W * 0.1, H * 0.5, H * 0.32, "#ffffff");
@@ -990,12 +992,16 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   const lx1 = gx1;
   const lx0 = lx1 - lobbyW;
   const midCol = (gx0 + lx0 - colW) / 2;
+  /** 2층 코인노래방: 1층 오른쪽 끝 계단 출입문 칸 */
+  const stair = b.upstairs === "karaoke" && !wide ? stairDoorSpan(w) : null;
   const units: [number, number][] = wide
     ? [
         [gx0, midCol - colW / 2],
         [midCol + colW / 2, lx0 - colW],
       ]
-    : [[gx0, gx1]];
+    : stair
+      ? [stair.shop]
+      : [[gx0, gx1]];
   // 점포 사이 기둥 · 계단 입구 옆 기둥 (화강석)
   if (wide) {
     // 간판 띠 아래까지만 (간판 띠 앞면과 겹치지 않게)
@@ -1224,7 +1230,10 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   // ── 현수막: 2층 띠에 가로로, 위층 오른쪽에 세로로 ──
   const bw = w - pilW * 2 - 0.5;
   const bh = 0.82;
-  paper(bannerTexture(bw / bh, pet || clothes || fishing ? `2층~${floors}층` : `1층~${floors}층`), bw, bh, 0, base(2) + 0.25, front + 0.03);
+  if (stair && floors >= 3)
+    paper(bannerTexture(bw / bh, floors > 3 ? `3층~${floors}층` : "3층"), bw, bh, 0, base(3) + 0.25, front + 0.03);
+  else if (!stair)
+    paper(bannerTexture(bw / bh, pet || clothes || fishing ? `2층~${floors}층` : `1층~${floors}층`), bw, bh, 0, base(2) + 0.25, front + 0.03);
   if (floors >= 3 && w >= 4) {
     const vh = Math.min(5.2, h - base(3) - 0.6);
     // 기둥 바로 옆, 층 띠 앞에 늘어뜨린다
@@ -1238,7 +1247,7 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
     );
   }
   // 위층 유리마다 '임대' 종이 한두 장
-  for (let f = 2; f <= floors; f++) {
+  for (let f = stair ? 3 : 2; f <= floors; f++) {
     const y = base(f) + 1.6;
     const n = f % 2 ? 2 : 1;
     for (let k = 0; k < n; k++)
@@ -1250,6 +1259,19 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
         y,
         glassZ - 0.01,
       );
+  }
+
+  if (stair) {
+    const k = buildKaraokeFront(
+      stair.door,
+      gx0,
+      gx1,
+      { front, glassZ, backWallZ, signY0, signY1, floor2: base(2) },
+      keep,
+      put,
+      { alu, granite, plaster, glass, concrete },
+    );
+    for (const m of k) flat.push({ mesh: m });
   }
 
   // ── 옥상: 계단실 + 실외기 ──
@@ -1280,4 +1302,192 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
     mats.push(mesh.material as THREE.MeshStandardMaterial);
   }
   return { group, mats, glow: [lamp], textures, glass };
+}
+
+/** 코인노래방 네온 간판 (2층 띠): 짙은 보라 바탕 + 분홍 네온 글씨 + 마이크 */
+function karaokeSignTexture(aspect: number) {
+  const W = 1024;
+  const H = Math.max(120, Math.round(W / aspect));
+  return canvasTex(W, H, (g) => {
+    const grd = g.createLinearGradient(0, 0, W, 0);
+    grd.addColorStop(0, "#2a0a3d");
+    grd.addColorStop(1, "#15052a");
+    g.fillStyle = grd;
+    g.fillRect(0, 0, W, H);
+    g.strokeStyle = "#ff5fd2";
+    g.lineWidth = H * 0.05;
+    g.shadowColor = "#ff5fd2";
+    g.shadowBlur = H * 0.12;
+    g.strokeRect(H * 0.08, H * 0.1, W - H * 0.16, H - H * 0.2);
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `900 ${Math.round(H * 0.44)}px ${FONT}`;
+    const fit = Math.min(1, (W * 0.62) / g.measureText(KARAOKE_NAME).width);
+    g.font = `900 ${Math.round(H * 0.44 * fit)}px ${FONT}`;
+    g.fillStyle = "#ffe9ff";
+    g.shadowColor = "#ff4fd8";
+    g.shadowBlur = H * 0.18;
+    g.fillText(KARAOKE_NAME, W * 0.57, H * 0.43);
+    g.font = `800 ${Math.round(H * 0.17)}px ${FONT}`;
+    g.fillStyle = "#7fe9ff";
+    g.shadowColor = "#38d9ff";
+    g.fillText("COIN KARAOKE · 2F", W * 0.57, H * 0.78);
+    // 마이크
+    g.shadowColor = "#ffd24a";
+    g.fillStyle = "#ffd24a";
+    const mx = W * 0.13;
+    const my = H * 0.42;
+    const r = H * 0.16;
+    g.beginPath();
+    g.arc(mx, my, r, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(mx - r * 0.35, my + r * 0.8, r * 0.7, r * 1.6);
+  });
+}
+
+/** 계단 출입문 위 작은 안내판: '2F ↑ 코인노래방' */
+function stairSignTexture() {
+  return canvasTex(256, 200, (g) => {
+    g.fillStyle = "#1b0629";
+    g.fillRect(0, 0, 256, 200);
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.shadowColor = "#ff4fd8";
+    g.shadowBlur = 14;
+    g.fillStyle = "#ffe9ff";
+    g.font = `900 64px ${FONT}`;
+    g.fillText("2F ↑", 128, 62);
+    g.font = `800 36px ${FONT}`;
+    g.fillStyle = "#7fe9ff";
+    g.shadowColor = "#38d9ff";
+    g.fillText(KARAOKE_NAME, 128, 140);
+  });
+}
+
+/** 2층 유리 너머 노래방 안 (보라 조명 · 방 문 · 네온 띠): 밤낮 없이 불이 켜져 있다 */
+function karaokeWindowTexture(aspect: number) {
+  const W = 1024;
+  const H = Math.max(200, Math.round(W / aspect));
+  return canvasTex(W, H, (g) => {
+    const grd = g.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0, "#3b0f5c");
+    grd.addColorStop(0.7, "#24093d");
+    grd.addColorStop(1, "#14051f");
+    g.fillStyle = grd;
+    g.fillRect(0, 0, W, H);
+    // 천장 네온 띠
+    g.fillStyle = "#ff5fd2";
+    g.shadowColor = "#ff5fd2";
+    g.shadowBlur = 24;
+    g.fillRect(0, H * 0.06, W, H * 0.025);
+    g.shadowBlur = 0;
+    // 방 문 셋 (번호 + 작은 유리창)
+    for (let i = 0; i < 3; i++) {
+      const dx = W * (0.12 + i * 0.3);
+      const dw = W * 0.18;
+      g.fillStyle = "#1a0a26";
+      g.fillRect(dx, H * 0.22, dw, H * 0.78);
+      g.fillStyle = i === 1 ? "#ffcf5a" : "#7fe9ff";
+      g.globalAlpha = 0.75;
+      g.fillRect(dx + dw * 0.3, H * 0.34, dw * 0.4, H * 0.22);
+      g.globalAlpha = 1;
+      g.fillStyle = "#ffe9ff";
+      g.font = `800 ${Math.round(H * 0.08)}px ${FONT}`;
+      g.textAlign = "center";
+      g.fillText(`${i + 1}`, dx + dw / 2, H * 0.29);
+    }
+    // 미러볼 빛 점
+    for (let k = 0; k < 40; k++) {
+      g.fillStyle = ["#ffffff", "#ff9ae6", "#9ff1ff", "#fff19a"][k % 4];
+      g.globalAlpha = 0.5;
+      g.fillRect((k * 197) % W, H * 0.1 + ((k * 89) % Math.round(H * 0.5)), 6, 6);
+    }
+    g.globalAlpha = 1;
+  });
+}
+
+type PutFn = (mat: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number, ry?: number) => void;
+
+/**
+ * 펫샵 건물의 2층 코인노래방 겉모습:
+ *  - 1층 오른쪽 끝 계단 출입문 칸: 계단실 (올라가는 계단 · 보라 LED 띠) + 문 위 '2F ↑' 안내판
+ *    (유리문 문짝은 다른 가게 문처럼 cityRenderer 가 단다)
+ *  - 2층 띠: 네온 간판 / 2층 유리 너머: 불 켜진 노래방 안
+ * 반환: 따로 그리는 빛나는 판들
+ */
+function buildKaraokeFront(
+  door: [number, number],
+  gx0: number,
+  gx1: number,
+  at: { front: number; glassZ: number; backWallZ: number; signY0: number; signY1: number; floor2: number },
+  keep: (t: THREE.Texture) => THREE.Texture,
+  put: PutFn,
+  m: { alu: THREE.Material; granite: THREE.Material; plaster: THREE.Material; glass: THREE.Material; concrete: THREE.Material },
+): THREE.Mesh[] {
+  const out: THREE.Mesh[] = [];
+  const [dx0, dx1] = door;
+  const dw = dx1 - dx0;
+  const dcx = (dx0 + dx1) / 2;
+  const box = (mat: THREE.Material, bw: number, bh: number, bd: number, x: number, y: number, z: number) => put(mat, new THREE.BoxGeometry(bw, bh, bd), x, y, z);
+  // 점포 칸과 계단 칸 사이 화강석 기둥 (간판 띠 아래까지)
+  box(m.granite, 0.12, at.signY0, 0.3, dx0 - 0.06, at.signY0 / 2, at.front - 0.27);
+  // 계단실 옆벽 (점포 쪽): 점포 안이 계단실로 이어져 보이지 않게
+  const depth = at.glassZ - at.backWallZ;
+  box(m.plaster, 0.08, at.signY1, depth, dx0 - 0.02, at.signY1 / 2, at.backWallZ + depth / 2);
+  // 계단 (안쪽으로 올라간다)
+  const steps = 10;
+  const run = Math.min(0.28, (depth - 0.5) / steps);
+  for (let i = 0; i < steps; i++) {
+    const h = 0.18 * (i + 1);
+    box(m.concrete, dw - 0.1, h, run, dcx, h / 2, at.glassZ - 0.45 - i * run);
+  }
+  // 계단실 천장 (간판 띠 높이)
+  box(m.plaster, dw, 0.06, depth, dcx, at.signY0, at.backWallZ + depth / 2);
+  // 문틀 + 문 위 채광창
+  for (const s of [-1, 1]) box(m.alu, 0.06, 2.35, 0.12, dcx + (s * dw) / 2 - s * 0.03, 1.175, at.glassZ);
+  box(m.alu, dw, 0.08, 0.12, dcx, 2.39, at.glassZ);
+  put(m.glass, new THREE.PlaneGeometry(dw - 0.06, at.signY0 - 2.45), dcx, (2.43 + at.signY0) / 2, at.glassZ);
+  // 보라 LED 띠 (계단 벽을 따라) + 계단실 안쪽 빛
+  const neon = new THREE.MeshStandardMaterial({ color: 0xff5fd2, emissive: 0xff3fc8, emissiveIntensity: 1.4, roughness: 0.4 });
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, depth - 0.3), neon);
+  led.position.set(dx1 - 0.06, 0.95, at.backWallZ + depth / 2);
+  out.push(led);
+  const glowBack = new THREE.Mesh(
+    new THREE.PlaneGeometry(dw - 0.1, at.signY0 - 0.2),
+    new THREE.MeshStandardMaterial({ color: 0x2a0b3e, emissive: 0x5a1a7a, emissiveIntensity: 0.9, roughness: 1 }),
+  );
+  glowBack.position.set(dcx, (at.signY0 - 0.2) / 2 + 0.1, at.backWallZ + 0.04);
+  out.push(glowBack);
+  // 문 위 안내판 (간판 띠)
+  const sh = at.signY1 - at.signY0 - 0.12;
+  const stTex = keep(stairSignTexture());
+  const stairSign = new THREE.Mesh(
+    new THREE.PlaneGeometry(Math.min(dw - 0.08, sh * 1.28), sh),
+    new THREE.MeshStandardMaterial({ map: stTex, emissive: 0xffffff, emissiveMap: stTex, emissiveIntensity: 0.6, roughness: 0.5 }),
+  );
+  stairSign.position.set(dcx, (at.signY0 + at.signY1) / 2, at.front - 0.09);
+  out.push(stairSign);
+
+  // ── 2층 ──
+  const gw = gx1 - gx0;
+  // 네온 간판: 2층 창 아래 띠 앞
+  const sw = gw - 0.1;
+  const sgh = 0.78;
+  const sTex = keep(karaokeSignTexture(sw / sgh));
+  const sign = new THREE.Mesh(
+    new THREE.PlaneGeometry(sw, sgh),
+    new THREE.MeshStandardMaterial({ map: sTex, emissive: 0xffffff, emissiveMap: sTex, emissiveIntensity: 0.85, roughness: 0.5 }),
+  );
+  sign.position.set((gx0 + gx1) / 2, at.floor2 + 0.27, at.front + 0.04);
+  out.push(sign);
+  // 유리 너머 불 켜진 노래방 (안쪽 벽에 붙인 그림)
+  const ih = 3.4 - 0.35;
+  const iTex = keep(karaokeWindowTexture((gw - 0.1) / ih));
+  const inside = new THREE.Mesh(
+    new THREE.PlaneGeometry(gw - 0.1, ih),
+    new THREE.MeshStandardMaterial({ map: iTex, emissive: 0xffffff, emissiveMap: iTex, emissiveIntensity: 0.7, roughness: 1 }),
+  );
+  inside.position.set((gx0 + gx1) / 2, at.floor2 + ih / 2, at.backWallZ + 0.02);
+  out.push(inside);
+  return out;
 }

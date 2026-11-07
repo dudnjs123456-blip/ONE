@@ -3,7 +3,7 @@ import { PET_BY_ID, PET_GOODS, PET_SHOP_NAME, PET_SPECIES } from '../data/pets';
 import { SHOPS } from '../data/shops';
 import { CLOTHES_SHOP_NAME } from '../data/fashion';
 import { FISHING_SHOP_NAME, RODS } from '../data/fishing';
-import type { Poi } from './cityMap';
+import { KARAOKE_NAME, type Poi } from './cityMap';
 
 /**
  * 가게 안 (먹거리 가게 · 펫샵): 문을 열고 들어가서 걸어 다니며 진열대의 물건을 직접 보고 산다.
@@ -21,7 +21,7 @@ export interface Rect {
   z1: number;
 }
 
-export type StoreKind = 'pet' | 'mart' | 'cafe' | 'diner' | 'clothes' | 'fishing';
+export type StoreKind = 'pet' | 'mart' | 'cafe' | 'diner' | 'clothes' | 'fishing' | 'karaoke';
 
 /** 옷가게 진열 구역: 전투 장비 셋 + 코디 넷 */
 export type ClothesCorner = 'weapon' | 'gearAcc' | 'armor' | 'hat' | 'top' | 'bottom' | 'shoes';
@@ -74,6 +74,7 @@ export function storeKindOf(sign: string): StoreKind {
   if (sign === PET_SHOP_NAME) return 'pet';
   if (sign === CLOTHES_SHOP_NAME) return 'clothes';
   if (sign === FISHING_SHOP_NAME) return 'fishing';
+  if (sign === KARAOKE_NAME) return 'karaoke';
   if (sign === '편의점 24' || sign === '약국' || sign === '꽃집' || sign === '안경원') return 'mart';
   if (sign === '카페 모먼트' || sign === '베이커리') return 'cafe';
   return 'diner';
@@ -86,6 +87,7 @@ const THEMES: Record<StoreKind, StoreLayout['theme']> = {
   mart: { wall: 0xf2f4f6, floor: 0xd9dde2, accent: 0x2f6fd6 },
   cafe: { wall: 0xefe4d6, floor: 0x9c7350, accent: 0x5a3b28 },
   diner: { wall: 0xf3e8d2, floor: 0xb89a74, accent: 0xc0392b },
+  karaoke: { wall: 0x2a1838, floor: 0x3a3340, accent: 0xc026d3 },
 };
 
 const buildCache = new Map<string, StoreLayout>();
@@ -94,7 +96,7 @@ export function storeLayout(sign: string): StoreLayout {
   const hit = buildCache.get(sign);
   if (hit) return hit;
   const kind = storeKindOf(sign);
-  const layout = kind === 'pet' ? petLayout(sign) : kind === 'clothes' ? clothesLayout(sign) : kind === 'fishing' ? fishingLayout(sign) : foodLayout(sign, kind);
+  const layout = kind === 'pet' ? petLayout(sign) : kind === 'clothes' ? clothesLayout(sign) : kind === 'fishing' ? fishingLayout(sign) : kind === 'karaoke' ? karaokeLayout(sign) : foodLayout(sign, kind);
   buildCache.set(sign, layout);
   return layout;
 }
@@ -424,4 +426,74 @@ export class PenSim {
       a.moving = Math.min(1, a.moving + 0.15);
     }
   }
+}
+
+/** 코인노래방 방 하나: 방 번호 · 방 안쪽 · 화면이 붙은 바깥 벽 쪽 (-1 = 서쪽, 1 = 동쪽) · 문 가운데 z */
+export interface KaraokeBooth {
+  no: number;
+  rect: Rect;
+  side: -1 | 1;
+  doorZ: number;
+}
+
+/** 코인노래방 크기 (10 × 8 m): 복도 폭 · 방과 로비 사이 벽 z · 방 문 폭 */
+export const KARAOKE_ROOM: Rect = { x0: -5, x1: 5, z0: -4, z1: 4 };
+export const KARAOKE_HALL = 0.85;
+export const KARAOKE_LOBBY_Z = 0.5;
+export const KARAOKE_DOOR_W = 0.95;
+const WALL_T = 0.06;
+
+/** 방 넷: 복도 서쪽에 1·2번, 동쪽에 3·4번 (북쪽부터) */
+export const KARAOKE_BOOTHS: KaraokeBooth[] = (() => {
+  const { x0, x1, z0 } = KARAOKE_ROOM;
+  const mid = (z0 + KARAOKE_LOBBY_Z) / 2;
+  const out: KaraokeBooth[] = [];
+  for (const side of [-1, 1] as const) {
+    const [bx0, bx1] = side < 0 ? [x0, -KARAOKE_HALL] : [KARAOKE_HALL, x1];
+    out.push({ no: out.length + 1, side, rect: { x0: bx0, x1: bx1, z0, z1: mid }, doorZ: (z0 + mid) / 2 });
+    out.push({ no: out.length + 1, side, rect: { x0: bx0, x1: bx1, z0: mid, z1: KARAOKE_LOBBY_Z }, doorZ: (mid + KARAOKE_LOBBY_Z) / 2 });
+  }
+  return out;
+})();
+
+/**
+ * 코인노래방 (펫샵 건물 2층, 10 × 8 m). 계단을 올라와 남쪽 문으로 들어선다.
+ *  - 남쪽 로비: 동쪽 카운터 (사장님) · 서쪽 대기 소파
+ *  - 가운데 복도 (북쪽으로) 양옆에 방 넷: 바깥 벽에 큰 화면과 노래방 기계, 긴 벽에 소파, 가운데 테이블
+ *  - 방에 들어가 노래방 기계 앞에서 E → 노래 고르기 (한 곡씩 결제)
+ */
+function karaokeLayout(sign: string): StoreLayout {
+  const room = KARAOKE_ROOM;
+  const furniture: StoreLayout['furniture'] = [];
+  const pois: Poi[] = [];
+  const wall = (id: string, r: Rect) => furniture.push({ id: `wall:${id}`, rect: r });
+  // 방과 로비 사이 벽 (복도 입구만 비운다)
+  wall('lobbyW', { x0: room.x0, x1: -KARAOKE_HALL, z0: KARAOKE_LOBBY_Z - WALL_T, z1: KARAOKE_LOBBY_Z + WALL_T });
+  wall('lobbyE', { x0: KARAOKE_HALL, x1: room.x1, z0: KARAOKE_LOBBY_Z - WALL_T, z1: KARAOKE_LOBBY_Z + WALL_T });
+  for (const b of KARAOKE_BOOTHS) {
+    const { rect: r, side } = b;
+    const hallX = side < 0 ? r.x1 : r.x0;
+    // 복도 쪽 벽 (문 자리만 비운다)
+    wall(`hall${b.no}a`, { x0: hallX - WALL_T, x1: hallX + WALL_T, z0: r.z0, z1: b.doorZ - KARAOKE_DOOR_W / 2 });
+    wall(`hall${b.no}b`, { x0: hallX - WALL_T, x1: hallX + WALL_T, z0: b.doorZ + KARAOKE_DOOR_W / 2, z1: r.z1 });
+    // 북쪽 방과 남쪽 방 사이 벽
+    if (r.z1 < KARAOKE_LOBBY_Z - 0.01) wall(`split${b.no}`, { x0: r.x0, x1: r.x1, z0: r.z1 - WALL_T, z1: r.z1 + WALL_T });
+    // 바깥 벽: 화면 + 노래방 기계 / 긴 벽: 소파 / 가운데: 테이블
+    const outX = side < 0 ? r.x0 : r.x1;
+    const inward = -side;
+    const cz = (r.z0 + r.z1) / 2;
+    const xs = (a: number, c: number) => (a < c ? { x0: a, x1: c } : { x0: c, x1: a });
+    furniture.push({ id: `machine:${b.no}`, rect: { ...xs(outX, outX + inward * 0.45), z0: cz - 0.35, z1: cz + 0.35 } });
+    furniture.push({ id: `sofa:${b.no}`, rect: { ...xs(outX + inward * 0.8, hallX - inward * 0.75), z0: r.z0 + WALL_T, z1: r.z0 + 0.66 } });
+    furniture.push({ id: `table:${b.no}`, rect: { ...xs(outX + inward * 1.4, outX + inward * 2.8), z0: r.z0 + 0.95, z1: r.z0 + 1.45 } });
+    pois.push({ id: `store:sing:${b.no}`, kind: 'shop', label: `🎤 ${b.no}번방 노래방 기계 — 노래 부르기`, x: outX + inward * 0.95, z: cz + 0.25, radius: 0.75 });
+  }
+  // 로비: 카운터 (동쪽) · 대기 소파 (서쪽)
+  furniture.push({ id: 'counter', rect: { x0: 3.0, x1: 3.6, z0: 1.15, z1: 2.95 } });
+  furniture.push({ id: 'backbar', rect: { x0: room.x1 - 0.3, x1: room.x1, z0: 0.9, z1: 3.2 } });
+  const keeper = { x: 4.2, z: 2.05 };
+  furniture.push({ id: 'waitSofa', rect: { x0: room.x0, x1: room.x0 + 0.65, z0: 1.3, z1: 3.3 } });
+  pois.push({ id: 'store:counter', kind: 'shop', label: '카운터 — 사장님과 이야기 (이용 안내)', x: 2.4, z: 2.05, radius: 0.85 });
+  pois.push({ id: 'store:exit', kind: 'home', label: '출입문 (계단으로 내려가기)', x: 0, z: room.z1 - 0.45, radius: 0.9 });
+  return { sign, kind: 'karaoke', room, spawn: { x: 0, z: room.z1 - 1.0 }, keeper, furniture, displays: [], pois, spots: [], theme: THEMES.karaoke };
 }

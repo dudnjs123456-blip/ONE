@@ -37,6 +37,24 @@ export interface Building {
   vacant?: boolean;
   /** 1층에 들어온 가게 (위층은 그대로 공실) */
   tenant?: 'pet' | 'clothes' | 'fishing';
+  /** 2층에 들어온 가게: 1층 오른쪽 끝에 계단 출입문을 따로 낸다 */
+  upstairs?: 'karaoke';
+}
+
+/** 펫샵 건물 2층 코인노래방 */
+export const KARAOKE_NAME = '코인노래방';
+
+/**
+ * 2층 가게가 있는 건물 앞면 나누기 (건물 가운데 기준 x): 1층 점포 칸과 오른쪽 끝 계단 출입문 칸.
+ * 정면 기둥 폭은 건물 그림(vacantShop)과 같은 규칙 (좁은 건물 0.4 m, 넓은 건물 0.62 m).
+ */
+export function stairDoorSpan(w: number): { shop: [number, number]; door: [number, number] } {
+  const pil = w < 6 ? 0.4 : 0.62;
+  const gx0 = -w / 2 + pil;
+  const gx1 = w / 2 - pil;
+  const doorW = 0.95;
+  const col = 0.12;
+  return { shop: [gx0, gx1 - doorW - col], door: [gx1 - doorW, gx1] };
 }
 
 export type PoiKind = 'home' | 'shop' | 'subway' | 'bus' | 'park' | 'job' | 'casino' | 'fish';
@@ -152,7 +170,7 @@ const SHOPS: Sign[] = [
   { text: '황금치킨', bg: '#f2b705', fg: '#3a1d00' },
   { text: '분식천국', bg: '#e8483b', fg: '#ffffff' },
   { text: 'PC방', bg: '#1b2a6b', fg: '#7fe1ff' },
-  { text: '코인노래방', bg: '#a020a0', fg: '#ffe9ff' },
+  { text: '네일샵', bg: '#f8bbd0', fg: '#880e4f' },
   { text: '약국', bg: '#ffffff', fg: '#1a8a3a' },
   { text: '헤어살롱', bg: '#202020', fg: '#ffd1e0' },
   { text: '꽃집', bg: '#ffe0ea', fg: '#c2185b' },
@@ -189,7 +207,9 @@ function shopRow(x0: number, x1: number, zFront: number): Omit<Building, 'id'>[]
     const w = total * p;
     // 빌라 바로 옆 건물 1층엔 펫샵, 그 옆 건물엔 옷가게, 맨 끝 4층 건물엔 낚시점이 들어왔다
     const tenant = i === parts.length - 1 ? ('pet' as const) : i === parts.length - 2 ? ('clothes' as const) : ('fishing' as const);
-    out.push({ kind: 'shop', x: x + w / 2, z: zFront - D / 2, w: w - gap, d: D, h: 4.2 + uppers[i] * 3.4, color: colors[i], vacant: true, tenant });
+    // 펫샵 건물 2층엔 코인노래방이 들어왔다 (1층 오른쪽 계단으로 올라간다)
+    const upstairs = tenant === 'pet' ? ('karaoke' as const) : undefined;
+    out.push({ kind: 'shop', x: x + w / 2, z: zFront - D / 2, w: w - gap, d: D, h: 4.2 + uppers[i] * 3.4, color: colors[i], vacant: true, tenant, ...(upstairs ? { upstairs } : {}) });
     x += w;
   });
   return out;
@@ -340,7 +360,13 @@ export function buildCityMap(seed = 2025): CityMap {
 
   for (const s of laterShops) {
     const b = add(s);
-    if (b.tenant === 'pet') pois.push({ id: 'petshop', kind: 'shop', label: PET_SHOP_NAME, x: b.x, z: b.z + b.d / 2 + 1.2, radius: 1.8 });
+    if (b.tenant === 'pet') {
+      // 2층 가게가 있으면 1층 점포 칸이 줄어든다: 펫샵 문은 점포 칸 가운데, 계단 문은 오른쪽 끝
+      const span = b.upstairs ? stairDoorSpan(b.w) : null;
+      const shopX = span ? b.x + (span.shop[0] + span.shop[1]) / 2 : b.x;
+      pois.push({ id: 'petshop', kind: 'shop', label: PET_SHOP_NAME, x: shopX, z: b.z + b.d / 2 + 1.2, radius: span ? 1.3 : 1.8 });
+      if (span) pois.push({ id: 'karaoke', kind: 'shop', label: KARAOKE_NAME, x: b.x + (span.door[0] + span.door[1]) / 2, z: b.z + b.d / 2 + 1.2, radius: 0.9 });
+    }
     if (b.tenant === 'clothes') pois.push({ id: 'clothesshop', kind: 'shop', label: CLOTHES_SHOP_NAME, x: b.x, z: b.z + b.d / 2 + 1.2, radius: 1.8 });
   }
 

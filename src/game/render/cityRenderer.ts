@@ -1046,11 +1046,13 @@ export class CityRenderer {
     for (const poi of m.pois) {
       if (poi.kind !== 'shop') continue;
       // 펫샵·옷가게는 기둥 안쪽으로 들어간 유리면에 문이 있다
-      const inset = poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop';
+      const inset = poi.id === 'petshop' || poi.id === 'clothesshop' || poi.id === 'fishingshop' || poi.id === 'karaoke';
+      // 2층 가게가 있는 펫샵 건물은 1층 점포 칸이 좁아 문도 좁다 (오른쪽 끝은 노래방 계단 문)
+      const narrow = poi.id === 'karaoke' || (poi.id === 'petshop' && m.pois.some((q) => q.id === 'karaoke'));
       // 북쪽을 보는 가게는 문이 POI 의 남쪽에 있고 문짝도 북쪽을 본다 (문 묶음을 180° 돌린다)
       const north = poi.facing === -1;
       const z = north ? poi.z + 1.2 - 0.08 : poi.z - 1.2 + (inset ? -0.35 : 0.08);
-      const w = inset ? 1.36 : 1.5;
+      const w = poi.id === 'karaoke' ? 0.8 : narrow ? 0.9 : inset ? 1.36 : 1.5;
       const g = new THREE.Group();
       g.position.set(poi.x, 0, z);
       if (north) g.rotation.y = Math.PI;

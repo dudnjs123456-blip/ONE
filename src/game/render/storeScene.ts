@@ -3,6 +3,7 @@ import type { StockPet, StoreLayout } from '../city/store';
 import { glassMaterial } from './glassKit';
 import { buildClothesInterior } from './clothesInterior';
 import { buildFishingInterior } from './fishingInterior';
+import { buildKaraokeInterior } from './karaokeInterior';
 import type { FishingState } from '../data/fishing';
 import { swingDoors, type DoorControl } from './signage';
 import { SHOPS } from '../data/shops';
@@ -90,13 +91,14 @@ export function buildStoreScene(L: StoreLayout, stock: StockPet[] = []): StoreSc
     return m;
   };
 
-  // 조명
-  g.add(new THREE.HemisphereLight(0xfffaf0, 0x4a4238, 0.8));
-  for (const [lx, lz] of [[-2, -1], [2, -1], [-2, 1.6], [2, 1.6]]) {
-    const l = new THREE.PointLight(0xfff2dc, 5, 7, 1.6);
+  // 조명 (노래방은 어둡게 — 방마다 색 조명을 따로 단다)
+  const dim = L.kind === 'karaoke';
+  g.add(new THREE.HemisphereLight(dim ? 0xd9c2ff : 0xfffaf0, 0x4a4238, dim ? 0.45 : 0.8));
+  for (const [lx, lz] of dim ? [[0, 2.2]] : [[-2, -1], [2, -1], [-2, 1.6], [2, 1.6]]) {
+    const l = new THREE.PointLight(dim ? 0xffd9f4 : 0xfff2dc, dim ? 3 : 5, 7, 1.6);
     l.position.set(lx, H - 0.25, lz);
     g.add(l);
-    box(0.9, 0.04, 0.3, new THREE.MeshBasicMaterial({ color: 0xfff6e6 }), lx, H - 0.02, lz, false);
+    if (!dim) box(0.9, 0.04, 0.3, new THREE.MeshBasicMaterial({ color: 0xfff6e6 }), lx, H - 0.02, lz, false);
   }
   const key = new THREE.DirectionalLight(0xffffff, 0.55);
   key.position.set(2, 7, 5);
@@ -159,7 +161,7 @@ export function buildStoreScene(L: StoreLayout, stock: StockPet[] = []): StoreSc
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.62), new THREE.MeshBasicMaterial({ map: signTex }));
   sign.position.set(-1.2, H - 0.55, z0 + 0.09);
   // 옷가게는 구역 간판을 따로 단다
-  if (L.kind !== 'clothes') g.add(sign);
+  if (L.kind !== 'clothes' && L.kind !== 'karaoke') g.add(sign);
 
   // 계산대 + 뒤 선반 (병·상자)
   const ctr = L.furniture.find((f) => f.id === 'counter')!.rect;
@@ -257,10 +259,13 @@ export function buildStoreScene(L: StoreLayout, stock: StockPet[] = []): StoreSc
     buildClothesInterior(g, L);
   } else if (L.kind === 'fishing') {
     tick = buildFishingInterior(g, L).tick;
+  } else if (L.kind === 'karaoke') {
+    const k = buildKaraokeInterior(g, L);
+    tick = (t) => k.tick(t);
   }
 
   // 진열 물건 그림 · 가격표
-  for (const d of L.kind === 'pet' || L.kind === 'clothes' || L.kind === 'fishing' ? [] : L.displays) {
+  for (const d of L.kind === 'pet' || L.kind === 'clothes' || L.kind === 'fishing' || L.kind === 'karaoke' ? [] : L.displays) {
     const it = itemOf(d.item);
     if (!it) continue;
     const sp = itemSprite(it.icon, it.name, it.price);
