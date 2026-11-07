@@ -907,17 +907,17 @@ export class CityRenderer {
     for (const r of world.remotes.values()) {
       let v = this.remoteViews.get(r.id);
       const url = bodyUrl(r.body);
-      // 친구가 몸(남자·여자)을 바꿨으면 새로 만든다
+      // 친구가 몸(캐릭터)을 바꿨으면 새로 만든다. 색조는 입히지 않는다 (흰 머리·옷이 물들어 이상해 보여서, 구별은 이름표로)
       if (v && v.url !== url) {
         v.lift.remove(v.view.root);
         v.view.dispose?.();
-        const view = createCharacter({ kind: 'vrm', url, fallback: HEROINE.azure, tint: remoteTint(r.id) });
+        const view = createCharacter({ kind: 'vrm', url, fallback: HEROINE.azure });
         view.casual = true;
         v.lift.add(view.root);
         Object.assign(v, { view, url, outfit: undefined });
       }
       if (!v) {
-        const view = createCharacter({ kind: 'vrm', url, fallback: HEROINE.azure, tint: remoteTint(r.id) });
+        const view = createCharacter({ kind: 'vrm', url, fallback: HEROINE.azure });
         view.casual = true;
         const lift = new THREE.Group();
         lift.add(view.root);
@@ -2589,14 +2589,6 @@ function saveQuality(q: number) {
   } catch {
     // 저장소를 못 쓰면 다음에도 최고 화질부터 시작할 뿐
   }
-}
-
-/** 친구마다 다른 색조 (같은 모델이라도 누가 누군지 구별되게) */
-const REMOTE_TINTS = [0x9db8ff, 0xa8f0b4, 0xffd29d, 0xe2b0ff, 0xfff0a0, 0xffb0b8];
-function remoteTint(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return REMOTE_TINTS[h % REMOTE_TINTS.length];
 }
 
 /**
