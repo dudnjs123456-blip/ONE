@@ -570,6 +570,9 @@ const MINUTES_PER_FRAME = 1 / 3600; // 게임 시각 = 실제 시각 (1초 = 1�
  * 행인을 때리면: 체력바가 뜨고, 쓰러뜨리면 지갑의 돈(가끔 소지품)을 줍는다.
  * 본 사람들이 신고하면 경찰이 출동하고, 현장에 남아 있다 잡히면 집 앞에서 다시 시작.
  */
+/** 버스 교통비 (골드) */
+export const BUS_FARE = 15;
+
 export class CityWorld {
   readonly map: CityMap;
   readonly player: Fighter;
@@ -623,6 +626,8 @@ export class CityWorld {
   casinoRequest = false;
   /** 코인노래방 입구에서 E → 노래방 방 열기 */
   karaokeRequest = false;
+  /** 버스정류장에서 E → 행선지 고르기 창 */
+  busRequest = false;
   /** 펫샵 창을 열어 달라 (UI 가 읽고 끈다) */
   petShopRequest = false;
   /** 펫샵 놀이터에서 고른 아이 (UI 가 분양 창을 연다) */
@@ -1697,6 +1702,43 @@ export class CityWorld {
     return true;
   }
 
+  /** 버스 행선지: 동네 주요 장소 (정류장 앞에 내린다 — 실제로 서 있는 자리라 바로 E 로 들어갈 수 있다) */
+  busDestinations(): { id: string; label: string; icon: string; x: number; z: number }[] {
+    const find = (id: string) => this.map.pois.find((p) => p.id === id);
+    const out: { id: string; label: string; icon: string; x: number; z: number }[] = [];
+    const add = (id: string, label: string, icon: string, dz = 0) => {
+      const p = find(id);
+      if (p) out.push({ id, label, icon, x: p.x, z: p.z + dz });
+    };
+    add('lobby', '행복빌라 (내 집 앞)', '🏠', 1.4);
+    add('petshop', '상가 거리 (펫샵·옷가게·낚시마트)', '🛍️');
+    const karaoke = this.map.pois.find((p) => p.kind === 'shop' && p.label === '코인노래방');
+    if (karaoke) out.push({ id: karaoke.id, label: '코인노래방', icon: '🎤', x: karaoke.x, z: karaoke.z });
+    add('casino', '한강 그랜드 카지노', '🎰', 1);
+    add('park-center', '근린공원', '🌳');
+    add('trail', '한강뷰 단지 산책로', '🚶');
+    add('fish-0', '한강공원 낚시 데크', '🎣');
+    add('subway', '지하철 2호선 한강공원역', '🚇');
+    return out;
+  }
+
+  /** 버스 타기: 교통비를 내고 행선지로 (돈이 모자라면 false) */
+  busTravel(id: string): boolean {
+    const d = this.busDestinations().find((x) => x.id === id);
+    if (!d || this.location !== 'city' || this.job) return false;
+    const pr = this.profile;
+    if (pr.gold < BUS_FARE) {
+      this.say(`💸 교통비가 모자라요 (${BUS_FARE} G)`);
+      return false;
+    }
+    pr.gold -= BUS_FARE;
+    saveProfile(pr);
+    this.stopFishing(true);
+    this.moveTo('city', d.x, d.z, 0, 1);
+    this.say(`🚌 ${d.icon} ${d.label} 도착 (교통비 -${BUS_FARE} G)`, 3);
+    return true;
+  }
+
   /** 코인노래방: 곡 값 내기 (돈이 모자라면 false) / 음수면 돌려받기 */
   karaokePay(amount: number): boolean {
     const pr = this.profile;
@@ -2386,6 +2428,14 @@ export class CityWorld {
     }
     if (poi.id === 'casino') {
       this.casinoRequest = true;
+      return;
+    }
+    if (poi.kind === 'bus') {
+      if (this.job) {
+        this.say('🚌 근무 중에는 버스를 탈 수 없어요');
+        return;
+      }
+      this.busRequest = true;
       return;
     }
     if (poi.kind === 'shop' && poi.label === '코인노래방') {

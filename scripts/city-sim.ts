@@ -1,5 +1,5 @@
 // 도시 로직 헤드리스 검증: npx tsx scripts/city-sim.ts
-import { CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
+import { BUS_FARE, CityWorld, CORRIDOR, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import { LifeTracker } from '../src/game/core/life';
 import { MOVES } from '../src/game/data/moves';
 import { bjDeal, bjHit, bjStand, handValue, hlOdds, isBlackjack, rollSicBo, rouletteMultiplier, spinRoulette, spinSlots } from '../src/game/city/casino';
@@ -1421,4 +1421,17 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('E again: look out again', w.lookingOut);
   w.stopLookOut(true);
   check('close window from look-out', !w.lookingOut && !w.homeWindowOpen);
+}
+
+// 버스: 행선지로 바로 이동, 교통비 차감, 돈 없으면 못 탐
+{
+  const b = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  const dests = b.busDestinations();
+  check('bus: destinations', dests.length >= 6, dests.map((d) => d.label).join(', '));
+  b.profile.gold = 100;
+  const casino = dests.find((d) => d.id === 'casino')!;
+  const ok = b.busTravel('casino');
+  check('bus: arrive at casino, fare paid', ok && Math.hypot(b.player.x - casino.x, b.player.z - casino.z) < 0.5 && b.profile.gold === 100 - BUS_FARE, `gold ${b.profile.gold}`);
+  b.profile.gold = BUS_FARE - 1;
+  check('bus: no money, no ride', !b.busTravel('lobby') && b.profile.gold === BUS_FARE - 1);
 }

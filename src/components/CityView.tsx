@@ -22,6 +22,7 @@ import GearPanel from './GearPanel';
 import WardrobeView from './WardrobeView';
 import CasinoPanel from './CasinoPanel';
 import KaraokePanel from './KaraokePanel';
+import BusPanel from './BusPanel';
 import PetPanel from './PetPanel';
 import FishingPanel, { type FishTab } from './FishingPanel';
 import FishingShopPanel, { type FishShopTab } from './FishingShopPanel';
@@ -201,6 +202,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   const [gear, setGear] = useState(false);
   const [casino, setCasino] = useState(false);
   const [karaoke, setKaraoke] = useState(false);
+  const [bus, setBus] = useState(false);
   const [pets, setPets] = useState<null | 'shop' | 'care'>(null);
   const [adoptPick, setAdoptPick] = useState<string | null>(null);
   const [keys, setKeys] = useState(false);
@@ -220,6 +222,8 @@ export default function CityView({ profile, account, onExit }: { profile: Player
   casinoRef.current = casino;
   const karaokeRef = useRef(karaoke);
   karaokeRef.current = karaoke;
+  const busRef = useRef(bus);
+  busRef.current = bus;
   const petsRef = useRef(pets);
   petsRef.current = pets;
   // 낚시 도감 (F) · 낚시마트 계산대
@@ -241,7 +245,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
     const canvas = canvasRef.current!;
     const kb = new CityKeyboard();
     kb.attach();
-    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
+    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || busRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
@@ -319,6 +323,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
         else if (gearRef.current) setGear(false);
         else if (casinoRef.current) setCasino(false);
         else if (karaokeRef.current) setKaraoke(false);
+        else if (busRef.current) setBus(false);
         else if (petsRef.current) setPets(null);
         else if (clothesRef.current) setClothes(null);
         else if (fishDexRef.current) setFishDex(null);
@@ -453,7 +458,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       }
 
       // 화면 위 글자(HUD)는 0.08초마다만 새로 만든다 (매 프레임 비교하던 것을 줄여서 가볍게)
-      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
+      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.busRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
       const h: CityHud | null = !hudDue ? null : {
         location: world.location,
         floor: world.floor,
@@ -522,6 +527,10 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       if (world.karaokeRequest) {
         world.karaokeRequest = false;
         setKaraoke(true);
+      }
+      if (world.busRequest) {
+        world.busRequest = false;
+        setBus(true);
       }
       // 옷가게 창은 띄운 채로 걸어 다닐 수 있다 (입어본 옷을 입고 둘러보기). 가게를 벗어나면 닫는다
       if (clothesRef.current && world.location !== 'store') setClothes(null);
@@ -743,6 +752,7 @@ export default function CityView({ profile, account, onExit }: { profile: Player
       {pets && worldRef.current && <PetPanel key={`${pets}:${adoptPick ?? ''}`} world={worldRef.current} mode={pets} pick={adoptPick} onClose={() => setPets(null)} />}
       {casino && worldRef.current && <CasinoPanel world={worldRef.current} onClose={() => setCasino(false)} />}
       {karaoke && worldRef.current && <KaraokePanel world={worldRef.current} onClose={() => setKaraoke(false)} />}
+      {bus && worldRef.current && <BusPanel world={worldRef.current} onClose={() => setBus(false)} />}
       {gear && worldRef.current && (
         <GearPanel
           world={worldRef.current}
