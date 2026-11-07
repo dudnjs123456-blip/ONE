@@ -50,6 +50,8 @@ interface Peer {
   pan: StereoPannerNode | null;
   pendingIce: RTCIceCandidateInit[];
   level: number;
+  /** 연결을 만든 시각 — 막 만든 연결은 위치가 살짝 어긋나도 바로 끊지 않는다 */
+  born: number;
 }
 
 type Sig =
@@ -469,7 +471,14 @@ export class VoiceLink {
     }
 
     const wanted = this.wantedPeers();
-    for (const id of [...this.peers.keys()]) if (!wanted.has(id)) this.closePeer(id, true);
+    const now = Date.now();
+    for (const [id, peer] of [...this.peers]) {
+      // 상대가 음성 채널을 나갔으면 바로, 그 밖엔 만든 지 3초가 지난 연결만 끊는다
+      if (!this.metas.has(id)) this.closePeer(id, false);
+      else if (!wanted.has(id) && now - peer.born > 3000) this.closePeer(id, true);
+      // 15초가 지나도 연결이 안 되면 버리고 다시 시도한다
+      else if (peer.pc.connectionState !== 'connected' && now - peer.born > 15000) this.closePeer(id, true);
+    }
     // 연결은 id 가 작은 쪽이 먼저 건다 (양쪽이 동시에 걸어 엉키지 않게)
     for (const id of wanted) if (!this.peers.has(id) && this.me < id) void this.openPeer(id);
 
@@ -501,7 +510,7 @@ export class VoiceLink {
 
   private newPeer(id: string): Peer {
     const pc = new RTCPeerConnection(ICE);
-    const peer: Peer = { id, pc, sender: null, audio: null, source: null, analyser: null, gain: null, pan: null, pendingIce: [], level: 0 };
+    const peer: Peer = { id, pc, sender: null, audio: null, source: null, analyser: null, gain: null, pan: null, pendingIce: [], level: 0, born: Date.now() };
     pc.onicecandidate = (e) => {
       if (e.candidate) this.sendSig(id, { kind: 'ice', ice: e.candidate.toJSON() });
     };

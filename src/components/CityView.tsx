@@ -24,6 +24,7 @@ import CasinoPanel from './CasinoPanel';
 import KaraokePanel from './KaraokePanel';
 import BusPanel from './BusPanel';
 import ChatBox from './ChatBox';
+import VoicePanel from './VoicePanel';
 import PcRoomPanel, { type PcGame } from './PcRoomPanel';
 import PetPanel from './PetPanel';
 import FishingPanel, { type FishTab } from './FishingPanel';
@@ -41,6 +42,7 @@ import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
 import { tvPlay as tvPlayShared, tvPos, tvReset, tvState, type TvVideo } from '@/game/city/tvState';
 import { PerfProbe } from '@/game/render/perfProbe';
 import { TownLink } from '@/game/net/town';
+import { VoiceLink } from '@/game/net/voice';
 import type { Account } from '@/game/net/auth';
 import { attachZoomControls } from './zoomControls';
 
@@ -195,6 +197,8 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
   const [calendar, setCalendar] = useState(false);
   /** 거실 TV: 틀고 있는 영상 · 리모컨(검색) 창 · 재생 상태 */
   const [tv, setTv] = useState<TvVideo | null>(null);
+  /** 음성 대화·전화 (로그인했을 때만) */
+  const [voice, setVoice] = useState<VoiceLink | null>(null);
   const [tvPanel, setTvPanel] = useState(false);
   const [tvPlay, setTvPlay] = useState<{ playing: boolean; error: number | null }>({ playing: false, error: null });
   const tvBoxRef = useRef<HTMLDivElement>(null);
@@ -290,6 +294,10 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
     // 로그인했으면 마을에 접속해서 친구들과 같이 논다
     const link = account ? new TownLink(world, account) : null;
     link?.start();
+    // 음성 대화·전화: 근처 이웃과 자동 연결, 전화는 거리와 상관없이
+    const voiceLink = account ? new VoiceLink(world, account) : null;
+    voiceLink?.start();
+    setVoice(voiceLink);
     const onKey = (e: KeyboardEvent) => {
       if (typingIn(e)) return;
       // NPC 와 대화 중엔 글자를 입력하므로 게임 단축키를 막는다 (Esc 로만 닫기)
@@ -350,8 +358,10 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         setFishShop(null);
         setFishDex((v) => (v ? null : 'dex'));
       }
-      // V: 1인칭 ↔ 3인칭
-      if (e.code === 'KeyV' && !e.repeat) {
+      // V: 음성 대화 마이크 켜기/끄기
+      if (e.code === 'KeyV' && !e.repeat) void voiceLink?.toggleMic();
+      // B: 1인칭 ↔ 3인칭 (V 는 음성 대화로 옮겼다)
+      if (e.code === 'KeyB' && !e.repeat) {
         world.toggleFirstPerson();
         if (!world.firstPerson && document.pointerLockElement) document.exitPointerLock();
       }
@@ -600,6 +610,8 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       if (document.pointerLockElement) document.exitPointerLock();
       detachZoom();
       link?.stop();
+      voiceLink?.stop();
+      setVoice(null);
       probe.dispose();
       renderer.dispose();
       savePlace();
@@ -620,6 +632,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       {/* 폰·태블릿: 화면 조작 버튼 (뒤에 그려지는 창들이 이 위를 덮는다) */}
       {touch && !loading && <CityTouchControls />}
       {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}
+      {!loading && <VoicePanel voice={voice} touch={touch} />}
       <div
         ref={perfRef}
         style={{ display: 'none' }}
@@ -726,7 +739,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
               {/* 조준점 */}
               <div className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80 shadow-[0_0_4px_rgba(0,0,0,0.8)]" />
               <div className="absolute bottom-16 right-4 rounded-lg bg-black/55 px-3 py-1.5 text-xs text-white/85">
-                👀 1인칭 · ↑↓ 걷기 · {hud.fp.mouse ? '←→ 옆걸음 · 마우스 둘러보기 (Esc 풀기)' : '←→ 돌기 · 화면 클릭 = 마우스로 보기'} · V 되돌리기
+                👀 1인칭 · ↑↓ 걷기 · {hud.fp.mouse ? '←→ 옆걸음 · 마우스 둘러보기 (Esc 풀기)' : '←→ 돌기 · 화면 클릭 = 마우스로 보기'} · B 되돌리기
               </div>
             </>
           )}
@@ -744,7 +757,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
               {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리 ({bindLabel('run')} = 아래) · Esc 메뉴에서 키 설정
             </div>
             <div>싸울 때 ↓ 숙이기 (상단 공격 피하기)</div>
-            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · V 1인칭 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
+            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · B 1인칭 · V 음성 대화 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
           </div>
         </div>
       )}
