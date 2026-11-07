@@ -75,7 +75,7 @@ export class FieldKeyboardController implements PlayerController {
 
   read(w: FieldWorld): FieldCommand {
     const raw = this.padIndex === undefined ? this.kb.read(this.map) : mergeRaw(this.kb.read(this.map), readGamepad(this.padIndex));
-    const crouch = bindCodes('run').some((k) => this.kb.has(k)) || (this.padIndex !== undefined && padHeld(4, this.padIndex));
+    const crouch = bindCodes('run').some((k) => this.kb.has(k)) || bindCodes('crouch').some((k) => this.kb.has(k)) || (this.padIndex !== undefined && padHeld(4, this.padIndex));
     const mx = (raw.right ? 1 : 0) - (raw.left ? 1 : 0);
     const mz = (raw.down ? 1 : 0) - (raw.up ? 1 : 0);
     const p = w.player;

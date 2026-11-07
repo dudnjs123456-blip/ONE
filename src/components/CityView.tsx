@@ -117,6 +117,8 @@ function typingIn(e: KeyboardEvent) {
 /** 키보드 → 도시 입력. 카메라가 북쪽을 보고 있으므로 화면 위 = -z */
 class CityKeyboard {
   private down = new Set<string>();
+  /** 터치 조이스틱이 보낸 키 (진짜 키보드가 아님): 터치에선 조이스틱 아래로 숙인다 */
+  private synthetic = new Set<string>();
   private pressed = false;
   /** 점프 키(Space)를 새로 눌렀다 (낚시 연타: 짧게 톡 쳐도 놓치지 않게) */
   private tapped = false;
@@ -130,6 +132,8 @@ class CityKeyboard {
     if (has('interact', e.code) && !e.repeat) this.pressed = true;
     if (has('jump', e.code) && !e.repeat) this.tapped = true;
     this.down.add(e.code);
+    if (e.isTrusted) this.synthetic.delete(e.code);
+    else this.synthetic.add(e.code);
   };
   private onUp = (e: KeyboardEvent) => {
     // 점프 키를 뗄 때 브라우저 기본 동작(스페이스 = 눌린 버튼 다시 클릭, Alt = 메뉴)을 막는다
@@ -180,7 +184,9 @@ class CityKeyboard {
       crouch: bindCodes('run').some((k) => this.down.has(k)),
       buttons: P1_KEYS.buttons.map((k) => this.down.has(k)) as Buttons,
       jump: bindCodes('jump').some((k) => this.down.has(k)),
-      down: bindCodes('down').some((k) => this.down.has(k)),
+      // 키보드는 숙이기 키(C)로, 터치는 조이스틱 아래로 숙인다 (키보드 ↓ 는 그냥 걷기)
+      duck: bindCodes('crouch').some((k) => this.down.has(k)),
+      down: bindCodes('down').some((k) => this.down.has(k) && this.synthetic.has(k)),
       interact,
       jumpTap,
     };
@@ -776,7 +782,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
             <div>
               {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리 ({bindLabel('run')} = 아래) · Esc 메뉴에서 키 설정
             </div>
-            <div>싸울 때 ↓ 숙이기 (상단 공격 피하기)</div>
+            <div>싸울 때 C 숙이기 (상단 공격 피하기)</div>
             <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · B 1인칭 · V 음성 대화 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
           </div>
         </div>

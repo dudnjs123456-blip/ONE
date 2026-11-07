@@ -1177,6 +1177,18 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   for (let i = 0; i < 10; i++) { w.lastCombatFrame = w.frame; w.step(); }
   check('down alone still ducks while fighting', w.player.state === 'crouch');
   c = { move: null, run: false, interact: false };
+  for (let i = 0; i < 20; i++) { w.lastCombatFrame = w.frame; w.step(); }
+  // 키보드: 숙이기 키(C)만 눌러도 숙이고, 키보드 ↓(down 없이 move 만)는 그냥 걷는다
+  c = { move: null, run: false, interact: false, duck: true };
+  for (let i = 0; i < 6; i++) { w.lastCombatFrame = w.frame; w.step(); }
+  check('crouch key (C) ducks while fighting', w.player.state === 'crouch');
+  c = { move: null, run: false, interact: false };
+  for (let i = 0; i < 20; i++) { w.lastCombatFrame = w.frame; w.step(); }
+  const zk = w.player.z;
+  c = { move: { x: 0, z: 1 }, run: false, interact: false };
+  for (let i = 0; i < 20; i++) { w.lastCombatFrame = w.frame; w.step(); }
+  check('keyboard down arrow just walks while fighting', w.player.state !== 'crouch' && w.player.z > zk + 0.2, `(dz ${(w.player.z - zk).toFixed(2)})`);
+  c = { move: null, run: false, interact: false };
 }
 {
   const prof: PlayerProfile = { level: 1, exp: 0, gold: 0, kills: 0, bossClears: {}, bossBest: {}, inventory: {}, life: { fatigue: 10, hunger: 10 } };

@@ -76,8 +76,10 @@ export interface CityInput {
   buttons?: Buttons;
   /** 기술 입력 때 '아래' (Shift) */
   crouch?: boolean;
-  /** 아래 방향키를 누르고 있나 (싸울 때는 숙이기) */
+  /** 터치 조이스틱을 아래로만 밀고 있나 (터치에서 싸울 때 숙이기) */
   down?: boolean;
+  /** 숙이기 키(C)를 누르고 있나 (싸울 때 숙이기) */
+  duck?: boolean;
   jump?: boolean;
   /** 이번 프레임에 점프 키(Space)를 새로 눌렀나 (낚시 연타) */
   jumpTap?: boolean;
@@ -947,11 +949,11 @@ export class CityWorld {
     // 방향키는 캐릭터가 보는 방향 기준 앞/뒤, Shift 는 '아래'
     const buttons = inp.buttons ?? NEUTRAL_INPUT.buttons;
     const attacking = buttons.some(Boolean);
-    // 싸우는 중엔 아래 방향키'만' 누르면 숙이기 (상단 공격을 피한다).
-    // ↓ 와 ← / → 를 같이 누르면 평소처럼 대각선 이동, 싸우지 않을 땐 ↓ 도 그냥 걷기
+    // 싸우는 중엔 숙이기 키(C)를 누르면 숙이기 (상단 공격을 피한다). 키보드 ↓ 는 언제나 그냥 걷기.
+    // 터치는 조이스틱을 아래로'만' 밀면 숙이기 (대각선은 평소처럼 이동)
     const sideways = !!inp.move && Math.abs(inp.move.x) > 1e-6;
     this.downOnlyFrames = inp.down && !sideways ? this.downOnlyFrames + 1 : 0;
-    const duck = this.downOnlyFrames >= 4 && this.inCombat;
+    const duck = this.inCombat && (!!inp.duck || this.downOnlyFrames >= 4);
     let h: -1 | 0 | 1 = 0;
     if (inp.move && !duck) {
       const d = (inp.move.x * p.fx + inp.move.z * p.fz) / Math.hypot(inp.move.x, inp.move.z);

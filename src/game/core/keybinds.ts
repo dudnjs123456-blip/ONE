@@ -4,11 +4,11 @@ import { P1_KEYS } from './input';
  * 키 설정 (1P): 이동·공격·점프·달리기·상호작용 키를 바꿀 수 있다.
  * 이 컴퓨터(브라우저)에만 저장된다. 바꾸면 P1_KEYS 에 바로 반영돼 모든 모드(도시·필드·보스·대전)에 적용된다.
  */
-export type BindAction = 'up' | 'down' | 'left' | 'right' | 'b1' | 'b2' | 'b3' | 'b4' | 'jump' | 'run' | 'interact';
+export type BindAction = 'up' | 'down' | 'left' | 'right' | 'b1' | 'b2' | 'b3' | 'b4' | 'jump' | 'run' | 'crouch' | 'interact';
 
 export const BIND_ACTIONS: { id: BindAction; label: string }[] = [
   { id: 'up', label: '위 이동' },
-  { id: 'down', label: '아래 이동 (싸울 때 숙이기)' },
+  { id: 'down', label: '아래 이동' },
   { id: 'left', label: '왼쪽 이동' },
   { id: 'right', label: '오른쪽 이동' },
   { id: 'b1', label: '1 왼팔' },
@@ -17,6 +17,7 @@ export const BIND_ACTIONS: { id: BindAction; label: string }[] = [
   { id: 'b4', label: '4 오른다리' },
   { id: 'jump', label: '점프' },
   { id: 'run', label: '달리기 · 기술 아래 입력' },
+  { id: 'crouch', label: '숙이기 (싸울 때 상단 공격 피하기)' },
   { id: 'interact', label: '상호작용 (말 걸기·문 열기)' },
 ];
 
@@ -31,6 +32,8 @@ const DEFAULT_BINDS: Record<BindAction, string[]> = {
   b4: ['KeyS'],
   jump: ['Space'],
   run: ['ShiftLeft', 'ShiftRight'],
+  // Ctrl 은 숙인 채 W(오른팔)를 누르면 Ctrl+W 로 탭이 닫혀서 C 로 한다
+  crouch: ['KeyC'],
   // Enter 는 서울 채팅 열기 키라 상호작용에서 뺐다
   interact: ['KeyE'],
 };
