@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { CHAT_MAX, type ChatLine } from '@/game/city/chat';
+import { CHAT_MAX, EMOTES, type ChatLine } from '@/game/city/chat';
 
 /** 오래된 말은 이만큼 지나면 흐려진다 (입력창을 열면 다시 다 보인다) */
 const FADE_MS = 30_000;
@@ -16,6 +16,8 @@ export default function ChatBox({ world, touch = false }: { world: CityWorld; to
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  /** 감정 표현 고르기 줄 */
+  const [emotes, setEmotes] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
   const seen = useRef(-1);
@@ -110,9 +112,27 @@ export default function ChatBox({ world, touch = false }: { world: CityWorld; to
           <button className="rounded-lg bg-amber-500 px-3 font-bold text-black hover:bg-amber-400">보내기</button>
         </form>
       ) : (
-        <button onClick={() => setOpen(true)} className="rounded-full bg-black/50 px-3 py-1 text-white/80 hover:bg-black/70">
-          💬 채팅{!touch && ' (Enter)'} · {online}명
-        </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setOpen(true)} className="rounded-full bg-black/50 px-3 py-1 text-white/80 hover:bg-black/70">
+            💬 채팅{!touch && ' (Enter)'} · {online}명
+          </button>
+          <button
+            onClick={() => setEmotes((v) => !v)}
+            title="감정 표현 (머리 위에 떠올라요)"
+            className={`rounded-full px-2.5 py-1 hover:bg-black/70 ${emotes ? 'bg-amber-500/80 text-black' : 'bg-black/50'}`}
+          >
+            😊
+          </button>
+          {emotes && (
+            <div className="flex gap-0.5 rounded-full bg-black/60 px-1.5 py-0.5">
+              {EMOTES.map((e) => (
+                <button key={e} onClick={() => world.postEmote(e)} className="rounded-full px-1 text-lg leading-7 transition hover:scale-125 active:scale-95">
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {err && <div className="mt-1 text-amber-300">{err}</div>}
     </div>

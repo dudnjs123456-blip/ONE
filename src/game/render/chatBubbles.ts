@@ -1,11 +1,31 @@
 import * as THREE from 'three';
-import { BUBBLE_MS, wrapChat } from '../city/chat';
+import { BUBBLE_MS, EMOTE_MS, wrapChat } from '../city/chat';
 
 interface Bubble {
   who: string;
   sprite: THREE.Sprite;
   until: number;
   tex: THREE.CanvasTexture;
+  /** 감정 표현 (이모지만, 위로 떠오른다) */
+  emote?: boolean;
+}
+
+/** 감정 표현 그림: 투명 바탕에 큰 이모지 + 흰 테두리 빛 */
+function emoteTexture(e: string): THREE.CanvasTexture {
+  const S = 160;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const g = cv.getContext('2d')!;
+  g.font = '110px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(255,255,255,0.9)';
+  g.shadowBlur = 14;
+  g.fillText(e, S / 2, S / 2 + 6);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 /** 캔버스 글자 크기 → 월드 높이 (작을수록 말풍선이 작다). 0.0058 은 캐릭터에 비해 커서 약 28% 줄임 */
@@ -94,8 +114,19 @@ export class ChatBubbles {
   readonly layer = new THREE.Group();
   private items: Bubble[] = [];
 
+  /** 감정 표현: 머리 위로 톡 떠올라 사라진다 (말풍선과 따로, 한 사람당 하나) */
+  addEmote(who: string, e: string, now: number) {
+    this.remove((b) => b.who === who && !!b.emote);
+    const tex = emoteTexture(e);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+    sprite.renderOrder = 11;
+    sprite.userData.born = now;
+    this.layer.add(sprite);
+    this.items.push({ who, sprite, until: now + EMOTE_MS, tex, emote: true });
+  }
+
   add(who: string, name: string, text: string, now: number) {
-    this.remove((b) => b.who === who);
+    this.remove((b) => b.who === who && !b.emote);
     const { tex, w, h } = bubbleTexture(name, text, who === 'me');
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
     sprite.scale.set(w * WORLD_PER_PX, h * WORLD_PER_PX, 1);
@@ -114,6 +145,17 @@ export class ChatBubbles {
       const p = pos(b.who);
       b.sprite.visible = !!p;
       if (!p) continue;
+      if (b.emote) {
+        // 떠오르면서 톡 커졌다가, 끝에 흐려진다 (말풍선이 있으면 그 옆으로)
+        const age = now - (b.sprite.userData.born as number);
+        const t = Math.min(1, age / 220);
+        const size = 0.75 * (0.6 + 0.4 * (1 - Math.pow(1 - t, 3)) + (t >= 1 ? 0.04 * Math.sin(age / 90) : 0));
+        b.sprite.scale.set(size, size, 1);
+        const beside = this.items.some((o) => o.who === b.who && !o.emote);
+        b.sprite.position.set(p.x + (beside ? 0.9 : 0), 2.45 + Math.min(0.5, age / 2000), p.z);
+        (b.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, (b.until - now) / 400);
+        continue;
+      }
       const base = b.sprite.userData.base as { x: number; y: number };
       const t = Math.min(1, (now - (b.sprite.userData.born as number)) / 180);
       const pop = 0.85 + 0.15 * (1 - Math.pow(1 - t, 3));

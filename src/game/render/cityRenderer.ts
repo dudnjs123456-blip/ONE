@@ -670,7 +670,8 @@ export class CityRenderer {
     this.playerLift.visible = !fp;
     // 채팅 말풍선: 지금 장면에 붙이고, 말한 사람 머리 위를 따라간다 (같은 곳에 있는 친구만)
     const nowMs = performance.now();
-    for (const c of world.chatBubbles.splice(0)) this.chatBubbles.add(c.who, c.name, c.text, nowMs);
+    for (const c of world.chatBubbles.splice(0)) if (c.emote) this.chatBubbles.addEmote(c.who, c.text, nowMs);
+      else this.chatBubbles.add(c.who, c.name, c.text, nowMs);
     const chatScene = this.sceneOf(view);
     if (this.chatBubbles.layer.parent !== chatScene) chatScene.add(this.chatBubbles.layer);
     this.chatBubbles.update(nowMs, (who) => {

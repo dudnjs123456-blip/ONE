@@ -7,7 +7,7 @@ import type { Buttons } from '../core/types';
 import { applyHit, detectHit, type CombatEvent } from '../core/combat';
 import { ITEMS, ITEM_IDS } from '../data/items';
 import { SHOPS, type ShopDef } from '../data/shops';
-import { CHAT_GAP_MS, CHAT_KEEP, cleanChat, type ChatLine } from './chat';
+import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine } from './chat';
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
@@ -721,7 +721,10 @@ export class CityWorld {
   /** 보낼 채팅 (마을 연결이 가져가서 보낸다) */
   chatOut: string[] = [];
   /** 머리 위 말풍선으로 띄울 것 (화면이 가져간다). who = 'me' 또는 친구 id */
-  chatBubbles: { who: string; name: string; text: string }[] = [];
+  chatBubbles: { who: string; name: string; text: string; emote?: boolean }[] = [];
+  /** 보낼 감정 표현 (마을 연결이 가져가서 보낸다) */
+  emoteOut: string[] = [];
+  private lastEmoteAt = -Infinity;
   private lastChatAt = -Infinity;
   /** 지금 들어가 있는 집의 주인 (null = 내 집) */
   homeOwner: string | null = null;
@@ -1755,6 +1758,20 @@ export class CityWorld {
     this.chatBubbles.push({ who: 'me', name: this.netName || '나', text });
     this.chatOut.push(text);
     return null;
+  }
+
+  /** 감정 표현 (👋 등): 내 머리 위에 띄우고 마을로 보낸다. @returns 보냈나 */
+  postEmote(e: string, now = Date.now()): boolean {
+    if (!(EMOTES as readonly string[]).includes(e) || now - this.lastEmoteAt < EMOTE_GAP_MS) return false;
+    this.lastEmoteAt = now;
+    this.chatBubbles.push({ who: 'me', name: this.netName || '나', text: e, emote: true });
+    this.emoteOut.push(e);
+    return true;
+  }
+
+  /** 친구의 감정 표현 (목록에 있는 이모지만) */
+  receiveEmote(id: string, e: string) {
+    if ((EMOTES as readonly string[]).includes(e)) this.chatBubbles.push({ who: id, name: '', text: e, emote: true });
   }
 
   /** 친구가 보낸 채팅 (마을 연결이 부른다). 같은 곳에 있으면 그 친구 머리 위에도 띄운다 */

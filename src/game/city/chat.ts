@@ -61,3 +61,10 @@ export function wrapChat(text: string, max = 14): string[] {
   if (lines.length > 3) return [...lines.slice(0, 2), lines[2].slice(0, max - 1) + '…'];
   return lines;
 }
+
+/** 감정 표현: 머리 위에 잠깐 떠오르는 큰 이모지 (채팅 기록엔 남지 않는다) */
+export const EMOTES = ['👋', '😂', '❤️', '👍', '😮', '😢', '🎉', '💢'] as const;
+/** 감정 표현이 떠 있는 시간 (ms) */
+export const EMOTE_MS = 2200;
+/** 감정 표현 연달아 누르기 간격 (ms) */
+export const EMOTE_GAP_MS = 600;

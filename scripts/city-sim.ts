@@ -1541,3 +1541,15 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('optical: not on clothes shop racks', !COSMETICS.some((c) => c.id === 'sun-blue') && COSMETIC_BY_ID['sun-blue']?.slot === 'glasses');
   check('optical shop on the map', ow.map.pois.some((p) => p.label === '안경원'));
 }
+
+// 감정 표현: 목록의 이모지만, 연타 제한, 친구 것도 머리 위에 (채팅 기록엔 안 남음)
+{
+  const ew = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) });
+  const logBefore = ew.chatLog.length;
+  check('emote: send', ew.postEmote('👋', 1000) && ew.emoteOut[0] === '👋' && ew.chatBubbles.at(-1)?.emote === true);
+  check('emote: too fast', !ew.postEmote('😂', 1200));
+  check('emote: unknown emoji rejected', !ew.postEmote('💩', 5000));
+  ew.receiveEmote('f1', '❤️');
+  ew.receiveEmote('f1', '<script>');
+  check('emote: friend shows, junk ignored, not in chat log', ew.chatBubbles.filter((b) => b.who === 'f1').length === 1 && ew.chatLog.length === logBefore);
+}
