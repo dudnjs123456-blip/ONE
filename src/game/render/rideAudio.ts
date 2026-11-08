@@ -98,6 +98,8 @@ export class RideAudio {
   }
 
   private fadeOut() {
+    // 아직 소리를 만든 적이 없으면 오디오를 건드리지 않는다 (매 프레임 오디오 장치를 깨우지 않게)
+    if (!this.wind && !this.rumble) return;
     const bus = audioBus();
     if (!bus) return;
     const t = bus.ctx.currentTime;

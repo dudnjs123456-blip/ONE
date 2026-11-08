@@ -442,6 +442,10 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         }
         return;
       }
+      // 그리기 상한: 초당 60번 (144Hz 모니터에서 두 배 넘게 그리며 CPU 를 먹지 않게).
+      // 다른 창을 보고 있을 땐(포커스 없음) 초당 20번. 게임 시간은 쌓인 만큼 그대로 계산하므로 느려지지 않는다
+      const cap = document.hasFocus() ? 1000 / 60 : 1000 / 20;
+      if (now - last < cap * 0.8) return;
       const interval = now - last;
       const dt = Math.min(interval, 250) / 1000;
       acc += dt * 1000;
