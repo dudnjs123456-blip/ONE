@@ -6,7 +6,7 @@ import type { PlayerProfile } from '../core/profile';
  */
 export const CLOTHES_SHOP_NAME = '스타일 하우스';
 
-export type CosmeticSlot = 'hat' | 'glasses' | 'top' | 'bottom' | 'shoes' | 'bag';
+export type CosmeticSlot = 'hat' | 'glasses' | 'top' | 'bottom' | 'shoes' | 'bag' | 'tail';
 
 export const COSMETIC_SLOTS: { id: CosmeticSlot; label: string; icon: string }[] = [
   { id: 'hat', label: '모자', icon: '🧢' },
@@ -15,12 +15,13 @@ export const COSMETIC_SLOTS: { id: CosmeticSlot; label: string; icon: string }[]
   { id: 'bottom', label: '하의', icon: '👖' },
   { id: 'shoes', label: '신발', icon: '👟' },
   { id: 'bag', label: '가방', icon: '🎒' },
+  { id: 'tail', label: '꼬리', icon: '🐰' },
 ];
 
 /** 옷 무늬 (상의·하의) */
 export type Pattern = 'solid' | 'stripe' | 'check' | 'dot';
 /** 소품 모양 */
-export type AccStyle = 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini';
+export type AccStyle = 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini' | 'bunny' | 'bunnyTail';
 
 export interface CosmeticDef {
   id: string;
@@ -46,6 +47,11 @@ export const COSMETICS: CosmeticDef[] = [
   C({ id: 'beanie-mint', name: '민트 비니', icon: '🧶', slot: 'hat', price: 150, color: 0x7fd6c2, style: 'beanie', desc: '포근한 니트 비니.' }),
   C({ id: 'beanie-gray', name: '그레이 비니', icon: '🧶', slot: 'hat', price: 150, color: 0x8e9196, style: 'beanie', desc: '꾸안꾸의 정석.' }),
   C({ id: 'bucket-beige', name: '베이지 버킷햇', icon: '👒', slot: 'hat', price: 180, color: 0xd9c3a0, style: 'bucket', desc: '한강 피크닉 필수템.' }),
+  // 토끼 머리띠 (모자 칸) · 토끼 꼬리 (꼬리 칸): color2 = 귀 안쪽 색
+  C({ id: 'bunny-white', name: '화이트 토끼 머리띠', icon: '🐰', slot: 'hat', price: 240, color: 0xfbf8f4, color2: 0xf6b3c8, style: 'bunny', desc: '쫑긋 선 토끼 귀. 놀이공원 필수템.' }),
+  C({ id: 'bunny-black', name: '블랙 토끼 머리띠', icon: '🐰', slot: 'hat', price: 240, color: 0x232127, color2: 0xe58fa8, style: 'bunny', desc: '시크한 검은 토끼.' }),
+  C({ id: 'tail-white', name: '화이트 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xfbf8f4, style: 'bunnyTail', desc: '엉덩이에 달린 몽실몽실 솜뭉치.' }),
+  C({ id: 'tail-pink', name: '핑크 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xf7c3d4, style: 'bunnyTail', desc: '머리띠랑 맞춰 달면 더 귀엽다.' }),
   // 안경
   C({ id: 'sun-black', name: '블랙 선글라스', icon: '🕶️', slot: 'glasses', price: 200, color: 0x111114, style: 'sunglasses', desc: '눈부신 날엔 이거.' }),
   C({ id: 'round-gold', name: '골드 동그란 안경', icon: '👓', slot: 'glasses', price: 160, color: 0xc9a24a, style: 'round', desc: '지적인 분위기.' }),
@@ -102,6 +108,7 @@ const KIND: Record<CosmeticSlot, { names: string[]; icon: string; price: number;
   glasses: { names: ['선글라스', '동그란 안경'], icon: '🕶️', price: 170, styles: ['sunglasses', 'round'] },
   shoes: { names: ['스니커즈', '하이탑', '로퍼', '러닝화'], icon: '👟', price: 150 },
   bag: { names: ['백팩', '미니 백팩'], icon: '🎒', price: 210, styles: ['backpack', 'mini'] },
+  tail: { names: ['토끼 꼬리'], icon: '🐇', price: 200, styles: ['bunnyTail'] },
 };
 const DESCS = ['오늘 막 들어온 신상!', '이번 주 인기 예감.', '한정 수량이에요.', '요즘 제일 핫한 색.', '데일리로 딱.', '코디하기 쉬운 신상.', '사진 잘 받는 색감.', '친구랑 맞춰 입기 좋아요.'];
 

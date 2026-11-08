@@ -216,10 +216,10 @@ export const CORNER_LABEL: Record<ClothesCorner, string> = {
   weapon: '⚔️ 무기 벽',
   gearAcc: '🥊 장갑 · 액세서리 진열장',
   armor: '🛡️ 방어구 코너',
-  hat: '🧢 모자 · 안경 선반',
+  hat: '🧢 모자 · 안경 · 머리띠 선반',
   top: '👕 상의 행거',
   bottom: '👖 하의 테이블',
-  shoes: '👟 신발 · 가방 벽',
+  shoes: '👟 신발 · 가방 · 꼬리 벽',
 };
 
 /**

@@ -1623,6 +1623,12 @@ export class CityWorld {
 
   /** 지도에서 누른 곳으로 걸어간다 (건물을 피해 길찾기). @returns 안내 문구 */
   navigateTo(x: number, z: number, label = '선택한 곳'): string {
+    // 놀이공원: 지하철을 타고 동네로 돌아온 뒤 그곳으로 걸어간다
+    if (this.location === 'park') {
+      if (this.ride) return '놀이기구에서 내린 뒤에 이동할 수 있어요';
+      this.rideQueue = null;
+      this.leavePark();
+    }
     if (this.location !== 'city') return '집 밖으로 나가야 이동할 수 있어요';
     this.nav ??= new CityNav(this.map);
     const path = this.nav.findPath(this.player.x, this.player.z, x, z);

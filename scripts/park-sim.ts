@@ -163,6 +163,11 @@ for (const id of RIDE_IDS) {
   now += 121_000;
   A.step();
   check('wheel: gets off after one turn', A.ride === null);
+  // 지도에서 집을 누르면: 지하철로 동네에 돌아와 집으로 걸어간다
+  const home = A.map.pois.find((q) => q.kind === 'home')!;
+  const err = A.navigateTo(home.x, home.z, '내 집');
+  check('map: tapping home inside the park rides back and walks home', err === '' && A.location === 'city' && !!A.autopilot, `(${err})`);
+  a.goToPark();
   // 역으로 돌아가기
   a.leavePark();
   check('subway: back to town', A.location === 'city');

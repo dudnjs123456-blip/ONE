@@ -258,7 +258,19 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
       const x = r.x0 + ((i + 0.5) * w) / hats.length;
       const y = shelves[1] + 0.015;
       const mt = std(c.color, 0.8);
-      if (c.style === 'bucket') {
+      if (c.style === 'bunny') {
+        // 머리띠 + 쫑긋 선 귀 두 개
+        const band = mesh(new THREE.TorusGeometry(0.08, 0.008, 6, 20, Math.PI), std(c.color, 0.6), x, y + 0.005, cz);
+        band.scale.y = 1.1;
+        for (const s of [-1, 1]) {
+          const ear = mesh(new THREE.SphereGeometry(1, 14, 10), std(c.color, 0.7), x + s * 0.04, y + 0.17, cz);
+          ear.scale.set(0.022, 0.07, 0.012);
+          ear.rotation.z = -s * 0.2;
+          const inner = mesh(new THREE.SphereGeometry(1, 12, 8), std(c.color2 ?? 0xf6b3c8, 0.7), x + s * 0.04, y + 0.165, cz + 0.008);
+          inner.scale.set(0.012, 0.052, 0.006);
+          inner.rotation.z = -s * 0.2;
+        }
+      } else if (c.style === 'bucket') {
         mesh(new THREE.CylinderGeometry(0.085, 0.1, 0.09, 20), mt, x, y + 0.05, cz);
         mesh(new THREE.CylinderGeometry(0.1, 0.15, 0.012, 20), mt, x, y + 0.006, cz);
       } else {
@@ -377,6 +389,14 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
       b.rotation.y = 0.05;
       box(0.13, bh * 0.22, bw * 1.02, std(new THREE.Color(c.color).multiplyScalar(0.75).getHex(), 0.7), (r.x0 + r.x1) / 2, 1.465 + bh * 0.9, z);
       tag(c, r.x0 - 0.005, 1.4, z, -Math.PI / 2);
+    });
+    // 꼬리: 맨 위 선반 끝에 솜뭉치
+    const tails = cosOf(['tail']);
+    tails.forEach((c, i) => {
+      const z = r.z0 + 0.12 + i * 0.16;
+      const mt = std(c.color, 0.95);
+      mesh(new THREE.IcosahedronGeometry(0.05, 1), mt, (r.x0 + r.x1) / 2, 1.515, z);
+      mesh(new THREE.IcosahedronGeometry(0.03, 1), mt, (r.x0 + r.x1) / 2 + 0.02, 1.55, z + 0.02);
     });
     header('shoes', r.x0 - 0.02, 2.2, cz, -Math.PI / 2);
   }

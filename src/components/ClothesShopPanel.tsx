@@ -17,10 +17,10 @@ const GEAR_CATS: { id: GearCat; label: string; slots: EquipDef['slot'][] }[] = [
   { id: 'armor', label: '🛡️ 방어구', slots: ['head', 'top', 'bottom', 'shoes'] },
 ];
 const STYLE_CATS: { id: StyleCat; label: string; slots: CosmeticSlot[] }[] = [
-  { id: 'hat', label: '🧢 모자·안경', slots: ['hat', 'glasses'] },
+  { id: 'hat', label: '🧢 모자·안경·머리띠', slots: ['hat', 'glasses'] },
   { id: 'top', label: '👕 상의', slots: ['top'] },
   { id: 'bottom', label: '👖 하의', slots: ['bottom'] },
-  { id: 'shoes', label: '👟 신발·가방', slots: ['shoes', 'bag'] },
+  { id: 'shoes', label: '👟 신발·가방·꼬리', slots: ['shoes', 'bag', 'tail'] },
 ];
 
 const RARITY: Record<Rarity, { label: string; cls: string }> = {

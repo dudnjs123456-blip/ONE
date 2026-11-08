@@ -65,6 +65,10 @@ interface Metrics {
   body: Float32Array;
   /** VRM 0.x 모델 (뼈 기준 방향이 180° 돌아 있다) */
   v0: boolean;
+  /** 골반 뼈 (꼬리) · 엉덩이 둘레 정점 (몸 · 하의 · 원피스 · 치마처럼 긴 상의) */
+  hips: THREE.Object3D;
+  hipsPos: THREE.Vector3;
+  lower: Float32Array;
 }
 
 /** VRoid 0.x 모델은 재질 이름 앞에 'M00_001_01_' 같은 번호가 붙는다 → 떼고 비교 */
@@ -122,7 +126,7 @@ export class OutfitDresser {
       this.paint(part, c);
       part.cur = c?.id ?? '';
     }
-    for (const slot of ['hat', 'glasses', 'bag'] as CosmeticSlot[]) {
+    for (const slot of ['hat', 'glasses', 'bag', 'tail'] as CosmeticSlot[]) {
       const c = want.get(slot);
       const cur = this.acc.get(slot);
       if ((cur?.id ?? '') === (c?.id ?? '')) continue;
@@ -350,7 +354,7 @@ function measure(vrm: VRM): Metrics {
   for (let i = 0; i < face.length; i += 3) if (Math.abs(face[i + 1] - eyeY) < 0.03) sideX = Math.max(sideX, Math.abs(face[i] - (x0 + x1) / 2));
   if (!sideX) sideX = (x1 - x0) / 2;
   const body = new Float32Array(vertsOf(vrm, ['Tops_', 'Body_']));
-  return { head, headPos, top, eyeY, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, rx: (x1 - x0) / 2, rz: (z1 - z0) / 2, faceZ, eyeX, eyeR, sideX, chest, chestPos, body, tops: new Float32Array(vertsOf(vrm, ['Tops_'])), v0: vrm.meta?.metaVersion === '0' };
+  return { head, headPos, top, eyeY, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, rx: (x1 - x0) / 2, rz: (z1 - z0) / 2, faceZ, eyeX, eyeR, sideX, chest, chestPos, body, tops: new Float32Array(vertsOf(vrm, ['Tops_'])), v0: vrm.meta?.metaVersion === '0', hips: node('hips')!, hipsPos: node('hips')!.getWorldPosition(new THREE.Vector3()), lower: new Float32Array(vertsOf(vrm, ['Body_', 'Bottoms_', 'Onepiece_', 'Tops_'])) };
 }
 
 /** 몸 표면 z: (x, y) 근처 정점 중 가장 앞(dir 1) 또는 뒤(dir -1) */
@@ -468,6 +472,60 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
         const curve = new THREE.CatmullRomCurve3(pts);
         add(new THREE.TubeGeometry(curve, 16, 0.009, 6, false), strap, 0, 0, 0).castShadow = false;
       }
+      break;
+    }
+    case 'bunny': {
+      // 머리띠: 정수리를 넘어가는 반원 (귀에서 귀까지) + 쫑긋 선 토끼 귀 두 개 (안쪽은 분홍)
+      // 머리카락 부피(똥머리·바보털)까지 잰 크기라 조금 줄여서 머리에 붙게 한다
+      const bandR = R * 0.97;
+      const bandH = crownH * 0.86;
+      const band = add(new THREE.TorusGeometry(bandR, 0.007, 6, 28, Math.PI), main, m.cx, base - 0.015, m.cz - m.rz * 0.08);
+      band.scale.y = bandH / bandR;
+      const inner = mat(c.color2 ?? 0xf6b3c8);
+      const earH = Math.max(0.12, crownH * 1.25);
+      for (const s of [-1, 1]) {
+        // 머리띠 위, 정수리에서 양옆으로 조금 벌어진 곳
+        const a = 0.42;
+        const ex = m.cx + s * bandR * Math.sin(a);
+        const ey = base - 0.015 + bandH * Math.cos(a);
+        const ear = new THREE.Group();
+        ear.position.set(ex, ey, m.cz - m.rz * 0.08);
+        // 바깥으로 살짝 벌어지고, 한쪽 귀는 끝이 앞으로 살짝 접힌다
+        ear.rotation.set(s > 0 ? -0.12 : 0, 0, -s * 0.22);
+        g.add(ear);
+        const outer = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), main);
+        outer.scale.set(0.028, earH / 2, 0.014);
+        outer.position.y = earH / 2 - 0.005;
+        outer.castShadow = true;
+        const pink = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), inner);
+        pink.scale.set(0.016, earH * 0.38, 0.006);
+        pink.position.set(0, earH / 2 - 0.004, 0.01);
+        ear.add(outer, pink);
+      }
+      break;
+    }
+    case 'bunnyTail': {
+      // 꼬리뼈 높이, 엉덩이(또는 치마) 뒷면에 붙는 솜뭉치
+      parent = m.hips;
+      origin = m.hipsPos;
+      const ty = m.hipsPos.y - 0.06;
+      let back = Infinity;
+      const b = m.lower;
+      for (let i = 0; i < b.length; i += 3) {
+        if (Math.abs(b[i] - m.cx) > 0.05 || Math.abs(b[i + 1] - ty) > 0.05) continue;
+        back = Math.min(back, b[i + 2]);
+      }
+      if (!Number.isFinite(back)) back = m.hipsPos.z - 0.12;
+      const fluff = mat(c.color);
+      const r = 0.045;
+      const z = back - r * 0.6;
+      add(new THREE.IcosahedronGeometry(r, 2), fluff, m.cx, ty, z);
+      // 몽실몽실하게 작은 솜을 둘레에 붙인다
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2;
+        add(new THREE.IcosahedronGeometry(r * 0.55, 1), fluff, m.cx + Math.cos(a) * r * 0.62, ty + Math.sin(a) * r * 0.62, z - r * 0.15);
+      }
+      add(new THREE.IcosahedronGeometry(r * 0.6, 1), fluff, m.cx, ty + r * 0.1, z - r * 0.55);
       break;
     }
     default:
