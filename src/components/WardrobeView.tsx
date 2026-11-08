@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { CLOTHES_SHOP_NAME, COSMETIC_BY_ID, isNewToday, shopCosmetics, COSMETIC_SLOTS, ensureWardrobe, takeOffCosmetic, wearCosmetic, type CosmeticDef, type CosmeticSlot } from '@/game/data/fashion';
+import { CLOTHES_SHOP_NAME, COSMETIC_BY_ID, canWear, dropUnwearable, wearBlock, isNewToday, shopCosmetics, COSMETIC_SLOTS, ensureWardrobe, takeOffCosmetic, wearCosmetic, type CosmeticDef, type CosmeticSlot } from '@/game/data/fashion';
 import { saveProfile } from '@/game/core/profile';
 import { BODY_TYPES } from '@/game/render/looks';
 import { preloadVrm } from '@/game/render/vrmCharacter';
@@ -190,6 +190,10 @@ export default function WardrobeView({
 
   const click = (c: CosmeticDef) => {
     setHover(null);
+    if (!canWear(pr, c) && wd.worn[c.slot] !== c.id) {
+      setMsg({ ok: false, text: `${c.icon} ${c.name} — ${wearBlock(pr, c)}` });
+      return;
+    }
     if (owned.has(c.id)) {
       // 가진 옷: 입기 / 벗기 (바로 저장)
       untry(c.slot);
@@ -303,6 +307,9 @@ export default function WardrobeView({
                 onClick={() => {
                   if (on) return;
                   pr.body = b.id;
+                  // 남자 캐릭터로 바꾸면 못 입는 옷(비키니)은 벗기고, 입어보던 것도 뺀다
+                  dropUnwearable(pr);
+                  setTrying((t) => Object.fromEntries(Object.entries(t).filter(([, id]) => { const cc = COSMETIC_BY_ID[id as string]; return !cc || canWear(pr, cc); })) as typeof t);
                   changed();
                 }}
                 className={`rounded-md py-1.5 ${on ? 'bg-pink-400 text-black' : 'text-white/60 hover:bg-white/10'}`}

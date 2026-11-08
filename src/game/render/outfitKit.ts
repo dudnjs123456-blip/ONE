@@ -19,6 +19,121 @@ const CLOTH_MAT: [CosmeticSlot, string[]][] = [
   ['shoes', ['Shoes_']],
 ];
 
+/** 비키니를 입을 때 감추는 옷 (신발은 그대로) */
+const SWIM_HIDE = ['Tops_', 'Bottoms_', 'Onepiece_'];
+
+/**
+ * 피부 그림에 비키니를 그린다. 몸 삼각형을 그림 좌표(UV)에서 한 픽셀씩 훑으며, 그 픽셀이 처음 자세에서
+ * 몸의 어디인지(높이·좌우)를 삼각형 안에서 보간해 정한다 → 경계가 매끈하고 모델마다 몸에 맞는다.
+ * 옷에 가려져 있던 몸통 그림은 비어 있거나 얼룩이 있어서, 비키니 밖 몸통은 다리에서 뽑은 피부색으로 먼저 채운다.
+ */
+function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture, m: Metrics, color: number): THREE.Texture | null {
+  const img = src.image as CanvasImageSource & { width: number; height: number };
+  const geo = mesh.geometry;
+  const uv = geo.attributes.uv;
+  const pos = geo.attributes.position;
+  if (!uv || !img?.width) return null;
+  const W = img.width;
+  const H = img.height;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const g = cv.getContext('2d', { willReadFrequently: true })!;
+  g.drawImage(img, 0, 0);
+  const data = g.getImageData(0, 0, W, H);
+  const px = data.data;
+  mesh.updateMatrixWorld(true);
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const groups = geo.groups.length ? geo.groups : [{ start: 0, count: geo.index ? geo.index.count : pos.count, materialIndex: 0 }];
+  const chestY = m.chestPos.y;
+  const hipY = m.hipsPos.y;
+  // 삼각형 목록 (처음 자세 위치 + 그림 좌표)
+  const tris: { p: THREE.Vector3[]; u: number[] }[] = [];
+  for (const gr of groups) {
+    if (mats[gr.materialIndex ?? 0] !== mat) continue;
+    for (let k = gr.start; k + 2 < gr.start + gr.count; k += 3) {
+      const ids = [0, 1, 2].map((j) => (geo.index ? geo.index.getX(k + j) : k + j));
+      tris.push({
+        p: ids.map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld)),
+        u: ids.flatMap((i) => [uv.getX(i) * W, uv.getY(i) * H]),
+      });
+    }
+  }
+  // 피부색: 허벅지 가운데 삼각형들의 그림 색 평균 (옷에 안 가려진 곳)
+  let sr = 0, sg = 0, sb = 0, sn = 0;
+  for (const t of tris) {
+    const y = (t.p[0].y + t.p[1].y + t.p[2].y) / 3;
+    if (y > hipY - 0.45 && y < hipY - 0.32) {
+      const x = Math.floor((t.u[0] + t.u[2] + t.u[4]) / 3);
+      const yy = Math.floor((t.u[1] + t.u[3] + t.u[5]) / 3);
+      const i = (Math.max(0, Math.min(H - 1, yy)) * W + Math.max(0, Math.min(W - 1, x))) * 4;
+      if (px[i + 3] < 200) continue;
+      sr += px[i];
+      sg += px[i + 1];
+      sb += px[i + 2];
+      sn++;
+    }
+  }
+  const skin = sn ? [sr / sn, sg / sn, sb / sn] : [246, 224, 210];
+  const suit = new THREE.Color(color);
+  const sc = suit.clone().convertLinearToSRGB();
+  const suitRgb = [sc.r * 255, sc.g * 255, sc.b * 255];
+  // 아랫단: 허벅지 뼈(다리 시작) 조금 위 허리선 → 가랑이(허벅지 뼈 아래)로 좁아진다
+  const top = m.legY + 0.075;
+  const bot = m.legY - 0.075;
+  /** 0 = 그대로, 1 = 피부로 채움 (옷에 가려졌던 몸통), 2 = 수영복 */
+  const zone = (dx: number, y: number) => {
+    // 위: 가슴을 감싸는 띠 + 가운데에서 목 뒤로 올라가는 끈 두 줄
+    if (y > chestY - 0.125 && y < chestY - 0.01 && dx < 0.18) return 2;
+    if (y >= chestY - 0.01 && y < chestY + 0.12 && Math.abs(dx - (0.05 + (y - chestY) * 0.2)) < 0.009) return 2;
+    // 아래: 허리선에서 가랑이로 좁아지는 삼각형
+    if (y < top && y > bot && dx < 0.03 + ((y - bot) / (top - bot)) * 0.16) return 2;
+    // 옷에 가려졌던 몸통 (팔·다리는 그대로)
+    if (y > hipY - 0.28 && y < chestY + 0.16 && dx < 0.2) return 1;
+    return 0;
+  };
+  const p = new THREE.Vector3();
+  for (const t of tris) {
+    const ys = t.p.map((q) => q.y);
+    if (Math.max(...ys) < hipY - 0.3 || Math.min(...ys) > chestY + 0.18) continue;
+    if (Math.min(...t.p.map((q) => Math.abs(q.x - m.cx))) > 0.22) continue;
+    const [x0, y0, x1, y1, x2, y2] = t.u;
+    const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)) - 1);
+    const maxX = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2)) + 1);
+    const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)) - 1);
+    const maxY = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)) + 1);
+    const den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+    if (Math.abs(den) < 1e-9) continue;
+    for (let yy = minY; yy <= maxY; yy++)
+      for (let xx = minX; xx <= maxX; xx++) {
+        const fx = xx + 0.5;
+        const fy = yy + 0.5;
+        const w0 = ((y1 - y2) * (fx - x2) + (x2 - x1) * (fy - y2)) / den;
+        const w1 = ((y2 - y0) * (fx - x2) + (x0 - x2) * (fy - y2)) / den;
+        const w2 = 1 - w0 - w1;
+        // 경계 픽셀도 칠해 그림 이음매가 벌어지지 않게 (조금 바깥까지)
+        const e = -1.5 / Math.max(1, Math.abs(den) ** 0.5);
+        if (w0 < e || w1 < e || w2 < e) continue;
+        p.set(0, 0, 0).addScaledVector(t.p[0], w0).addScaledVector(t.p[1], w1).addScaledVector(t.p[2], w2);
+        const z = zone(Math.abs(p.x - m.cx), p.y);
+        if (!z) continue;
+        const i = (yy * W + xx) * 4;
+        const c = z === 2 ? suitRgb : skin;
+        px[i] = c[0];
+        px[i + 1] = c[1];
+        px[i + 2] = c[2];
+        px[i + 3] = 255;
+      }
+  }
+  g.putImageData(data, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.flipY = src.flipY;
+  tex.colorSpace = src.colorSpace;
+  tex.wrapS = src.wrapS;
+  tex.wrapT = src.wrapT;
+  return tex;
+}
+
 type ClothMat = THREE.Material & {
   color?: THREE.Color;
   map?: THREE.Texture | null;
@@ -68,6 +183,8 @@ interface Metrics {
   /** 골반 뼈 (꼬리) · 엉덩이 둘레 정점 (몸 · 하의 · 원피스 · 치마처럼 긴 상의) */
   hips: THREE.Object3D;
   hipsPos: THREE.Vector3;
+  /** 다리가 시작되는 높이 (허벅지 뼈) — 비키니 아랫단 기준 */
+  legY: number;
   lower: Float32Array;
 }
 
@@ -109,6 +226,47 @@ export class OutfitDresser {
     } catch (e) {
       console.warn('코디 치수 재기 실패:', e);
     }
+    // 비키니용: 감출 옷 조각(외곽선 포함)과 수영복을 그릴 피부
+    const clothGeo = new Set<THREE.BufferGeometry>();
+    vrm.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData.isOutline) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      if (mats.some((mt) => SWIM_HIDE.some((pf) => matName(mt).startsWith(pf)))) {
+        this.clothMeshes.push(mesh);
+        clothGeo.add(mesh.geometry);
+      }
+      const skin = mats.find((mt) => matName(mt).startsWith('Body_')) as ClothMat | undefined;
+      if (skin && !this.skin.some((k) => k.mat === skin)) this.skin.push({ mesh, mat: skin, origMap: skin.map ?? null, origShade: skin.shadeMultiplyTexture ?? null });
+    });
+    vrm.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh && mesh.userData.isOutline && clothGeo.has(mesh.geometry)) this.clothMeshes.push(mesh);
+    });
+  }
+
+  private clothMeshes: THREE.Object3D[] = [];
+  private skin: { mesh: THREE.Mesh; mat: ClothMat; origMap: THREE.Texture | null; origShade: THREE.Texture | null }[] = [];
+  private swim = '';
+
+  /** 비키니: 옷을 감추고 피부 그림 위에 수영복을 그린다 (null = 원래대로) */
+  private setSwim(c: CosmeticDef | null) {
+    const id = c?.id ?? '';
+    if (this.swim === id) return;
+    this.swim = id;
+    for (const o of this.clothMeshes) o.visible = !c;
+    for (const k of this.skin) {
+      if (!c || !this.m || !k.origMap?.image) {
+        if (k.origMap) k.mat.map = k.origMap;
+        if (k.origShade) k.mat.shadeMultiplyTexture = k.origShade;
+        continue;
+      }
+      const tex = paintSwimsuit(k.mesh, k.mat, k.origMap, this.m, c.color);
+      if (!tex) continue;
+      this.own.push(tex);
+      k.mat.map = tex;
+      if (k.origShade) k.mat.shadeMultiplyTexture = tex;
+    }
   }
 
   /** 입은 코디 id 목록을 그대로 반영한다 (빠진 칸은 기본 옷으로) */
@@ -118,6 +276,13 @@ export class OutfitDresser {
       const c = COSMETIC_BY_ID[id];
       if (c) want.set(c.slot, c);
     }
+    // 비키니를 입으면 상의·하의 코디는 쓰지 않는다 (옷이 감춰진다)
+    const swim = want.get('top')?.style === 'bikini' ? want.get('top')! : null;
+    if (swim) {
+      want.delete('top');
+      want.delete('bottom');
+    }
+    this.setSwim(swim);
     for (const part of this.parts) {
       // 이 조각을 칠할 수 있는 부위 중 실제로 입은 첫 코디
       const slot = part.slots.find((sl) => want.has(sl));
@@ -354,7 +519,7 @@ function measure(vrm: VRM): Metrics {
   for (let i = 0; i < face.length; i += 3) if (Math.abs(face[i + 1] - eyeY) < 0.03) sideX = Math.max(sideX, Math.abs(face[i] - (x0 + x1) / 2));
   if (!sideX) sideX = (x1 - x0) / 2;
   const body = new Float32Array(vertsOf(vrm, ['Tops_', 'Body_']));
-  return { head, headPos, top, eyeY, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, rx: (x1 - x0) / 2, rz: (z1 - z0) / 2, faceZ, eyeX, eyeR, sideX, chest, chestPos, body, tops: new Float32Array(vertsOf(vrm, ['Tops_'])), v0: vrm.meta?.metaVersion === '0', hips: node('hips')!, hipsPos: node('hips')!.getWorldPosition(new THREE.Vector3()), lower: new Float32Array(vertsOf(vrm, ['Body_', 'Bottoms_', 'Onepiece_', 'Tops_'])) };
+  return { head, headPos, top, eyeY, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, rx: (x1 - x0) / 2, rz: (z1 - z0) / 2, faceZ, eyeX, eyeR, sideX, chest, chestPos, body, tops: new Float32Array(vertsOf(vrm, ['Tops_'])), v0: vrm.meta?.metaVersion === '0', hips: node('hips')!, hipsPos: node('hips')!.getWorldPosition(new THREE.Vector3()), legY: (node('leftUpperLeg') ?? node('hips')!).getWorldPosition(new THREE.Vector3()).y, lower: new Float32Array(vertsOf(vrm, ['Body_', 'Bottoms_', 'Onepiece_', 'Tops_'])) };
 }
 
 /** 몸 표면 z: (x, y) 근처 정점 중 가장 앞(dir 1) 또는 뒤(dir -1) */

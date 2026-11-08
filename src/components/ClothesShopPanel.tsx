@@ -5,7 +5,7 @@ import type { CityWorld } from '@/game/city/cityWorld';
 import type { ClothesCorner } from '@/game/city/store';
 import { EQUIPS, EQUIP_SLOTS, SHOP_GEAR, ensureGear, equipItem, type EquipDef, type Rarity } from '@/game/data/equipment';
 import { saveProfile } from '@/game/core/profile';
-import { CLOTHES_SHOP_NAME, COSMETIC_SLOTS, isNewToday, shopCosmetics, ensureWardrobe, wearCosmetic, type CosmeticDef, type CosmeticSlot } from '@/game/data/fashion';
+import { CLOTHES_SHOP_NAME, COSMETIC_SLOTS, canWear, wearBlock, isNewToday, shopCosmetics, ensureWardrobe, wearCosmetic, type CosmeticDef, type CosmeticSlot } from '@/game/data/fashion';
 
 type Tab = 'gear' | 'style';
 type GearCat = 'weapon' | 'gearAcc' | 'armor';
@@ -151,6 +151,7 @@ export default function ClothesShopPanel({
     const owned = wd.owned.includes(c.id);
     const wearing = wd.worn[c.slot] === c.id;
     const isTrying = trying[c.slot] === c.id;
+    const wearable = canWear(pr, c);
     const afford = pr.gold >= c.price;
     return (
       <div className={`flex items-center gap-3 rounded-lg border bg-white/5 p-2 ${isTrying ? 'border-amber-300' : 'border-white/15'}`}>
@@ -161,12 +162,12 @@ export default function ClothesShopPanel({
             {c.name} <span className="text-[10px] font-normal text-white/50">{COSMETIC_SLOTS.find((s) => s.id === c.slot)!.label}</span>
           </div>
           <div className="truncate text-[11px] text-white/55">{c.desc}</div>
-          <div className="text-[10px] text-pink-300">{wearing ? '입고 있어요' : owned ? '가지고 있어요' : '겉모습만 바뀌어요 (능력치 없음)'}</div>
+          <div className="text-[10px] text-pink-300">{!wearable ? wearBlock(pr, c) : wearing ? '입고 있어요' : owned ? '가지고 있어요' : '겉모습만 바뀌어요 (능력치 없음)'}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span className="text-xs font-bold text-amber-300">{owned ? '보유' : `${c.price.toLocaleString()}G`}</span>
           <div className="flex gap-1">
-            {!owned && (
+            {!owned && wearable && (
               <button
                 onClick={() =>
                   setTrying((t) => {
@@ -183,7 +184,7 @@ export default function ClothesShopPanel({
             )}
             {owned ? (
               <button
-                disabled={wearing}
+                disabled={wearing || !wearable}
                 onClick={() => {
                   wearCosmetic(pr, c.id);
                   world.refreshStats();

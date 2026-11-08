@@ -309,7 +309,8 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
       box(0.04, 0.02, 0.45, chrome, x, 0.01, cz);
     }
     mesh(new THREE.CylinderGeometry(0.012, 0.012, w, 8), chrome, (r.x0 + r.x1) / 2, 1.55, cz).rotation.z = Math.PI / 2;
-    const tops = cosOf(['top']);
+    // 비키니는 행거 대신 계산대 목록에서만 (티셔츠 모양으로 걸면 이상하다)
+    const tops = cosOf(['top']).filter((c) => c.style !== 'bikini');
     tops.forEach((c, i) => {
       const x = r.x0 + 0.2 + ((i + 0.5) * (w - 0.4)) / tops.length;
       const z = cz - 0.12 + i * 0.03;

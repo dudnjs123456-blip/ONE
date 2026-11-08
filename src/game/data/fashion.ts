@@ -21,7 +21,7 @@ export const COSMETIC_SLOTS: { id: CosmeticSlot; label: string; icon: string }[]
 /** 옷 무늬 (상의·하의) */
 export type Pattern = 'solid' | 'stripe' | 'check' | 'dot';
 /** 소품 모양 */
-export type AccStyle = 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini' | 'bunny' | 'bunnyTail';
+export type AccStyle = 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini' | 'bunny' | 'bunnyTail' | 'bikini';
 
 export interface CosmeticDef {
   id: string;
@@ -35,6 +35,8 @@ export interface CosmeticDef {
   color2?: number;
   pattern?: Pattern;
   style?: AccStyle;
+  /** 여자 캐릭터만 입을 수 있다 (비키니) */
+  femaleOnly?: boolean;
   desc: string;
 }
 
@@ -50,6 +52,8 @@ export const COSMETICS: CosmeticDef[] = [
   // 토끼 머리띠 (모자 칸) · 토끼 꼬리 (꼬리 칸): color2 = 귀 안쪽 색
   C({ id: 'bunny-white', name: '화이트 토끼 머리띠', icon: '🐰', slot: 'hat', price: 240, color: 0xfbf8f4, color2: 0xf6b3c8, style: 'bunny', desc: '쫑긋 선 토끼 귀. 놀이공원 필수템.' }),
   C({ id: 'bunny-black', name: '블랙 토끼 머리띠', icon: '🐰', slot: 'hat', price: 240, color: 0x232127, color2: 0xe58fa8, style: 'bunny', desc: '시크한 검은 토끼.' }),
+  // 비키니 (상의 칸): 입으면 원래 상의·하의·원피스를 감추고 몸에 수영복을 그린다. 하의 칸 코디는 무시. 여자 캐릭터만
+  C({ id: 'bikini-white', name: '화이트 비키니', icon: '👙', slot: 'top', price: 380, color: 0xf7f6f2, style: 'bikini', femaleOnly: true, desc: '여름 한강 수영장 갈 때. (여자 캐릭터만)' }),
   C({ id: 'tail-white', name: '화이트 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xfbf8f4, style: 'bunnyTail', desc: '엉덩이에 달린 몽실몽실 솜뭉치.' }),
   C({ id: 'tail-pink', name: '핑크 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xf7c3d4, style: 'bunnyTail', desc: '머리띠랑 맞춰 달면 더 귀엽다.' }),
   // 안경
@@ -215,11 +219,44 @@ export function ensureWardrobe(p: PlayerProfile): Wardrobe {
   return (p.wardrobe ??= { owned: [], worn: {} });
 }
 
+/** 남자 캐릭터 몸 (render/looks 의 BODY_TYPES id 와 같다) */
+export const MALE_BODIES: readonly string[] = ['male', 'silverboy'];
+
+/** VRoid 에서 내보낼 때 옷에 가려진 몸을 지운 모델 (옷을 감추면 몸통이 비어 보인다) */
+const NO_BODY_UNDER_CLOTHES: readonly string[] = ['pink'];
+
+/** 이 캐릭터가 못 입는 이유 (입을 수 있으면 null). 비키니는 여자 캐릭터만, 옷 속 몸이 있는 모델만 */
+export function wearBlock(p: PlayerProfile, c: CosmeticDef): string | null {
+  if (!c.femaleOnly) return null;
+  const body = p.body ?? 'female';
+  if (MALE_BODIES.includes(body)) return '여자 캐릭터만 입을 수 있어요';
+  if (NO_BODY_UNDER_CLOTHES.includes(body)) return '이 캐릭터는 모델에 옷 속 몸이 없어서 입을 수 없어요';
+  return null;
+}
+
+export function canWear(p: PlayerProfile, c: CosmeticDef): boolean {
+  return !wearBlock(p, c);
+}
+
+/** 남자 캐릭터로 바꿨을 때 못 입는 옷은 벗긴다 */
+export function dropUnwearable(p: PlayerProfile): boolean {
+  const w = ensureWardrobe(p);
+  let changed = false;
+  for (const [slot, id] of Object.entries(w.worn) as [CosmeticSlot, string][]) {
+    const c = COSMETIC_BY_ID[id];
+    if (c && !canWear(p, c)) {
+      delete w.worn[slot];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /** 코디 입기 (가진 옷만). 같은 칸 옷은 벗겨진다 */
 export function wearCosmetic(p: PlayerProfile, id: string): boolean {
   const w = ensureWardrobe(p);
   const c = COSMETIC_BY_ID[id];
-  if (!c || !w.owned.includes(id)) return false;
+  if (!c || !w.owned.includes(id) || !canWear(p, c)) return false;
   w.worn[c.slot] = id;
   return true;
 }
