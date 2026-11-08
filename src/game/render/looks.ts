@@ -14,6 +14,7 @@ export const BODY_TYPES = [
   { id: 'pink', label: '핑크', icon: '🎀', url: '/models/pinky.vrm' },
   { id: 'silver', label: '은발', icon: '🤍', url: '/models/silver.vrm' },
   { id: 'silverboy', label: '은발 소년', icon: '🧑', url: '/models/silverboy.vrm' },
+  { id: 'smallSilverGirl', label: '작은은발소녀', icon: '👧', url: '/models/a3.vrm' },
 ] as const;
 
 export type BodyType = (typeof BODY_TYPES)[number]['id'];
