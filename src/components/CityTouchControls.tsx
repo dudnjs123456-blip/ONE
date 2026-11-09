@@ -21,7 +21,7 @@ const tapKey = (code: string) => {
 type Dirs = Record<'up' | 'down' | 'left' | 'right', boolean>;
 const NONE: Dirs = { up: false, down: false, left: false, right: false };
 
-export default function CityTouchControls() {
+export default function CityTouchControls({ skills = false }: { skills?: boolean }) {
   const padRef = useRef<HTMLDivElement>(null);
   const pointer = useRef<number | null>(null);
   const held = useRef<Dirs>(NONE);
@@ -89,6 +89,16 @@ export default function CityTouchControls() {
         <button className={`${small} h-11 w-11`} onClick={() => tapKey('KeyI')}>
           가방
         </button>
+        {skills && (
+          <>
+            <button title="은빛 날라차기 (R)" className={`${small} h-11 w-14 text-[10px]`} onClick={() => tapKey('KeyR')}>
+              R 날라차기
+            </button>
+            <button title="은빛 회오리 차기 (X)" className={`${small} h-11 w-14 text-[10px]`} onClick={() => tapKey('KeyX')}>
+              X 회오리
+            </button>
+          </>
+        )}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between px-4 pb-4">

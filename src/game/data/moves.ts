@@ -20,6 +20,7 @@ export type MoveAnim =
   | 'kneeR'
   | 'jumpPunchR'
   | 'flyKick'
+  | 'tornadoKick'
   | 'slide';
 
 /** 콤보 연결(스트링): 기술 도중 `until` 프레임까지 button 을 누르면 `at` 프레임에 `into` 로 이어진다. */
@@ -71,6 +72,8 @@ export interface MoveDef {
   weighty?: boolean;
   /** 공중 기술: 쓰는 동안에도 떨어지고, 착지하면 바로 끝난다 */
   aerial?: boolean;
+  /** 특정 캐릭터가 전용 스킬 입력으로만 사용하는 기술 */
+  characterOnly?: boolean;
   anim: MoveAnim;
 }
 
@@ -191,6 +194,16 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
     startup: 16, active: 4, recovery: 26, damage: 18, level: 'mid', lunge: 0.08,
     range: 1.15, tracking: 0.12, onBlock: -15, onHit: 0, pushback: 0.15, launch: 0.19, anim: 'kneeR',
   },
+  smallSilverFlyingKick: {
+    name: '은빛 날라차기', notation: '캐릭터 스킬', input: null, characterOnly: true,
+    startup: 12, active: 5, recovery: 28, damage: 24, level: 'mid', lunge: 0.075, weighty: true,
+    range: 1.5, tracking: 0.2, onBlock: -12, onHit: 4, pushback: 0.85, launch: 0.06, anim: 'flyKick',
+  },
+  smallSilverTornadoKick: {
+    name: '은빛 회오리 차기', notation: '캐릭터 스킬', input: null, characterOnly: true,
+    startup: 18, active: 6, recovery: 34, damage: 21, level: 'mid', weighty: true,
+    range: 1.45, tracking: 0.85, onBlock: -16, onHit: 2, pushback: 0.95, launch: 0.08, anim: 'tornadoKick',
+  },
 
   // ───── 보스 전용 (input: null → 플레이어는 못 씀, AI 가 직접 발동) ─────
   bossClaw: {
@@ -247,7 +260,7 @@ export const DASH_MOVES: Partial<Record<Button, string>> = { 1: 'dashStraight', 
 export const JUMP_MOVES: Record<Button, string> = { 1: 'jumpPunch', 2: 'jumpPunch', 3: 'jumpKick', 4: 'jumpKick' };
 
 /** 기술표에 보여줄 플레이어 기술 */
-export const PLAYER_MOVE_LIST: MoveDef[] = MOVE_LIST.filter((m) => m.notation !== 'BOSS');
+export const PLAYER_MOVE_LIST: MoveDef[] = MOVE_LIST.filter((m) => m.notation !== 'BOSS' && !m.characterOnly);
 
 /**
  * 대전에서 실제로 나가는 발생 프레임. 플레이어는 템포(PLAYER_TEMPO)만큼 빨라진다

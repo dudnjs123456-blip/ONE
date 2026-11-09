@@ -191,6 +191,22 @@ const EXTENDED: Record<
       shL: -1.0, elL: -2.2, arL: -0.3, shR: 0.55, elR: -0.35, arR: 0.3,
     },
   },
+  // 회오리 차기: 몸통을 반대로 감았다가 허리와 어깨를 크게 돌리며 오른발을 휘두른다
+  tornadoKick: {
+    base: GUARD,
+    rechamber: true,
+    windup: 0.55,
+    overshoot: 0.2,
+    chamber: {
+      hipYaw: -0.55, twist: -0.85, lean: 0.08, hpR: -1.45, knR: 2.0, abR: 0.18,
+      hpL: -0.12, knL: 0.62, shL: -0.7, elL: -1.8, shR: -0.45, elR: -1.75,
+    },
+    pose: {
+      hipYaw: 2.0, twist: 1.35, lean: -0.12, roll: 0.18,
+      hpR: -1.85, knR: 0.08, abR: 0.12, hpL: -0.12, knL: 0.62,
+      shR: 0.7, elR: -0.35, arR: 0.3, shL: -0.8, elL: -1.45, arL: 0.15,
+    },
+  },
   kneeR: {
     base: GUARD,
     windup: 0.55,

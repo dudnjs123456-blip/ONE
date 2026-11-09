@@ -34,6 +34,7 @@ node --experimental-websocket scripts/phone-shot.mjs <url> out.png [steps.json]
 효과음·배경 음악은 음원 파일 없이 Web Audio 로 합성한다 (`render/sfx.ts`, `render/bgm.ts`).
 
 레벨·경험치·골드는 `core/profile.ts` 의 프로필 하나를 필드와 보스가 같이 쓰고, 브라우저 localStorage 에 저장된다.
+서울 라이프에서 작은은발소녀를 고르면 `R` 은빛 날라차기, `X` 은빛 회오리 차기 스킬을 사용할 수 있다. 길거리 행인에게 맞히면 기존 전투 규칙(피격·신고·경찰)을 따른다.
 
 ## 클라우드 저장 (Supabase)
 

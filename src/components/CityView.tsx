@@ -122,12 +122,17 @@ class CityKeyboard {
   private pressed = false;
   /** 점프 키(Space)를 새로 눌렀다 (낚시 연타: 짧게 톡 쳐도 놓치지 않게) */
   private tapped = false;
+  private skillTap: CityInput['skill'];
   /** 대각선에서 키 하나를 먼저 뗐을 때 잠깐 대각선을 유지 (멈출 때 방향이 꺾이지 않게) */
   private lastDiag: { x: number; z: number } | null = null;
   private diagGrace = 0;
   private onDown = (e: KeyboardEvent) => {
     // 이름 입력칸 등에 글자를 칠 땐 게임 키로 쓰지 않는다
     if (typingIn(e)) return;
+    if (!e.repeat && (e.code === 'KeyR' || e.code === 'KeyX')) {
+      this.skillTap = e.code === 'KeyR' ? 'flyingKick' : 'tornadoKick';
+      e.preventDefault();
+    }
     if (moveOf(e.code) || has('interact', e.code) || has('jump', e.code)) e.preventDefault();
     if (has('interact', e.code) && !e.repeat) this.pressed = true;
     if (has('jump', e.code) && !e.repeat) this.tapped = true;
@@ -140,7 +145,10 @@ class CityKeyboard {
     if (has('jump', e.code)) e.preventDefault();
     this.down.delete(e.code);
   };
-  private onBlur = () => this.down.clear();
+  private onBlur = () => {
+    this.down.clear();
+    this.skillTap = undefined;
+  };
 
   attach() {
     window.addEventListener('keydown', this.onDown);
@@ -164,8 +172,10 @@ class CityKeyboard {
     }
     const interact = this.pressed;
     const jumpTap = this.tapped;
+    const skill = this.skillTap;
     this.tapped = false;
     this.pressed = false;
+    this.skillTap = undefined;
     // 대각선 → 한 방향: 두 키를 정확히 동시에 떼기는 어렵다. 6프레임 동안은 대각선으로 본다
     if (x && z) {
       this.lastDiag = { x, z };
@@ -189,6 +199,7 @@ class CityKeyboard {
       down: bindCodes('down').some((k) => this.down.has(k) && this.synthetic.has(k)),
       interact,
       jumpTap,
+      skill,
     };
   }
 }
@@ -200,6 +211,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
   const perfRef = useRef<HTMLDivElement>(null);
   const touch = useIsTouch();
   const [hud, setHud] = useState<CityHud | null>(null);
+  const [skillBody, setSkillBody] = useState(profile.body === 'smallSilverGirl');
   const [menu, setMenu] = useState(false);
   const [inventory, setInventory] = useState(false);
   const [bigMap, setBigMap] = useState(false);
@@ -266,10 +278,22 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
   wardrobeRef.current = wardrobe;
 
   useEffect(() => {
+    const timer = window.setInterval(() => setSkillBody(profile.body === 'smallSilverGirl'), 250);
+    return () => window.clearInterval(timer);
+  }, [profile]);
+
+  useEffect(() => {
     const canvas = canvasRef.current!;
     const kb = new CityKeyboard();
     kb.attach();
-    const world = new CityWorld({ read: () => (menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current ? { move: null, run: false, interact: false } : kb.read()) }, profile);
+    const world = new CityWorld({
+      read: () => {
+        const input = kb.read();
+        return menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current
+          ? { move: null, run: false, interact: false }
+          : input;
+      },
+    }, profile);
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
@@ -660,7 +684,13 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       <canvas ref={canvasRef} className="block h-full w-full" />
       {loading && <LoadingScreen {...loading} />}
       {/* 폰·태블릿: 화면 조작 버튼 (뒤에 그려지는 창들이 이 위를 덮는다) */}
-      {touch && !loading && <CityTouchControls />}
+      {touch && !loading && <CityTouchControls skills={skillBody} />}
+      {!touch && skillBody && (
+        <div className="pointer-events-none absolute bottom-4 right-4 z-10 rounded-lg border border-white/15 bg-black/55 px-3 py-2 text-xs text-white/85">
+          <span className="font-bold text-amber-300">R</span> 날라차기 <span className="mx-1 text-white/40">·</span>{' '}
+          <span className="font-bold text-amber-300">X</span> 회오리 차기
+        </div>
+      )}
       {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}
       {!loading && <VoicePanel voice={voice} touch={touch} />}
       <div

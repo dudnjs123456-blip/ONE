@@ -35,7 +35,7 @@ import { FishingSession, type FishPhase, type FishResult, type FishScene } from 
 import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
 import { weatherAt, type WeatherState } from './weather';
 import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt, sharedNow } from './worldClock';
-import { PARK, RIDES, WHEEL, WHEEL_RIDE_MS, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
+import { PARK, RIDES, RIDE_IDS, RIDE_NODE, WHEEL, WHEEL_RIDE_MS, parkPathTo, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
 
 export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store' | 'park';
 
@@ -84,6 +84,8 @@ export interface CityInput {
   jump?: boolean;
   /** 이번 프레임에 점프 키(Space)를 새로 눌렀나 (낚시 연타) */
   jumpTap?: boolean;
+  /** 작은은발소녀 전용 스킬 입력 */
+  skill?: 'flyingKick' | 'tornadoKick';
 }
 
 export interface Rect {
@@ -923,6 +925,7 @@ export class CityWorld {
 
     // 잡혔으면 잠깐 멈췄다가 집 앞에서 다시 시작
     if (this.caughtAt !== null) {
+      this.input.read(this);
       if (this.frame - this.caughtAt >= CAUGHT_FRAMES) this.restart();
       this.stepTown(false, false);
       return;
@@ -931,6 +934,7 @@ export class CityWorld {
     const p = this.player;
     // 행인에게 맞아 쓰러졌다: 잠시 뒤 집에서 깨어난다
     if (this.downedAt !== null) {
+      this.input.read(this);
       p.snapshot();
       p.freeMove = null;
       p.feed(NEUTRAL_INPUT);
@@ -944,7 +948,9 @@ export class CityWorld {
     // 내다보는 동안의 키 입력(돌아오기 E 포함)은 이 프레임에 다 쓴다
     const looking = this.lookingOut;
     if (looking) this.stepLookOut();
-    const inp: CityInput = this.dialog || this.npcChat || this.elevatorOpen || looking || sleeping ? { move: null, run: false, interact: false } : { ...this.input.read(this) };
+    const rawInput = this.input.read(this);
+    const blocked = this.dialog || this.npcChat || this.elevatorOpen || looking || sleeping;
+    const inp: CityInput = blocked ? { move: null, run: false, interact: false } : { ...rawInput };
     if (this.firstPerson && !looking && !sleeping && !this.ride) this.fpInput(inp);
     if (this.fishing) this.stepFishing(inp);
     if (!sleeping && this.downedAt === null) this.stepCare(inp);
@@ -964,7 +970,26 @@ export class CityWorld {
     // 공격 버튼이 눌려 있으면 이동 대신 기술 입력 (필드와 같은 규칙):
     // 방향키는 캐릭터가 보는 방향 기준 앞/뒤, Shift 는 '아래'
     const buttons = inp.buttons ?? NEUTRAL_INPUT.buttons;
-    const attacking = buttons.some(Boolean);
+    const requestedSkill = inp.skill === 'flyingKick' ? MOVES.smallSilverFlyingKick : inp.skill === 'tornadoKick' ? MOVES.smallSilverTornadoKick : null;
+    const canUseSkill =
+      requestedSkill &&
+      this.profile.body === 'smallSilverGirl' &&
+      p.isActionable &&
+      !this.seat &&
+      !this.ride &&
+      !this.rideQueue &&
+      !this.fishing &&
+      !this.doorway &&
+      this.downedAt === null &&
+      this.caughtAt === null;
+    if (requestedSkill && canUseSkill) {
+      p.queueMove(requestedSkill);
+      this.say(`✨ ${requestedSkill.name}!`, 1.2);
+    } else if (inp.skill && this.profile.body !== 'smallSilverGirl') {
+      this.say('작은은발소녀 전용 스킬이에요', 1.5);
+    }
+    const skillAttack = !!(requestedSkill && canUseSkill);
+    const attacking = buttons.some(Boolean) || skillAttack;
     // 싸우는 중엔 숙이기 키(C)를 누르면 숙이기 (상단 공격을 피한다). 키보드 ↓ 는 언제나 그냥 걷기.
     // 터치는 조이스틱을 아래로'만' 밀면 숙이기 (대각선은 평소처럼 이동)
     const sideways = !!inp.move && Math.abs(inp.move.x) > 1e-6;
@@ -1081,6 +1106,42 @@ export class CityWorld {
     this.say('🎡 한강랜드에 도착! 놀이기구 앞에서 E 를 누르면 줄을 서요', 4);
   }
 
+  /**
+   * 놀이공원 안에서 놀이기구(또는 역) 입구까지 길을 따라 걸어간다 (지도 · 가이드에서 누르면).
+   * @returns 안내 문구 (비어 있으면 출발)
+   */
+  parkNavigate(target: RideId | 'station'): string {
+    if (this.location !== 'park') return '놀이공원 안에서만 쓸 수 있어요';
+    if (this.ride) return '놀이기구에서 내린 뒤에 이동할 수 있어요';
+    this.rideQueue = null;
+    const node = target === 'station' ? 'station' : RIDE_NODE[target];
+    const path = parkPathTo(this.player.x, this.player.z, node);
+    if (!path.length) return '거기로는 갈 수 없어요';
+    const label = target === 'station' ? '🚇 한강공원역' : `${RIDES[target].icon} ${RIDES[target].name.split(' (')[0]}`;
+    this.autopilot = { path, i: 0, label };
+    this.parkTarget = target;
+    this.say(`🧭 ${label}(으)로 가는 중… (방향키를 누르면 취소)`, 2.5);
+    return '';
+  }
+
+  /** 놀이공원 안내 중인 목적지 (가이드 패널 · 화살표) */
+  parkTarget: RideId | 'station' | null = null;
+
+  /** 가이드 패널: 놀이기구마다 지금 상태 · 기다릴 시간 · 거리 */
+  parkGuide(): { id: RideId; icon: string; name: string; state: 'board' | 'run' | 'wait'; text: string; wait: number; dist: number }[] {
+    const now = this.parkClock();
+    const p = this.player;
+    return RIDE_IDS.map((id) => {
+      const R = RIDES[id];
+      const ck = rideClock(id, now);
+      const wait = this.waitSeconds(id, now);
+      const dist = Math.round(Math.hypot(p.x - R.gate.x, p.z - R.gate.z));
+      const state: 'board' | 'run' | 'wait' = id === 'wheel' ? (this.canBoard(id, now) ? 'board' : 'wait') : ck.phase === 'boarding' ? 'board' : ck.phase === 'running' ? 'run' : 'wait';
+      const text = id === 'wheel' ? (state === 'board' ? '지금 탑승 가능' : `다음 칸 ${wait}초`) : state === 'board' ? `탑승 중 · 출발 ${Math.ceil(ck.left)}초` : state === 'run' ? `운행 중 · 다음 탑승 ${wait}초` : `곧 탑승 · ${wait}초`;
+      return { id, icon: R.icon, name: R.name, state, text, wait, dist };
+    });
+  }
+
   /** 놀이공원 역에서 다시 동네(한강공원역)로 */
   private leavePark() {
     const st = this.map.pois.find((q) => q.kind === 'subway');
@@ -1163,6 +1224,8 @@ export class CityWorld {
         drop: '🗼 심장이 아직도 쿵쾅거린다',
         viking: '🏴‍☠️ 속이 울렁울렁…',
         wheel: '🎡 한강이 한눈에 보였다',
+        gyro: '🌀 하늘과 땅이 몇 번 뒤집혔는지 모르겠다…',
+        sky: '🪂 한강 위를 날아다닌 것 같았다',
       };
       this.say(msg[r.id], 3.5);
     }
@@ -1623,7 +1686,7 @@ export class CityWorld {
 
   /** 지도에서 누른 곳으로 걸어간다 (건물을 피해 길찾기). @returns 안내 문구 */
   navigateTo(x: number, z: number, label = '선택한 곳'): string {
-    // 놀이공원: 지하철을 타고 동네로 돌아온 뒤 그곳으로 걸어간다
+    // 놀이공원: 지하철을 타고 동네로 돌아온 뒤 그곳으로 걸어간다 (놀이공원 안 이동은 parkNavigate)
     if (this.location === 'park') {
       if (this.ride) return '놀이기구에서 내린 뒤에 이동할 수 있어요';
       this.rideQueue = null;
@@ -1645,9 +1708,10 @@ export class CityWorld {
   private followAutopilot(inp: CityInput) {
     const ap = this.autopilot;
     if (!ap) return;
-    const manual = !!inp.move || (inp.buttons ?? []).some(Boolean) || this.location !== 'city' || this.caughtAt !== null;
+    const manual = !!inp.move || (inp.buttons ?? []).some(Boolean) || (this.location !== 'city' && this.location !== 'park') || this.caughtAt !== null || !!this.ride;
     if (manual) {
       this.autopilot = null;
+      this.parkTarget = null;
       return;
     }
     const p = this.player;
@@ -1655,7 +1719,8 @@ export class CityWorld {
     while (wp && Math.hypot(wp.x - p.x, wp.z - p.z) < 0.7) wp = ap.path[++ap.i];
     if (!wp) {
       this.autopilot = null;
-      this.say(`📍 ${ap.label} 도착`, 2.5);
+      this.parkTarget = null;
+      this.say(this.location === 'park' ? `📍 ${ap.label} 도착 — 입구에서 E 를 누르면 줄을 서요` : `📍 ${ap.label} 도착`, 2.5);
       return;
     }
     inp.move = { x: wp.x - p.x, z: wp.z - p.z };

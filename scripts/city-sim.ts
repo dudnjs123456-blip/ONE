@@ -1565,3 +1565,43 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   ew.receiveEmote('f1', '<script>');
   check('emote: friend shows, junk ignored, not in chat log', ew.chatBubbles.filter((b) => b.who === 'f1').length === 1 && ew.chatLog.length === logBefore);
 }
+
+// 작은은발소녀 전용 스킬: 독립 입력으로 발동하고 기존 행인 전투 판정을 쓴다
+{
+  const profile: PlayerProfile = {
+    level: 1, exp: 0, gold: 0, kills: 0, bossClears: {}, bossBest: {}, inventory: {},
+    life: { fatigue: 0, hunger: 0 }, body: 'smallSilverGirl',
+  };
+  let input: CityInput = { move: null, run: false, interact: false, skill: 'flyingKick' };
+  const w = new CityWorld({ read: () => input }, profile, 31);
+  const npc = w.npcs[0];
+  npc.fighter.reset(w.player.x + w.player.fx * 0.9, w.player.z + w.player.fz * 0.9, -w.player.fx, -w.player.fz);
+  npc.pause = 1200;
+  w.step();
+  input = { move: null, run: false, interact: false };
+  for (let i = 0; i < 50 && npc.fighter.hp === npc.fighter.maxHp; i++) w.step();
+  check('small silver girl: flying kick is an independent attack that damages a city NPC', npc.fighter.hp < npc.fighter.maxHp, `(${npc.fighter.hp}/${npc.fighter.maxHp})`);
+  check('small silver girl: skill uses its dedicated move data', MOVES.smallSilverFlyingKick.damage === 24 && MOVES.smallSilverFlyingKick.input === null);
+
+  let tornadoInput: CityInput = { move: null, run: false, interact: false, skill: 'tornadoKick' };
+  const tornado = new CityWorld({ read: () => tornadoInput }, profile, 33);
+  const target = tornado.npcs[0];
+  target.fighter.reset(tornado.player.x + tornado.player.fx * 0.9, tornado.player.z + tornado.player.fz * 0.9, -tornado.player.fx, -tornado.player.fz);
+  target.pause = 1200;
+  tornado.step();
+  tornadoInput = { move: null, run: false, interact: false };
+  for (let i = 0; i < 50 && target.fighter.hp === target.fighter.maxHp; i++) tornado.step();
+  check('small silver girl: tornado kick independently damages a city NPC', target.fighter.hp < target.fighter.maxHp, `(${target.fighter.hp}/${target.fighter.maxHp})`);
+  check('small silver girl: tornado kick has a dedicated spinning animation', MOVES.smallSilverTornadoKick.anim === 'tornadoKick');
+
+  for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {
+    const world = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, profile, 34);
+    world.location = location;
+    world.step();
+    check(`small silver girl skill can activate in ${location}`, world.player.move?.id === 'smallSilverTornadoKick');
+  }
+
+  const other = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, { ...profile, body: 'female' }, 32);
+  other.step();
+  check('character skills are unavailable to other appearances', other.player.move === null);
+}
