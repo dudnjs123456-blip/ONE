@@ -25,6 +25,7 @@ import {
   Locomotion,
   Mannequin,
   PoseSpring,
+  backTurnSpin,
   kicking,
   attackBoost,
   poseFor,
@@ -454,7 +455,7 @@ export class VrmCharacter implements CharacterView {
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
 
     vrm.scene.position.set(lp.x, lp.y, lp.z);
-    vrm.scene.rotation.y = yaw;
+    vrm.scene.rotation.y = yaw + backTurnSpin(f, c.sub);
 
     // 골반 높이: 다리 각도로 발이 바닥에 닿는 높이를 계산 (누우면 바닥 가까이)
     const { thigh, shin, hipsY } = this.rig;

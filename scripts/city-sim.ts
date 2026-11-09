@@ -14,7 +14,7 @@ import { GUARD_SHIFT_FRAMES } from '../src/game/city/guardJob';
 import { dateOfDay, dayOfDate, shortDay } from '../src/game/city/calendar';
 import { CITY_CONST } from '../src/game/city/cityMap';
 import { crosswalks, vehicleLight, walkLight } from '../src/game/city/traffic';
-import { poseFor } from '../src/game/render/mannequin';
+import { backTurnSpin, poseFor } from '../src/game/render/mannequin';
 
 /** 시험용: 시계를 ms 만큼 앞으로 (실제로 몇 시간을 돌릴 수 없으니) */
 function skip(w: CityWorld, ms: number) {
@@ -1617,7 +1617,10 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   backTurn.player.move = MOVES.smallSilverBackTurnKick;
   backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup;
   const turnedPose = poseFor(backTurn.player, 0);
-  check('small silver girl: back-turn kick turns away and extends the kicking leg back toward the opponent', turnedPose.hipYaw > 2.5 && turnedPose.twist > 2.5 && turnedPose.hpR > 1.3 && turnedPose.knR < 0.1);
+  check('small silver girl: back-turn kick faces away at impact with the leg extended toward the opponent', backTurnSpin(backTurn.player) > Math.PI - 0.01 && turnedPose.hpR > 1.3 && turnedPose.knR < 0.1);
+  backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup + MOVES.smallSilverBackTurnKick.active - 1 + 14;
+  const rotatedKick = poseFor(backTurn.player, 0);
+  check('small silver girl: back-turn kick completes one airborne turn before landing', Math.abs(backTurnSpin(backTurn.player) - Math.PI * 2) < 0.01 && rotatedKick.rise < 0.01);
 
   for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {
     const world = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, profile, 34);

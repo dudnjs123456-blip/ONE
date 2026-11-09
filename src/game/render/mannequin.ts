@@ -215,11 +215,11 @@ const EXTENDED: Record<
     windup: 0.62,
     overshoot: 0.2,
     chamber: {
-      hipYaw: 1.15, twist: 1.0, lean: 0.12, hpR: 0.55, knR: 1.85, abR: 0.08,
+      hipYaw: 0.1, twist: -0.38, lean: 0.2, hpR: 0.55, knR: 1.85, abR: 0.08,
       hpL: -0.22, knL: 0.65, shL: -0.82, elL: -2.1, shR: -0.68, elR: -2.05,
     },
     pose: {
-      hipYaw: 2.85, twist: 2.72, lean: -0.18, roll: 0.08,
+      hipYaw: 0.12, twist: 0.38, lean: -0.24, roll: 0.08,
       hpR: 1.5, knR: 0.03, abR: -0.08, hpL: -0.25, knL: 0.55,
       shL: 0.62, elL: -0.42, arL: 0.22, shR: -0.85, elR: -2.25, arR: -0.32,
     },
@@ -591,11 +591,12 @@ export function poseFor(f: Fighter, t: number, sub = 0, loco?: Locomotion): Pose
       const ext = EXTENDED[m.anim];
       if (ext.chamber) {
         const pose = strikePose(fr, m, ext.base, ext.chamber, ext.pose, ext.windup, ext.overshoot, ext.rechamber);
-        if (m.anim === 'tornadoKick') {
+        if (m.anim === 'tornadoKick' || m.anim === 'backTurnKick') {
           const activeEnd = m.startup + m.active - 1;
           const launch = easeOut((fr - 2) / (m.startup - 2));
-          const landing = 1 - easeInOut((fr - activeEnd - 1) / 12);
-          pose.rise = 0.78 * launch * landing;
+          const landingDelay = m.anim === 'backTurnKick' ? 14 : 12;
+          const landing = 1 - easeInOut((fr - activeEnd - 1) / landingDelay);
+          pose.rise = (m.anim === 'backTurnKick' ? 0.9 : 0.78) * launch * landing;
         }
         return pose;
       }
@@ -625,6 +626,17 @@ const KICK_ANIMS = new Set<string>(['midKickL', 'highKickR', 'lowKickR', 'sweepL
 /** 발차기 중인가 (팔 스프링을 단단하게) */
 export function kicking(f: Fighter) {
   return f.state === 'attack' && !!f.move && KICK_ANIMS.has(f.move.anim);
+}
+
+/** 뒤돌려차기는 타격 때 등을 보이고, 착지 전에 한 바퀴 회전을 마친다. */
+export function backTurnSpin(f: Fighter, sub = 0): number {
+  const move = f.move;
+  if (f.state !== 'attack' || move?.anim !== 'backTurnKick') return 0;
+  const fr = Math.max(0, f.frame + sub);
+  const activeEnd = move.startup + move.active - 1;
+  const spinEnd = activeEnd + 14;
+  if (fr <= move.startup) return Math.PI * easeInOut(fr / move.startup);
+  return Math.PI + Math.PI * easeInOut((fr - move.startup) / (spinEnd - move.startup));
 }
 
 /** 목표 포즈를 관절별 2차 스프링으로 따라가는 실제 표시 포즈 */
@@ -872,7 +884,7 @@ export class Mannequin implements CharacterView {
     this.mainMat.emissive.setRGB(glow, glow * 0.25, 0);
 
     this.root.position.set(lp.x, lp.y, lp.z);
-    this.root.rotation.y = yaw;
+    this.root.rotation.y = yaw + backTurnSpin(f, c.sub);
 
     const standY = Math.max(legHeight(p.hpL, p.knL, p.abL), legHeight(p.hpR, p.knR, p.abR)) + 0.06;
     this.body.position.y = standY * (1 - p.drop) + 0.14 * p.drop + p.rise;
