@@ -1617,7 +1617,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   backTurn.player.move = MOVES.smallSilverBackTurnKick;
   backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup;
   const turnedPose = poseFor(backTurn.player, 0);
-  check('small silver girl: back-turn kick faces away at impact with the leg extended toward the opponent', backTurnSpin(backTurn.player) > Math.PI - 0.01 && turnedPose.hpR > 1.3 && turnedPose.knR < 0.1);
+  check('small silver girl: back-turn kick faces side-on at impact and extends the leg sideways', Math.abs(backTurnSpin(backTurn.player) - Math.PI / 2) < 0.01 && turnedPose.abR > 1 && turnedPose.knR < 0.1);
   backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup + MOVES.smallSilverBackTurnKick.active - 1 + 14;
   const rotatedKick = poseFor(backTurn.player, 0);
   check('small silver girl: back-turn kick completes one airborne turn before landing', Math.abs(backTurnSpin(backTurn.player) - Math.PI * 2) < 0.01 && rotatedKick.rise < 0.01);

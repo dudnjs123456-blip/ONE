@@ -208,7 +208,7 @@ const EXTENDED: Record<
       shR: 0.72, elR: -0.3, arR: 0.32, shL: -1.12, elL: -2.25, arL: -0.32,
     },
   },
-  // 뒤돌려차기: 등을 보이며 몸을 끝까지 돌리고, 접은 오른발을 뒤로 쭉 뻗어 상대를 찬다
+  // 뒤돌려차기: 회전 중 옆으로 몸을 세우고 오른발을 바깥으로 수평에 가깝게 뻗는다
   backTurnKick: {
     base: GUARD,
     rechamber: true,
@@ -219,8 +219,8 @@ const EXTENDED: Record<
       hpL: -0.22, knL: 0.65, shL: -0.82, elL: -2.1, shR: -0.68, elR: -2.05,
     },
     pose: {
-      hipYaw: 0.12, twist: 0.38, lean: -0.24, roll: 0.08,
-      hpR: 1.5, knR: 0.03, abR: -0.08, hpL: -0.25, knL: 0.55,
+      hipYaw: 0.12, twist: 0.38, lean: -0.18, roll: 0.24,
+      hpR: -0.15, knR: 0.03, abR: 1.1, hpL: -0.25, knL: 0.55,
       shL: 0.62, elL: -0.42, arL: 0.22, shR: -0.85, elR: -2.25, arR: -0.32,
     },
   },
@@ -628,15 +628,16 @@ export function kicking(f: Fighter) {
   return f.state === 'attack' && !!f.move && KICK_ANIMS.has(f.move.anim);
 }
 
-/** 뒤돌려차기는 타격 때 등을 보이고, 착지 전에 한 바퀴 회전을 마친다. */
+/** 뒤돌려차기는 옆으로 찰 때 상대를 향하고, 착지 전에 한 바퀴 회전을 마친다. */
 export function backTurnSpin(f: Fighter, sub = 0): number {
   const move = f.move;
   if (f.state !== 'attack' || move?.anim !== 'backTurnKick') return 0;
   const fr = Math.max(0, f.frame + sub);
   const activeEnd = move.startup + move.active - 1;
   const spinEnd = activeEnd + 14;
-  if (fr <= move.startup) return Math.PI * easeInOut(fr / move.startup);
-  return Math.PI + Math.PI * easeInOut((fr - move.startup) / (spinEnd - move.startup));
+  const impactSpin = Math.PI / 2;
+  if (fr <= move.startup) return impactSpin * easeInOut(fr / move.startup);
+  return impactSpin + (TAU - impactSpin) * easeInOut((fr - move.startup) / (spinEnd - move.startup));
 }
 
 /** 목표 포즈를 관절별 2차 스프링으로 따라가는 실제 표시 포즈 */
