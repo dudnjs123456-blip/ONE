@@ -13,6 +13,7 @@ export interface Pose {
   twist: number;
   tilt: number;
   roll: number;
+  rise: number;
   /** 0 = 서 있음, 1 = 바닥에 누움 */
   drop: number;
   shL: number;
@@ -35,11 +36,11 @@ export interface Pose {
 
 type PoseKey = keyof Pose;
 export const KEYS = [
-  'lean', 'twist', 'tilt', 'roll', 'drop', 'shL', 'elL', 'shR', 'elR', 'hpL', 'knL', 'hpR', 'knR', 'abL', 'abR', 'arL', 'arR', 'hipYaw',
+  'lean', 'twist', 'tilt', 'roll', 'rise', 'drop', 'shL', 'elL', 'shR', 'elR', 'hpL', 'knL', 'hpR', 'knR', 'abL', 'abR', 'arL', 'arR', 'hipYaw',
 ] as const satisfies readonly PoseKey[];
 
 export const GUARD: Pose = {
-  lean: 0.12, twist: -0.32, tilt: 0, roll: 0, drop: 0,
+  lean: 0.12, twist: -0.32, tilt: 0, roll: 0, rise: 0, drop: 0,
   shL: -0.95, elL: -1.55, shR: -0.5, elR: -2.2,
   hpL: -0.36, knL: 0.5, hpR: 0.18, knR: 0.46,
   abL: 0.13, abR: 0.15,
@@ -191,20 +192,20 @@ const EXTENDED: Record<
       shL: -1.0, elL: -2.2, arL: -0.3, shR: 0.55, elR: -0.35, arR: 0.3,
     },
   },
-  // 회오리 차기: 몸통을 반대로 감았다가 허리와 어깨를 크게 돌리며 오른발을 휘두른다
+  // 회오리 차기: 웅크려 도약한 뒤 몸을 틀며 얼굴 높이로 오른발을 뻗는다
   tornadoKick: {
     base: GUARD,
     rechamber: true,
-    windup: 0.55,
-    overshoot: 0.2,
+    windup: 0.58,
+    overshoot: 0.22,
     chamber: {
-      hipYaw: -0.55, twist: -0.85, lean: 0.08, hpR: -1.45, knR: 2.0, abR: 0.18,
-      hpL: -0.12, knL: 0.62, shL: -0.7, elL: -1.8, shR: -0.45, elR: -1.75,
+      hipYaw: -0.28, twist: -0.72, lean: 0.32, hpR: -1.35, knR: 2.0, abR: 0.12,
+      hpL: -0.88, knL: 1.65, shL: -0.92, elL: -2.05, shR: -0.7, elR: -2.0,
     },
     pose: {
-      hipYaw: 2.0, twist: 1.35, lean: -0.12, roll: 0.18,
-      hpR: -1.85, knR: 0.08, abR: 0.12, hpL: -0.12, knL: 0.62,
-      shR: 0.7, elR: -0.35, arR: 0.3, shL: -0.8, elL: -1.45, arL: 0.15,
+      hipYaw: 0.72, twist: 0.62, lean: -0.38, roll: 0.16,
+      hpR: -2.18, knR: 0.02, abR: -0.1, hpL: -0.92, knL: 1.85,
+      shR: 0.72, elR: -0.3, arR: 0.32, shL: -1.12, elL: -2.25, arL: -0.32,
     },
   },
   kneeR: {
@@ -572,7 +573,16 @@ export function poseFor(f: Fighter, t: number, sub = 0, loco?: Locomotion): Pose
         k = Math.pow(1 - r, 2);
       }
       const ext = EXTENDED[m.anim];
-      if (ext.chamber) return strikePose(fr, m, ext.base, ext.chamber, ext.pose, ext.windup, ext.overshoot, ext.rechamber);
+      if (ext.chamber) {
+        const pose = strikePose(fr, m, ext.base, ext.chamber, ext.pose, ext.windup, ext.overshoot, ext.rechamber);
+        if (m.anim === 'tornadoKick') {
+          const activeEnd = m.startup + m.active - 1;
+          const launch = easeOut((fr - 2) / (m.startup - 2));
+          const landing = 1 - easeInOut((fr - activeEnd - 1) / 12);
+          pose.rise = 0.78 * launch * landing;
+        }
+        return pose;
+      }
       return mix(ext.base, ext.pose, Math.max(0, k));
     }
   }
@@ -590,7 +600,7 @@ const SPRING: Record<PoseKey, [number, number, number]> = {
   hipYaw: [28, 0.8, 0.6],
   lean: [19, 0.72, 0.4], twist: [19, 0.7, 0.4], roll: [19, 0.75, 0.4],
   shL: [16, 0.6, 0.2], elL: [15, 0.6, 0.2], shR: [16, 0.6, 0.2], elR: [15, 0.6, 0.2], arL: [16, 0.62, 0.2], arR: [16, 0.62, 0.2],
-  tilt: [14, 1, 0.3], drop: [14, 1, 0.3],
+  tilt: [14, 1, 0.3], rise: [22, 1, 0.65], drop: [14, 1, 0.3],
 };
 
 const ARM_KEYS = new Set<PoseKey>(['shL', 'elL', 'shR', 'elR', 'arL', 'arR']);
@@ -849,7 +859,7 @@ export class Mannequin implements CharacterView {
     this.root.rotation.y = yaw;
 
     const standY = Math.max(legHeight(p.hpL, p.knL, p.abL), legHeight(p.hpR, p.knR, p.abR)) + 0.06;
-    this.body.position.y = standY * (1 - p.drop) + 0.14 * p.drop;
+    this.body.position.y = standY * (1 - p.drop) + 0.14 * p.drop + p.rise;
     this.body.rotation.set(p.tilt, p.hipYaw, p.roll + bank);
     this.torso.rotation.set(p.lean, p.twist - p.hipYaw, 0);
 

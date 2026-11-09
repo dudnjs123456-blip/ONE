@@ -14,6 +14,7 @@ import { GUARD_SHIFT_FRAMES } from '../src/game/city/guardJob';
 import { dateOfDay, dayOfDate, shortDay } from '../src/game/city/calendar';
 import { CITY_CONST } from '../src/game/city/cityMap';
 import { crosswalks, vehicleLight, walkLight } from '../src/game/city/traffic';
+import { poseFor } from '../src/game/render/mannequin';
 
 /** 시험용: 시계를 ms 만큼 앞으로 (실제로 몇 시간을 돌릴 수 없으니) */
 function skip(w: CityWorld, ms: number) {
@@ -1593,6 +1594,14 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   for (let i = 0; i < 50 && target.fighter.hp === target.fighter.maxHp; i++) tornado.step();
   check('small silver girl: tornado kick independently damages a city NPC', target.fighter.hp < target.fighter.maxHp, `(${target.fighter.hp}/${target.fighter.maxHp})`);
   check('small silver girl: tornado kick has a dedicated spinning animation', MOVES.smallSilverTornadoKick.anim === 'tornadoKick');
+  tornado.player.state = 'attack';
+  tornado.player.move = MOVES.smallSilverTornadoKick;
+  tornado.player.frame = MOVES.smallSilverTornadoKick.startup;
+  const airborneKick = poseFor(tornado.player, 0);
+  tornado.player.frame = MOVES.smallSilverTornadoKick.startup + MOVES.smallSilverTornadoKick.active + 12;
+  const landingPose = poseFor(tornado.player, 0);
+  check('small silver girl: tornado kick leaps into a high extended kick', airborneKick.rise > 0.7 && airborneKick.hpR < -2);
+  check('small silver girl: tornado kick lands during recovery', landingPose.rise < 0.01);
 
   for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {
     const world = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, profile, 34);
