@@ -497,6 +497,7 @@ export class VrmCharacter implements CharacterView {
     bone('rightFoot')?.rotation.set(foot(p.hpR, p.knR), 0, 0);
 
     this.applyClip(f, c, vrm);
+    bone('hips')!.position.y += p.rise;
     vrm.scene.rotation.order = 'YXZ';
     vrm.scene.rotation.x = 0;
     vrm.scene.rotation.z = 0;
