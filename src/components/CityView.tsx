@@ -129,8 +129,8 @@ class CityKeyboard {
   private onDown = (e: KeyboardEvent) => {
     // 이름 입력칸 등에 글자를 칠 땐 게임 키로 쓰지 않는다
     if (typingIn(e)) return;
-    if (!e.repeat && (e.code === 'KeyR' || e.code === 'KeyX')) {
-      this.skillTap = e.code === 'KeyR' ? 'flyingKick' : 'tornadoKick';
+    if (!e.repeat && (e.code === 'KeyR' || e.code === 'KeyX' || e.code === 'KeyY')) {
+      this.skillTap = e.code === 'KeyR' ? 'flyingKick' : e.code === 'KeyX' ? 'tornadoKick' : 'backTurnKick';
       e.preventDefault();
     }
     if (moveOf(e.code) || has('interact', e.code) || has('jump', e.code)) e.preventDefault();
@@ -689,6 +689,8 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         <div className="pointer-events-none absolute bottom-4 right-4 z-10 rounded-lg border border-white/15 bg-black/55 px-3 py-2 text-xs text-white/85">
           <span className="font-bold text-amber-300">R</span> 날라차기 <span className="mx-1 text-white/40">·</span>{' '}
           <span className="font-bold text-amber-300">X</span> 회오리 차기
+          <span className="mx-1 text-white/40">·</span>{' '}
+          <span className="font-bold text-amber-300">Y</span> 뒤돌려차기
         </div>
       )}
       {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}

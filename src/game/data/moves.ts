@@ -21,6 +21,7 @@ export type MoveAnim =
   | 'jumpPunchR'
   | 'flyKick'
   | 'tornadoKick'
+  | 'backTurnKick'
   | 'slide';
 
 /** 콤보 연결(스트링): 기술 도중 `until` 프레임까지 button 을 누르면 `at` 프레임에 `into` 로 이어진다. */
@@ -203,6 +204,11 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
     name: '은빛 회오리 차기', notation: '캐릭터 스킬', input: null, characterOnly: true,
     startup: 18, active: 6, recovery: 34, damage: 21, level: 'mid', weighty: true,
     range: 1.45, tracking: 0.85, onBlock: -16, onHit: 2, pushback: 0.95, launch: 0.08, anim: 'tornadoKick',
+  },
+  smallSilverBackTurnKick: {
+    name: '은빛 뒤돌려차기', notation: '캐릭터 스킬', input: null, characterOnly: true,
+    startup: 16, active: 4, recovery: 32, damage: 26, level: 'mid', weighty: true,
+    range: 1.5, tracking: 0.65, onBlock: -14, onHit: 3, pushback: 0.75, launch: 0.12, anim: 'backTurnKick',
   },
 
   // ───── 보스 전용 (input: null → 플레이어는 못 씀, AI 가 직접 발동) ─────

@@ -1603,11 +1603,33 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('small silver girl: tornado kick leaps into a high extended kick', airborneKick.rise > 0.7 && airborneKick.hpR < -2);
   check('small silver girl: tornado kick lands during recovery', landingPose.rise < 0.01);
 
+  let backTurnInput: CityInput = { move: null, run: false, interact: false, skill: 'backTurnKick' };
+  const backTurn = new CityWorld({ read: () => backTurnInput }, profile, 35);
+  const backTurnTarget = backTurn.npcs[0];
+  backTurnTarget.fighter.reset(backTurn.player.x + backTurn.player.fx * 0.9, backTurn.player.z + backTurn.player.fz * 0.9, -backTurn.player.fx, -backTurn.player.fz);
+  backTurnTarget.pause = 1200;
+  backTurn.step();
+  backTurnInput = { move: null, run: false, interact: false };
+  for (let i = 0; i < 50 && backTurnTarget.fighter.hp === backTurnTarget.fighter.maxHp; i++) backTurn.step();
+  check('small silver girl: back-turn kick independently damages a city NPC', backTurnTarget.fighter.hp < backTurnTarget.fighter.maxHp, `(${backTurnTarget.fighter.hp}/${backTurnTarget.fighter.maxHp})`);
+  check('small silver girl: back-turn kick uses dedicated move data', !!MOVES.smallSilverBackTurnKick.characterOnly && MOVES.smallSilverBackTurnKick.input === null);
+  backTurn.player.state = 'attack';
+  backTurn.player.move = MOVES.smallSilverBackTurnKick;
+  backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup;
+  const turnedPose = poseFor(backTurn.player, 0);
+  check('small silver girl: back-turn kick turns away and extends the kicking leg back toward the opponent', turnedPose.hipYaw > 2.5 && turnedPose.twist > 2.5 && turnedPose.hpR > 1.3 && turnedPose.knR < 0.1);
+
   for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {
     const world = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, profile, 34);
     world.location = location;
     world.step();
     check(`small silver girl skill can activate in ${location}`, world.player.move?.id === 'smallSilverTornadoKick');
+  }
+  for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {
+    const world = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'backTurnKick' }) }, profile, 36);
+    world.location = location;
+    world.step();
+    check(`small silver girl back-turn kick can activate in ${location}`, world.player.move?.id === 'smallSilverBackTurnKick');
   }
 
   const other = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, { ...profile, body: 'female' }, 32);

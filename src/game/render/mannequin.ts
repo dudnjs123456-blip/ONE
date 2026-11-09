@@ -208,6 +208,22 @@ const EXTENDED: Record<
       shR: 0.72, elR: -0.3, arR: 0.32, shL: -1.12, elL: -2.25, arL: -0.32,
     },
   },
+  // 뒤돌려차기: 등을 보이며 몸을 끝까지 돌리고, 접은 오른발을 뒤로 쭉 뻗어 상대를 찬다
+  backTurnKick: {
+    base: GUARD,
+    rechamber: true,
+    windup: 0.62,
+    overshoot: 0.2,
+    chamber: {
+      hipYaw: 1.15, twist: 1.0, lean: 0.12, hpR: 0.55, knR: 1.85, abR: 0.08,
+      hpL: -0.22, knL: 0.65, shL: -0.82, elL: -2.1, shR: -0.68, elR: -2.05,
+    },
+    pose: {
+      hipYaw: 2.85, twist: 2.72, lean: -0.18, roll: 0.08,
+      hpR: 1.5, knR: 0.03, abR: -0.08, hpL: -0.25, knL: 0.55,
+      shL: 0.62, elL: -0.42, arL: 0.22, shR: -0.85, elR: -2.25, arR: -0.32,
+    },
+  },
   kneeR: {
     base: GUARD,
     windup: 0.55,
@@ -604,7 +620,7 @@ const SPRING: Record<PoseKey, [number, number, number]> = {
 };
 
 const ARM_KEYS = new Set<PoseKey>(['shL', 'elL', 'shR', 'elR', 'arL', 'arR']);
-const KICK_ANIMS = new Set<string>(['midKickL', 'highKickR', 'lowKickR', 'sweepL', 'flyKick', 'kneeR', 'slide', 'tailSweep']);
+const KICK_ANIMS = new Set<string>(['midKickL', 'highKickR', 'lowKickR', 'sweepL', 'flyKick', 'tornadoKick', 'backTurnKick', 'kneeR', 'slide', 'tailSweep']);
 
 /** 발차기 중인가 (팔 스프링을 단단하게) */
 export function kicking(f: Fighter) {

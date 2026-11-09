@@ -97,6 +97,9 @@ export default function CityTouchControls({ skills = false }: { skills?: boolean
             <button title="은빛 회오리 차기 (X)" className={`${small} h-11 w-14 text-[10px]`} onClick={() => tapKey('KeyX')}>
               X 회오리
             </button>
+            <button title="은빛 뒤돌려차기 (Y)" className={`${small} h-11 w-14 text-[10px]`} onClick={() => tapKey('KeyY')}>
+              Y 뒤돌려
+            </button>
           </>
         )}
       </div>

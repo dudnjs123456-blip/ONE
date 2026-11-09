@@ -85,7 +85,7 @@ export interface CityInput {
   /** 이번 프레임에 점프 키(Space)를 새로 눌렀나 (낚시 연타) */
   jumpTap?: boolean;
   /** 작은은발소녀 전용 스킬 입력 */
-  skill?: 'flyingKick' | 'tornadoKick';
+  skill?: 'flyingKick' | 'tornadoKick' | 'backTurnKick';
 }
 
 export interface Rect {
@@ -970,7 +970,14 @@ export class CityWorld {
     // 공격 버튼이 눌려 있으면 이동 대신 기술 입력 (필드와 같은 규칙):
     // 방향키는 캐릭터가 보는 방향 기준 앞/뒤, Shift 는 '아래'
     const buttons = inp.buttons ?? NEUTRAL_INPUT.buttons;
-    const requestedSkill = inp.skill === 'flyingKick' ? MOVES.smallSilverFlyingKick : inp.skill === 'tornadoKick' ? MOVES.smallSilverTornadoKick : null;
+    const requestedSkill =
+      inp.skill === 'flyingKick'
+        ? MOVES.smallSilverFlyingKick
+        : inp.skill === 'tornadoKick'
+          ? MOVES.smallSilverTornadoKick
+          : inp.skill === 'backTurnKick'
+            ? MOVES.smallSilverBackTurnKick
+            : null;
     const canUseSkill =
       requestedSkill &&
       this.profile.body === 'smallSilverGirl' &&
