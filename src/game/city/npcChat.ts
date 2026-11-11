@@ -2,10 +2,26 @@ import { saveProfile } from '../core/profile';
 import { TALK_NPCS, type NpcBond, type NpcContext, type NpcReply } from '../data/npcs';
 import type { CityWorld } from './cityWorld';
 import { FLOWER_GIFTS } from '../data/items';
+import { MALE_BODIES } from '../data/fashion';
 
 /** 기억은 최근 것만 남긴다 */
 const MAX_MEMORIES = 15;
-const COFFEE = { fatigue: 10, hunger: 3 };
+
+/** 엄마가 보기에 딸인지 아들인지 (캐릭터 몸으로 정한다) */
+export function childOf(world: CityWorld): '딸' | '아들' {
+  return MALE_BODIES.includes(world.profile.body ?? '') ? '아들' : '딸';
+}
+
+/** 엄마가 지금 하는 일 (시각에 따라) */
+function momDoing(minutes: number): string {
+  const h = Math.floor(minutes / 60) % 24;
+  if (h < 6) return '잠이 안 와서 주방에서 따뜻한 물을 마시는 중';
+  if (h < 9) return '주방에서 아침밥을 차리는 중';
+  if (h < 13) return '반찬가게 일을 마치고 막 들어와 장 본 것을 정리하는 중';
+  if (h < 17) return '주방에서 반찬을 만드는 중';
+  if (h < 21) return '주방에서 저녁 찌개를 끓이는 중';
+  return '설거지를 끝내고 주방을 정리하는 중';
+}
 
 export interface ChatLine {
   role: 'user' | 'assistant';
@@ -58,7 +74,8 @@ export function buildContext(world: CityWorld, npcId: string): NpcContext {
       maxHp: world.player.maxHp,
     },
     pastShifts: pr.jobs?.aptGuard?.shifts ?? 0,
-    doing: npcId === 'senior' ? world.seniorAI.status : undefined,
+    doing: npcId === 'senior' ? world.seniorAI.status : npcId === 'mom' ? momDoing(world.minutes) : undefined,
+    ...(npcId === 'mom' ? { child: childOf(world), fridge: pr.fridge?.length ?? 0 } : {}),
     affinity: bond.affinity,
     canGift: bond.lastGiftDay !== world.day,
     memories: bond.memories.map((m) => `${m.day}일째: ${m.text}`),
@@ -69,6 +86,15 @@ export function buildContext(world: CityWorld, npcId: string): NpcContext {
 export function greeting(world: CityWorld, npcId: string): string {
   const bond = bondOf(world, npcId);
   const h = Math.floor(world.minutes / 60) % 24;
+  if (npcId === 'mom') {
+    const life = world.profile.life;
+    if (world.player.hp < world.player.maxHp * 0.4) return '아이고, 얼굴이 왜 이래! 어디서 다쳤어? 이리 와 봐.';
+    if (h < 5 || h >= 23) return '이 시간까지 안 자고 뭐 해? 얼른 씻고 자야지.';
+    if (life.hunger >= 60) return '배고프지? 얼굴에 다 쓰여 있네. 밥 먹을래?';
+    if (h < 9) return '일어났어? 아침은 먹고 나가야지.';
+    if (h >= 17 && h < 21) return '왔어? 찌개 거의 다 됐어. 손 씻고 와.';
+    return bond.affinity >= 80 ? '우리 예쁜 새끼 왔네! 오늘은 어땠어?' : '왔니? 밖에 별일 없었고?';
+  }
   if (bond.talks === 0) return '자네가 이번에 새로 온 후배인가? 난 박만수, 다들 박 반장이라 부르지. 잘 지내보세.';
   if (world.job?.robber) return '이 사람아, 지금 말할 때가 아니여! 강도부터 잡고 오게!';
   if (h < 6 || h >= 22) return '허허, 이 밤에 왔나. 졸리면 커피 한 잔 하고 하게.';
@@ -90,7 +116,7 @@ export async function ask(world: CityWorld, npcId: string, lines: ChatLine[]): P
   } catch {
     // 네트워크 오류 → 오프라인 대사
   }
-  return offlineReply(lines[lines.length - 1]?.content ?? '', context);
+  return offlineReply(npcId, lines[lines.length - 1]?.content ?? '', context);
 }
 
 /** 가방의 꽃을 선물한다 (하루 한 번 호감도 +). @returns 못 주면 이유, 줬으면 null */
@@ -104,7 +130,8 @@ export function giftFlower(world: CityWorld, npcId: string, itemId: string): str
   if (inv[itemId] <= 0) delete inv[itemId];
   bond.lastFlowerDay = world.day;
   bond.affinity = Math.min(100, bond.affinity + bonus);
-  bond.memories.push({ day: world.day, text: itemId === 'bouquet' ? '후배가 꽃다발을 선물했다' : '후배가 장미 한 송이를 줬다' });
+  const who = npcId === 'mom' ? childOf(world) : '후배';
+  bond.memories.push({ day: world.day, text: itemId === 'bouquet' ? `${who}가 꽃다발을 선물했다` : `${who}가 장미 한 송이를 줬다` });
   if (bond.memories.length > MAX_MEMORIES) bond.memories.splice(0, bond.memories.length - MAX_MEMORIES);
   saveProfile(world.profile);
   return null;
@@ -123,9 +150,10 @@ export function applyReply(world: CityWorld, npcId: string, r: NpcReply): string
   if (r.gift && bond.lastGiftDay !== world.day) {
     bond.lastGiftDay = world.day;
     const life = world.profile.life;
-    life.fatigue = Math.max(0, life.fatigue - COFFEE.fatigue);
-    life.hunger = Math.max(0, life.hunger - COFFEE.hunger);
-    note = `☕ 박 반장이 믹스커피를 타 주셨다 (피로도 -${COFFEE.fatigue}, 배고픔 -${COFFEE.hunger})`;
+    const g = TALK_NPCS[npcId].gift;
+    life.fatigue = Math.max(0, life.fatigue - g.fatigue);
+    life.hunger = Math.max(0, life.hunger - g.hunger);
+    note = `${g.label} (피로도 -${g.fatigue}, 배고픔 -${g.hunger})`;
   }
   saveProfile(world.profile);
   return note;
@@ -141,15 +169,24 @@ const OFFLINE: { keys: string[]; lines: string[] }[] = [
   { keys: ['주민', '빌라', '별일', '소문'], lines: ['요즘 401호가 택배를 자주 시키더구먼. 뭘 그리 사는지.', '밤에 계단 쪽에서 소리 나면 꼭 가 보게. 그게 다 일이여.'] },
 ];
 
-function offlineReply(said: string, c: NpcContext): NpcReply {
-  const hit = OFFLINE.find((o) => o.keys.some((k) => said.includes(k)));
-  const pool = hit?.lines ?? ['허허, 그려그려.', '음, 그렇구먼. 근무나 잘 서게.', '뭐, 젊을 땐 다 그런 거여.'];
+const OFFLINE_MOM: { keys: string[]; lines: string[] }[] = [
+  { keys: ['안녕', '왔어', '다녀', '엄마'], lines: ['왔어? 밖에 춥지 않았어?', '응 왔구나. 손부터 씻고 와.'] },
+  { keys: ['배고', '밥', '먹을', '반찬'], lines: ['냉장고에 반찬 있어. 꺼내 먹으렴.', '조금만 기다려, 찌개 데워 줄게.'] },
+  { keys: ['힘들', '피곤', '졸', '아파'], lines: ['아이고 우리 새끼, 오늘은 일찍 자.', '무리하지 마. 몸이 제일이야.'] },
+  { keys: ['돈', '일', '알바', '경비'], lines: ['1층 경비 일 있잖아, 박 반장님께 여쭤 봐.', '돈 버는 것도 좋지만 밥은 꼭 챙겨 먹고 해.'] },
+];
+
+function offlineReply(npcId: string, said: string, c: NpcContext): NpcReply {
+  const mom = npcId === 'mom';
+  const hit = (mom ? OFFLINE_MOM : OFFLINE).find((o) => o.keys.some((k) => said.includes(k)));
+  const pool = hit?.lines ?? (mom ? ['그래그래, 엄마는 다 알아.', '응, 그랬구나.', '얘는, 엄마 말 좀 들어.'] : ['허허, 그려그려.', '음, 그렇구먼. 근무나 잘 서게.', '뭐, 젊을 땐 다 그런 거여.']);
   return {
     reply: pool[Math.floor(Math.random() * pool.length)],
     emotion: '평온',
+    playerMood: '기본',
     affinity: 0,
     memory: '',
-    gift: c.canGift && c.player.fatigue >= 60,
+    gift: c.canGift && (mom ? c.player.hunger >= 60 : c.player.fatigue >= 60),
     offline: true,
   };
 }

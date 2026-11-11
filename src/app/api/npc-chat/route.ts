@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { NPC_EMOTIONS, TALK_NPCS, type NpcContext, type NpcReply } from '@/game/data/npcs';
+import { NPC_EMOTIONS, PLAYER_MOODS, TALK_NPCS, type NpcContext, type NpcReply } from '@/game/data/npcs';
 
 /**
  * NPC 대화 (서버). API 키는 서버에만 두고 브라우저엔 대사만 돌려준다.
@@ -17,11 +17,12 @@ const SCHEMA = {
   properties: {
     reply: { type: 'string' },
     emotion: { type: 'string', enum: [...NPC_EMOTIONS] },
+    playerMood: { type: 'string', enum: [...PLAYER_MOODS] },
     affinity: { type: 'integer' },
     memory: { type: 'string' },
     gift: { type: 'boolean' },
   },
-  required: ['reply', 'emotion', 'affinity', 'memory', 'gift'],
+  required: ['reply', 'emotion', 'playerMood', 'affinity', 'memory', 'gift'],
   additionalProperties: false,
 } as const;
 
@@ -62,23 +63,44 @@ export async function POST(req: Request) {
       max_tokens: 4000,
       ...fallback,
       system: [{ type: 'text', text: npc.persona, cache_control: { type: 'ephemeral' } }],
-      messages: [...history, { role: 'system', content: describe(body.context) }],
+      messages: [...history, { role: 'system', content: npc.id === 'mom' ? describeMom(body.context) : describe(body.context) }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     });
-    if (res.stop_reason === 'refusal') return Response.json(soft('…허허, 그 얘긴 넘어가세. 근무나 열심히 하자고.'));
+    if (res.stop_reason === 'refusal') return Response.json(soft(npc.soft.refusal));
     const text = res.content.find((b) => b.type === 'text');
-    if (!text || text.type !== 'text') return Response.json(soft('…응? 잠깐 딴생각했네. 다시 말해 보게.'));
+    if (!text || text.type !== 'text') return Response.json(soft(npc.soft.empty));
     return Response.json(sanitize(JSON.parse(text.text), body.context));
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) return Response.json({ error: 'bad_key' }, { status: 503 });
-    if (e instanceof Anthropic.RateLimitError) return Response.json(soft('어이쿠, 숨 좀 돌리고 얘기하세. 잠깐만.'));
+    if (e instanceof Anthropic.RateLimitError) return Response.json(soft(npc.soft.busy));
     if (e instanceof Anthropic.APIError) console.error('npc-chat API error', e.status, e.message);
     else console.error('npc-chat error', e);
-    return Response.json(soft('…라디오 소리에 못 들었네. 뭐라고 했나?'));
+    return Response.json(soft(npc.soft.error));
   }
 }
 
-/** 게임 상황 → AI 가 읽을 글 */
+/** 엄마가 읽을 상황 */
+function describeMom(c: NpcContext): string {
+  const child = c.child === '아들' ? '아들' : '딸';
+  return [
+    '[지금 상황]',
+    `- ${c.day}일째 ${c.clock} (${c.partOfDay})`,
+    `- 자식은 ${child}. 지금 집에서 너(엄마)에게 말을 걸었다.`,
+    ...(c.doing ? [`- 너는 지금 ${String(c.doing).slice(0, 60)}`] : []),
+    `- ${child} 상태: 레벨 ${c.player.level}, ${c.player.gold}G, 체력 ${c.player.hp}/${c.player.maxHp}, 배고픔 ${c.player.hunger}/100, 피로 ${c.player.fatigue}/100 (높을수록 힘듦)`,
+    `- 냉장고에 든 음식: ${c.fridge ?? 0}개`,
+    `- 경비 일을 끝까지 마친 횟수: ${c.pastShifts}번`,
+    `- ${child}에 대한 마음(호감도): ${c.affinity}/100`,
+    c.canGift ? '- 오늘 밥 차려 줄 수 있음' : '- 오늘은 이미 밥을 차려 줬다 (gift 는 false)',
+    '',
+    '[기억]',
+    ...(c.memories.length ? c.memories.map((m) => `- ${m}`) : ['- (아직 특별한 기억 없음)']),
+    '',
+    `위 상황에 맞게 엄마로서 ${child}의 마지막 말에 답하라.`,
+  ].join('\n');
+}
+
+/** 게임 상황 → AI 가 읽을 글 (박 반장) */
 function describe(c: NpcContext): string {
   const lines = [
     '[지금 상황]',
@@ -95,7 +117,7 @@ function describe(c: NpcContext): string {
     '[기억]',
     ...(c.memories.length ? c.memories.map((m) => `- ${m}`) : ['- (아직 특별한 기억 없음)']),
     '',
-    '위 상황에 맞게 박 반장으로서 후배의 마지막 말에 답하라.',
+    '위 상황에 맞게 박 반장으로서 후배의 마지막 말에 답하라. playerMood 에는 후배의 마지막 말에서 느껴지는 후배의 기분을 고른다.',
   ];
   return lines.join('\n');
 }
@@ -103,9 +125,11 @@ function describe(c: NpcContext): string {
 /** AI 출력 검사: 범위를 벗어난 값은 잘라낸다 */
 function sanitize(raw: Partial<NpcReply>, c: NpcContext): NpcReply {
   const emotion = NPC_EMOTIONS.includes(raw.emotion as never) ? raw.emotion! : '평온';
+  const playerMood = PLAYER_MOODS.includes(raw.playerMood as never) ? raw.playerMood! : '기본';
   return {
     reply: String(raw.reply ?? '').slice(0, 200) || '…음.',
     emotion,
+    playerMood,
     affinity: Math.max(-3, Math.min(3, Math.round(Number(raw.affinity) || 0))),
     memory: String(raw.memory ?? '').slice(0, 40),
     gift: !!raw.gift && c.canGift,
@@ -113,5 +137,5 @@ function sanitize(raw: Partial<NpcReply>, c: NpcContext): NpcReply {
 }
 
 function soft(reply: string): NpcReply {
-  return { reply, emotion: '평온', affinity: 0, memory: '', gift: false };
+  return { reply, emotion: '평온', playerMood: '기본', affinity: 0, memory: '', gift: false };
 }

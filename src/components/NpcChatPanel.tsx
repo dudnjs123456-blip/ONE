@@ -4,7 +4,15 @@ import { useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
 import { applyReply, ask, bondOf, giftFlower, greeting, type ChatLine } from '@/game/city/npcChat';
 import { FLOWER_GIFTS, ITEMS } from '@/game/data/items';
-import { EMOTION_FACE, TALK_NPCS, type NpcEmotion } from '@/game/data/npcs';
+import { EMOTION_FACE, TALK_NPCS, type NpcEmotion, type PlayerMood } from '@/game/data/npcs';
+
+/**
+ * 대화할 때 왼쪽에 크게 띄우는 플레이어 스탠딩 일러스트 (캐릭터 몸별).
+ * 표정 그림이 생기면 여기에 기분별로 추가한다 — 없는 기분은 '기본' 그림을 쓴다.
+ */
+const PORTRAITS: Record<string, Partial<Record<PlayerMood, string>>> = {
+  smallSilverGirl: { 기본: '/portraits/smallSilverGirl/default.png' },
+};
 
 /**
  * 대화형 NPC 창: 자유롭게 입력하거나 추천 질문을 눌러 이야기한다.
@@ -14,6 +22,9 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
   const npc = TALK_NPCS[npcId];
   const [lines, setLines] = useState<ChatLine[]>(() => [{ role: 'assistant', content: greeting(world, npcId) }]);
   const [emotion, setEmotion] = useState<NpcEmotion>('평온');
+  const [mood, setMood] = useState<PlayerMood>('기본');
+  const portraits = PORTRAITS[world.profile.body ?? ''];
+  const portrait = portraits ? (portraits[mood] ?? portraits['기본']) : null;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -41,6 +52,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
     const n = applyReply(world, npcId, r);
     setLines((l) => [...l, { role: 'assistant', content: r.reply }]);
     setEmotion(r.emotion);
+    setMood(r.playerMood ?? '기본');
     setOffline(!!r.offline);
     setAffinity(bondOf(world, npcId).affinity);
     if (n) {
@@ -60,9 +72,21 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="flex max-h-[70vh] w-full max-w-2xl flex-col rounded-2xl border border-emerald-200/30 bg-zinc-900/95 text-white shadow-2xl backdrop-blur">
+      {portrait && (
+        // 표정이 바뀌면 key 가 바뀌어 살짝 튀어 오르며 새 그림으로 바뀐다
+        <img
+          key={portrait + mood}
+          src={portrait}
+          alt=""
+          draggable={false}
+          className="pointer-events-none absolute bottom-0 left-[3%] h-[55vh] select-none drop-shadow-[0_8px_24px_rgba(0,0,0,0.55)] sm:h-[82vh]"
+          style={{ animation: 'portrait-in 0.35s ease-out' }}
+        />
+      )}
+      <style>{'@keyframes portrait-in{from{opacity:.4;transform:translateY(12px)}to{opacity:1;transform:none}}'}</style>
+      <div className="relative flex max-h-[70vh] w-full max-w-2xl flex-col rounded-2xl border border-emerald-200/30 bg-zinc-900/95 text-white shadow-2xl backdrop-blur">
         <div className="flex items-center gap-3 border-b border-white/10 p-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-200/10 text-3xl">{busy ? '🤔' : EMOTION_FACE[emotion]}</div>
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-200/10 text-3xl">{busy ? '🤔' : emotion === '평온' ? npc.face : EMOTION_FACE[emotion]}</div>
           <div className="min-w-0 flex-1">
             <div className="font-bold text-emerald-200">{npc.title}</div>
             <div className="text-xs text-white/60">
@@ -80,7 +104,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
               <span className={`inline-block max-w-[85%] rounded-xl px-3 py-2 ${l.role === 'user' ? 'bg-sky-600/60' : 'bg-white/10'}`}>{l.content}</span>
             </div>
           ))}
-          {busy && <div className="text-xs text-white/50">박 반장이 생각 중…</div>}
+          {busy && <div className="text-xs text-white/50">{npc.callName}이(가) 생각 중…</div>}
           {note && <div className="text-center text-xs text-amber-200">{note}</div>}
         </div>
 
@@ -100,7 +124,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
                   }
                   setAffinity(bondOf(world, npcId).affinity);
                   setNote(`${ITEMS[id].icon} ${ITEMS[id].name}을(를) 드렸다 · 호감도 +${FLOWER_GIFTS[id]}`);
-                  void send(`(${ITEMS[id].name}을 건넨다) 반장님, 이거 받으세요.`);
+                  void send(`(${ITEMS[id].name}을 건넨다) ${npc.flowerLine}`);
                 }}
                 className="rounded-full border border-pink-300/50 bg-pink-500/15 px-2.5 py-1 text-xs text-pink-100 hover:bg-pink-500/30 disabled:opacity-40"
               >
@@ -125,7 +149,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
             value={text}
             maxLength={200}
             onChange={(e) => setText(e.target.value)}
-            placeholder="박 반장에게 하고 싶은 말 (Enter 보내기)"
+            placeholder={`${npc.callName}에게 하고 싶은 말 (Enter 보내기)`}
             className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-2 text-sm outline-none placeholder:text-white/40 focus:bg-white/15"
           />
           <button disabled={busy || !text.trim()} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-black hover:bg-emerald-400 disabled:opacity-40">

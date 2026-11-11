@@ -209,6 +209,9 @@ export class CityRenderer {
   /** 로비에 상주하는 선임 경비 박 반장 */
   private seniorView!: PersonView;
   private seniorPlate!: Nameplate;
+  /** 집에 있는 엄마 */
+  private momView!: PersonView;
+  private momPlate!: Nameplate;
   private lobbySparks!: SparkSystem;
   /** 집 안 타격 이펙트 (친구와 싸울 때) */
   private homeSparks!: SparkSystem;
@@ -420,6 +423,10 @@ export class CityRenderer {
     this.lobby.add(this.seniorView.root);
     this.seniorPlate = new Nameplate(false);
     this.lobby.add(this.seniorPlate.sprite);
+    this.momView = new PersonView(0, { skin: 'humanFemaleA' });
+    this.home.add(this.momView.root);
+    this.momPlate = new Nameplate(false);
+    this.home.add(this.momPlate.sprite);
 
     // 화풍: 애니메이션 툰 (주인공 VRM 에 맞춘다) — 모든 장면의 재질을 툰으로, 하늘은 그라데이션
     const swapped = new Map<THREE.Material, THREE.Material>();
@@ -766,6 +773,7 @@ export class CityRenderer {
       for (const s of world.drainSpeech()) this.texts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
     }
     this.syncSenior(world, clock, loc);
+    this.syncMom(world, clock, loc);
     if (loc === 'lobby') {
       this.syncPeople(world, clock, 1, this.lobbySparks, this.lobbyTexts);
     } else if (loc === 'corridor') {
@@ -1073,6 +1081,18 @@ export class CityRenderer {
     this.seniorPlate.sprite.position.set(sp.x, sp.y + (ai.sit > 0.5 ? 1.7 : 2.05), sp.z);
   }
 
+  /** 엄마: 집 주방 앞에 서 있다 (친구 집에선 그 집 엄마로 보인다) */
+  private syncMom(world: CityWorld, clock: FrameClock, loc: CityLocation) {
+    const show = loc === 'home';
+    this.momView.root.visible = show;
+    this.momPlate.sprite.visible = show;
+    if (!show) return;
+    this.momView.update(world.mom, clock);
+    const mp = world.mom.lerped(clock.alpha);
+    this.momPlate.draw(world.npcChat?.npc === 'mom' ? '💬 엄마' : '👩 엄마', 1, 1);
+    this.momPlate.sprite.position.set(mp.x, mp.y + 2.05, mp.z);
+  }
+
   private sceneOf(loc: CityLocation) {
     return loc === 'home' ? this.home : loc === 'lobby' ? this.lobby : loc === 'corridor' ? this.corridor : loc === 'store' ? this.store : loc === 'park' ? this.parkScene().scene : this.city;
   }
@@ -1265,7 +1285,7 @@ export class CityRenderer {
     for (const v of this.penViews.values()) disposePet(v.model);
     this.corridorTexts.dispose();
     this.lobbyTexts.dispose();
-    for (const p of [...this.npcPlates, ...this.lobbyPlates, this.seniorPlate]) p.dispose();
+    for (const p of [...this.npcPlates, ...this.lobbyPlates, this.seniorPlate, this.momPlate]) p.dispose();
     for (const s of [this.city, this.home, this.lobby, this.corridor, this.store]) disposeObject(s);
     // 그림자 지도도 GPU 그림이다
     this.sun.shadow.map?.dispose();
