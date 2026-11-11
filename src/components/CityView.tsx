@@ -16,6 +16,9 @@ import { loadProgress } from '@/game/render/loadTracker';
 import InventoryPanel from './InventoryPanel';
 import { LifeBars } from './LifeBar';
 import CityMapOverlay from './CityMapOverlay';
+import ParkMapOverlay from './ParkMapOverlay';
+import ParkGuide from './ParkGuide';
+import { drawParkBase, drawParkPlayer } from './parkMapDraw';
 import JobPanel from './JobPanel';
 import CalendarPanel from './CalendarPanel';
 import GearPanel from './GearPanel';
@@ -724,6 +727,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
           </div>
 
           <Minimap worldRef={worldRef} />
+          {worldRef.current && <ParkGuide world={worldRef.current} touch={touch} onMap={() => setBigMap(true)} />}
 
           {/* 상호작용 안내 */}
           {hud.prompt && (
@@ -824,7 +828,12 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         </div>
       )}
 
-      {bigMap && worldRef.current && <CityMapOverlay world={worldRef.current} onClose={() => setBigMap(false)} />}
+      {bigMap && worldRef.current &&
+        (worldRef.current.location === 'park' ? (
+          <ParkMapOverlay world={worldRef.current} onClose={() => setBigMap(false)} />
+        ) : (
+          <CityMapOverlay world={worldRef.current} onClose={() => setBigMap(false)} />
+        ))}
       {hud && worldRef.current && <FishingHud world={worldRef.current} />}
       {fishShop && worldRef.current && (
         <FishingShopPanel
@@ -995,6 +1004,7 @@ function Minimap({ worldRef }: { worldRef: React.RefObject<CityWorld | null> }) 
     const sx = (x: number) => ((x - X0) / (X1 - X0)) * W;
     const sz = (z: number) => ((z - Z0) / (Z1 - Z0)) * H;
     let base: ImageData | null = null;
+    let parkBase: HTMLCanvasElement | null = null;
     let raf = 0;
 
     const drawBase = (w: CityWorld) => {
@@ -1041,6 +1051,19 @@ function Minimap({ worldRef }: { worldRef: React.RefObject<CityWorld | null> }) 
       const w = worldRef.current;
       if (!w) return;
       if (!base) drawBase(w);
+      // 놀이공원: 공원 지도 (길 · 놀이기구) 위에 내 위치와 가는 길
+      if (w.location === 'park') {
+        if (!parkBase) {
+          parkBase = document.createElement('canvas');
+          parkBase.width = W;
+          parkBase.height = H;
+          drawParkBase(parkBase.getContext('2d')!, W, H, false);
+        }
+        g.drawImage(parkBase, 0, 0);
+        const ap = w.autopilot;
+        drawParkPlayer(g, W, H, w.player, ap ? ap.path : null, ap?.i ?? 0);
+        return;
+      }
       g.putImageData(base!, 0, 0);
       if (w.location !== 'city') {
         g.fillStyle = 'rgba(0,0,0,0.55)';
@@ -1049,7 +1072,7 @@ function Minimap({ worldRef }: { worldRef: React.RefObject<CityWorld | null> }) 
         g.font = 'bold 13px sans-serif';
         g.textAlign = 'center';
         // 가게 안이면 가게 이름 (예전엔 '행복빌라 N층'으로 잘못 나왔다)
-        g.fillText(w.location === 'park' ? '🎡 한강랜드' : w.location === 'home' ? '집 안' : w.location === 'store' ? `${w.store?.sign ?? '가게'} 안` : w.location === 'lobby' ? '행복빌라 1층' : `행복빌라 ${w.floor}층`, W / 2, H / 2 + 4);
+        g.fillText(w.location === 'home' ? '집 안' : w.location === 'store' ? `${w.store?.sign ?? '가게'} 안` : w.location === 'lobby' ? '행복빌라 1층' : `행복빌라 ${w.floor}층`, W / 2, H / 2 + 4);
         return;
       }
       const p = w.player;

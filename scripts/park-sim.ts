@@ -4,7 +4,7 @@
  */
 import { CityWorld, type CityInput } from '../src/game/city/cityWorld';
 import { newProfile } from '../src/game/core/profile';
-import { COASTER_TRACK, COASTER_LEN, COASTER_RUN, coasterAt, trackAt, RIDES, RIDE_IDS, rideClock, dropAt, DROP, vikingAt, PARK, parkSolids, wheelCabinAtBottom } from '../src/game/city/themePark';
+import { COASTER_TRACK, COASTER_LEN, COASTER_RUN, coasterAt, trackAt, RIDES, RIDE_IDS, rideClock, dropAt, DROP, vikingAt, PARK, parkSolids, wheelCabinAtBottom, GYRO, GYRO_RUN, gyroAt, gyroPose, SKY, SKY_RUN, skyAt, skyPose, RIDE_NODE, parkPathTo } from '../src/game/city/themePark';
 
 let fails = 0;
 function check(name: string, ok: boolean, extra = '') {
@@ -91,6 +91,33 @@ for (const id of RIDE_IDS) {
   check('viking: swings up to ~75°', amp > 1.2 && amp < 1.4, `(${((amp * 180) / Math.PI).toFixed(0)}°)`);
   check('viking: stops at the end', Math.abs(vikingAt(58)) < 0.05);
 }
+// 토네이도(자이로 스윙): 120° 가까이 올라가고, 끝나면 멈춘다
+{
+  let amp = 0;
+  for (let t = 0; t < GYRO_RUN; t += 0.02) amp = Math.max(amp, Math.abs(gyroAt(t).th));
+  check('gyro: swings up to ~120°', amp > 1.9 && amp < 2.2, `(${((amp * 180) / Math.PI).toFixed(0)}°)`);
+  check('gyro: stops at the end', Math.abs(gyroAt(GYRO_RUN).th) < 0.01);
+  let low = Infinity;
+  for (let t = 0; t < GYRO_RUN; t += 0.05) for (let s = 0; s < GYRO.seats; s++) low = Math.min(low, gyroPose(s, t).y);
+  check('gyro: seats never go under the ground', low > 0.5, `(lowest ${low.toFixed(1)}m)`);
+}
+// 스카이 스윙: 꼭대기까지 올라가 그네가 바깥으로 날고, 끝나면 내려온다
+{
+  const top = skyAt(20);
+  check('sky: rises to the top', top.y > SKY.top - 0.5, `(${top.y.toFixed(1)}m)`);
+  check('sky: swings fly outward (30~65°)', top.tilt > 0.5 && top.tilt < 1.15, `(${((top.tilt * 180) / Math.PI).toFixed(0)}°)`);
+  const end = skyAt(SKY_RUN);
+  check('sky: comes back down and stops', end.y < SKY.base + 0.5 && end.w < 0.01);
+  let low = Infinity;
+  for (let t = 0; t < SKY_RUN; t += 0.05) for (let s = 0; s < SKY.seats; s++) low = Math.min(low, skyPose(s, t).y);
+  check('sky: seats never go under the ground', low > 0.3, `(lowest ${low.toFixed(1)}m)`);
+}
+// 길: 역에서 모든 놀이기구 입구까지 길이 이어져 있다
+for (const id of RIDE_IDS) {
+  const path = parkPathTo(PARK.spawn.x, PARK.spawn.z, RIDE_NODE[id]);
+  const end = path[path.length - 1];
+  check(`path: station → ${id} gate`, !!end && Math.hypot(end.x - RIDES[id].gate.x, end.z - RIDES[id].gate.z) < 0.01);
+}
 // 대관람차: 맨 아래 칸이 있다
 check('wheel: some cabin is at the bottom', wheelCabinAtBottom(now).off < Math.PI / 16 + 1e-6);
 // 놀이기구 입구는 막힌 곳 밖
@@ -163,6 +190,26 @@ for (const id of RIDE_IDS) {
   now += 121_000;
   A.step();
   check('wheel: gets off after one turn', A.ride === null);
+  // 가이드 '가기': 길을 따라 토네이도 입구까지 걸어가 도착한다
+  a.placePlayer(PARK.spawn.x, PARK.spawn.z, 0, -1);
+  const msg = A.parkNavigate('gyro');
+  for (let k = 0; k < 3000 && A.autopilot; k++) A.step();
+  check('guide: walks along the paths to the gyro gate', msg === '' && !A.autopilot && Math.hypot(A.player.x - RIDES.gyro.gate.x, A.player.z - RIDES.gyro.gate.z) < 1.5, `(${A.player.x.toFixed(1)}, ${A.player.z.toFixed(1)})`);
+  // 토네이도 · 스카이 스윙도 탑승하고, 운행이 끝나면 내린다
+  for (const id of ['gyro', 'sky'] as const) {
+    a.placePlayer(RIDES[id].gate.x, RIDES[id].gate.z, 0, -1);
+    for (let k = 0; k < 400 && !A.ride; k++) {
+      if (!A.rideQueue) a.joinRide(id);
+      now += 500;
+      A.step();
+    }
+    check(`${id}: boards a seat`, A.ride?.id === id);
+    for (let k = 0; k < 400 && A.ride; k++) {
+      now += 500;
+      A.step();
+    }
+    check(`${id}: gets off at the exit`, A.ride === null && Math.hypot(A.player.x - RIDES[id].exit.x, A.player.z - RIDES[id].exit.z) < 0.5);
+  }
   // 지도에서 집을 누르면: 지하철로 동네에 돌아와 집으로 걸어간다
   const home = A.map.pois.find((q) => q.kind === 'home')!;
   const err = A.navigateTo(home.x, home.z, '내 집');

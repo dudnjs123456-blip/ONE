@@ -17,6 +17,18 @@ import {
   vikingAt,
   wheelAngle,
   DROP_RUN,
+  GYRO,
+  GYRO_RUN,
+  SKY,
+  SKY_RUN,
+  PARK_NODES,
+  PARK_PATHS,
+  RIDE_NODE,
+  gyroAt,
+  skyAt,
+  nearestOnPaths,
+  signposts,
+  type RideId,
   type SeatPose,
   type TrackPoint,
 } from '../city/themePark';
@@ -26,6 +38,8 @@ import { mergeByMaterial } from './merge';
  * 한강 놀이공원 장면. 놀이기구 움직임은 themePark.ts 의 공유 시각 계산을 그대로 그린다
  * (그래서 친구 화면과 열차·배·좌석 위치가 같다). 해·하늘빛·하늘은 도시 것을 빌려 쓴다(cityRenderer).
  */
+
+const FONT = '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
 const std = (color: number, rough = 0.7, metal = 0, extra: THREE.MeshStandardMaterialParameters = {}) =>
   new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, ...extra });
@@ -115,6 +129,81 @@ function basisAt(p: TrackPoint, m: THREE.Matrix4, offUp = 0, offRight = 0) {
   return m;
 }
 
+
+// ───────────────────────── 길 · 이정표 · 입구 아치 · 새 놀이기구 · 장식 (ThemeParkScene 확장) ─────────────────────────
+
+/** 벽돌 포장 무늬 (헤링본 비슷하게 엇갈려 쌓은 벽돌) */
+function brickTexture(base: string, dark: string, mortar: string) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  g.fillStyle = mortar;
+  g.fillRect(0, 0, 128, 128);
+  for (let row = 0; row < 8; row++) {
+    const off = row % 2 ? 16 : 0;
+    for (let col = -1; col < 4; col++) {
+      g.fillStyle = (row * 7 + col * 3) % 5 === 0 ? dark : base;
+      g.fillRect(col * 32 + off + 1, row * 16 + 1, 30, 14);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+
+/** 이정표 화살표 판: 화살표가 오른쪽(dir = 1) 또는 왼쪽(-1)을 가리킨다 */
+function arrowBoardTexture(labels: string[], dir: 1 | -1, color: string) {
+  const W = 512;
+  const lineH = 56;
+  const H = 24 + labels.length * lineH;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  // 화살표 모양 판 (뾰족한 끝이 가리키는 쪽)
+  const tip = 46;
+  g.fillStyle = color;
+  g.beginPath();
+  if (dir > 0) {
+    g.moveTo(4, 4);
+    g.lineTo(W - tip, 4);
+    g.lineTo(W - 4, H / 2);
+    g.lineTo(W - tip, H - 4);
+    g.lineTo(4, H - 4);
+  } else {
+    g.moveTo(W - 4, 4);
+    g.lineTo(tip, 4);
+    g.lineTo(4, H / 2);
+    g.lineTo(tip, H - 4);
+    g.lineTo(W - 4, H - 4);
+  }
+  g.closePath();
+  g.fill();
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = 5;
+  g.stroke();
+  g.fillStyle = '#ffffff';
+  g.font = `800 38px ${FONT}`;
+  g.textBaseline = 'middle';
+  g.textAlign = dir > 0 ? 'left' : 'right';
+  labels.forEach((t, i) => g.fillText(t, dir > 0 ? 22 : W - 22, 12 + lineH * (i + 0.5)));
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return { tex, aspect: W / H };
+}
+
+/** 놀이기구 상징 색 */
+const RIDE_COLOR: Record<RideId, string> = {
+  coaster: '#d6332f',
+  drop: '#2f6fd8',
+  viking: '#8a5a2b',
+  wheel: '#e08a1c',
+  gyro: '#7b2fd8',
+  sky: '#14a37f',
+};
+
 export class ThemeParkScene {
   readonly scene = new THREE.Scene();
   private cars: THREE.Group[] = [];
@@ -129,13 +218,18 @@ export class ThemeParkScene {
 
   constructor() {
     this.buildGround();
+    this.buildPaths();
     this.buildGate();
     this.buildCoaster();
     this.buildDrop();
     this.buildViking();
     this.buildWheel();
+    this.buildGyro();
+    this.buildSky();
     this.buildCarousel();
     this.buildStalls();
+    this.buildDecor();
+    this.buildSignposts();
     this.buildTreesAndLamps();
     this.buildSkyline();
   }
@@ -175,21 +269,6 @@ export class ThemeParkScene {
     grass.receiveShadow = true;
     this.scene.add(grass);
     const pave = std(0xd8c7a3, 0.9);
-    const path = (x0: number, x1: number, z0: number, z1: number) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 0.06, z1 - z0), pave);
-      m.position.set((x0 + x1) / 2, 0.03, (z0 + z1) / 2);
-      m.receiveShadow = true;
-      this.scene.add(m);
-    };
-    // 중앙 대로 (역 → 북쪽), 동서 대로, 놀이기구로 가는 갈래길
-    path(-5, 5, -84, 45);
-    path(-36, 72, 6, 14);
-    path(-46, -5, 33, 41);
-    path(5, 27, -36, -28);
-    path(27, 30, -36, 10);
-    path(30, 45, -2, 4);
-    path(30, 50, -58, -50);
-    path(30, 34, -58, -36);
     const plaza = new THREE.Mesh(new THREE.CircleGeometry(13, 48), pave);
     plaza.rotation.x = -Math.PI / 2;
     plaza.position.set(0, 0.05, 22);
@@ -477,22 +556,7 @@ export class ThemeParkScene {
 
   /** 놀이기구 입구 표지판 */
   private queueSign(id: keyof typeof RIDES) {
-    const R = RIDES[id];
-    const g = new THREE.Group();
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.6, 0.15), std(0x3b3b3b, 0.5, 0.6));
-    post.position.y = 1.3;
-    const board = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), new THREE.MeshBasicMaterial({ map: signTexture(`${R.icon} ${R.name.split(' (')[0]}`, '#203a6b', '#ffffff', 1024, 256), side: THREE.DoubleSide }));
-    board.position.y = 2.75;
-    g.add(post, board);
-    // 줄 서는 길 (난간)
-    const rail = std(0xc0c4c8, 0.3, 0.8);
-    for (const s of [-1, 1]) {
-      const r = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 3.5), rail);
-      r.position.set(s * 0.8, 0.95, -1.5);
-      g.add(r);
-    }
-    g.position.set(R.gate.x, 0, R.gate.z + 0.4);
-    this.add(g);
+    this.buildEntrance(id);
   }
 
   // ───────────── 자이로드롭 ─────────────
@@ -783,6 +847,9 @@ export class ThemeParkScene {
       Math.hypot(x - 18, z - 22) < 9 ||
       Math.hypot(x, z - 22) < 15 ||
       (z > 30 && Math.abs(x) < 50) ||
+      nearestOnPaths(x, z).d < 7 ||
+      (x > GYRO.x - 9 && x < GYRO.x + 9 && z > GYRO.z - 19 && z < GYRO.z + 19) ||
+      Math.hypot(x - SKY.x, z - SKY.z) < 14 ||
       Object.values(RIDES).some((R) => Math.hypot(x - R.gate.x, z - R.gate.z) < 5);
     const trees: [number, number, number][] = [];
     for (let i = 0; i < 400 && trees.length < 90; i++) {
@@ -849,6 +916,467 @@ export class ThemeParkScene {
     this.scene.add(mergeByMaterial(g));
   }
 
+  // ───────────── 산책로: 대로(붉은 벽돌) · 갈래길(베이지) · 연석 · 교차로 원형 바닥 ─────────────
+
+  private buildPaths() {
+    const mainTex = brickTexture('#b8573f', '#9a4433', '#7e3628');
+    const sideTex = brickTexture('#e6d3a8', '#d4bd8f', '#b9a27a');
+    const curb = std(0xeceae4, 0.85);
+    const padR = new Map<string, number>();
+    for (const [a, b, w] of PARK_PATHS) {
+      padR.set(a, Math.max(padR.get(a) ?? 0, w * 0.62));
+      padR.set(b, Math.max(padR.get(b) ?? 0, w * 0.62));
+    }
+    const mainNodes = new Set(PARK_PATHS.filter((p) => p[3]).flatMap((p) => [p[0], p[1]]));
+    PARK_PATHS.forEach(([a, b, w, main], i) => {
+      const A = PARK_NODES[a];
+      const B = PARK_NODES[b];
+      const len = Math.hypot(B.x - A.x, B.z - A.z);
+      const ang = Math.atan2(B.x - A.x, B.z - A.z);
+      const tex = (main ? mainTex : sideTex).clone();
+      tex.repeat.set(w / 2.5, len / 2.5);
+      tex.needsUpdate = true;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, len), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }));
+      m.rotation.order = 'YXZ';
+      m.rotation.y = ang;
+      m.rotation.x = -Math.PI / 2;
+      m.position.set((A.x + B.x) / 2, (main ? 0.03 : 0.025) + i * 0.0004, (A.z + B.z) / 2);
+      m.receiveShadow = true;
+      this.scene.add(m);
+      // 연석: 양쪽 가장자리, 교차로 원형 바닥 안쪽은 비운다
+      const ra = padR.get(a)!;
+      const rb = padR.get(b)!;
+      const cl = len - ra - rb;
+      if (cl > 0.5) {
+        const ux = (B.x - A.x) / len;
+        const uz = (B.z - A.z) / len;
+        const mid = ra + cl / 2;
+        for (const s of [-1, 1]) {
+          const k = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, cl), curb);
+          k.rotation.y = ang;
+          k.position.set(A.x + ux * mid + uz * s * (w / 2 + 0.14), 0.07, A.z + uz * mid - ux * s * (w / 2 + 0.14));
+          k.receiveShadow = true;
+          this.scene.add(k);
+        }
+      }
+    });
+    // 교차로 원형 바닥 (대로가 지나는 곳은 붉은 벽돌 + 가운데 무늬)
+    for (const [n, r] of padR) {
+      if (n === 'plaza') continue;
+      const P = PARK_NODES[n];
+      const main = mainNodes.has(n);
+      const tex = (main ? mainTex : sideTex).clone();
+      tex.repeat.set(r / 1.25, r / 1.25);
+      tex.needsUpdate = true;
+      const pad = new THREE.Mesh(new THREE.CircleGeometry(r, 40), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92 }));
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(P.x, 0.045, P.z);
+      pad.receiveShadow = true;
+      this.scene.add(pad);
+      if (main && r > 4) {
+        const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.35, r * 0.42, 40), std(0xf2c14e, 0.6));
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(P.x, 0.05, P.z);
+        this.scene.add(ring);
+      }
+    }
+  }
+
+  // ───────────── 이정표: 교차로마다, 그쪽으로 가면 나오는 놀이기구를 화살표로 ─────────────
+
+  private buildSignposts() {
+    const postMat = std(0x2d3a2e, 0.5, 0.6);
+    const capMat = std(0xf2c14e, 0.35, 0.6);
+    const colors = ['#c8323c', '#2f6fd8', '#1e9e5a', '#7b2fd8', '#e08a1c'];
+    for (const sp of signposts()) {
+      const g = new THREE.Group();
+      const h = 1.6 + sp.arrows.length * 0.75;
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, h, 8), postMat);
+      post.position.y = h / 2;
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), capMat);
+      cap.position.y = h + 0.1;
+      g.add(post, cap);
+      sp.arrows.forEach((ar, i) => {
+        const col = colors[i % colors.length];
+        const front = arrowBoardTexture(ar.labels, 1, col);
+        const back = arrowBoardTexture(ar.labels, -1, col);
+        const bw = 2.5;
+        const bh = bw / front.aspect;
+        const y = h - 0.45 - i * 0.75 - (bh - 0.5) / 2;
+        // 판의 x 축이 가리키는 방향(ar.dir)으로 뻗는다. 뒷면은 반대로 그린 판 (뒤에서 봐도 같은 쪽을 가리킨다)
+        const board = new THREE.Group();
+        const f = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), new THREE.MeshBasicMaterial({ map: front.tex }));
+        f.position.set(bw / 2 + 0.12, 0, 0.02);
+        const b = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), new THREE.MeshBasicMaterial({ map: back.tex }));
+        b.position.set(bw / 2 + 0.12, 0, -0.02);
+        b.rotation.y = Math.PI;
+        board.add(f, b);
+        board.position.y = y;
+        board.rotation.y = ar.dir - Math.PI / 2;
+        g.add(board);
+      });
+      g.position.set(sp.x, 0, sp.z);
+      this.add(g);
+    }
+  }
+
+  // ───────────── 놀이기구 입구: 색 아치 + 실시간 운행 전광판 ─────────────
+
+  private statusBoards: { id: RideId; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; last: string }[] = [];
+
+  private buildEntrance(id: RideId) {
+    const R = RIDES[id];
+    const node = RIDE_NODE[id];
+    // 이 입구로 들어오는 길의 방향 (아치가 길을 가로지르게)
+    const edge = PARK_PATHS.find((p) => p[0] === node || p[1] === node)!;
+    const other = PARK_NODES[edge[0] === node ? edge[1] : edge[0]];
+    const ang = Math.atan2(R.gate.x - other.x, R.gate.z - other.z);
+    const col = new THREE.Color(RIDE_COLOR[id]);
+    const pillar = std(col.getHex(), 0.45, 0.2);
+    const gold = std(0xf2c14e, 0.35, 0.6);
+    const g = new THREE.Group();
+    const span = 4.4;
+    for (const s of [-1, 1]) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.45, 4.2, 0.45), pillar);
+      p.position.set(s * span / 2, 2.1, 0);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), gold);
+      ball.position.set(s * span / 2, 4.5, 0);
+      g.add(p, ball);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(span + 0.6, 0.9, 0.35), pillar);
+    beam.position.y = 3.95;
+    g.add(beam);
+    const nameTex = signTexture(`${R.icon} ${R.name.split(' (')[0]}`, RIDE_COLOR[id], '#ffffff', 1024, 200);
+    for (const s of [1, -1]) {
+      const n = new THREE.Mesh(new THREE.PlaneGeometry(span + 0.4, 0.78), new THREE.MeshBasicMaterial({ map: nameTex }));
+      n.position.set(0, 3.95, s * 0.19);
+      if (s < 0) n.rotation.y = Math.PI;
+      g.add(n);
+    }
+    // 전광판 (검은 바탕 LED 글씨): 탑승 중 · 출발까지 · 운행 중
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 128;
+    const ctx = c.getContext('2d')!;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.8, 0.12), std(0x1b1b1f, 0.4, 0.5));
+    frame.position.y = 5.0;
+    g.add(frame);
+    for (const s of [1, -1]) {
+      const scr = new THREE.Mesh(new THREE.PlaneGeometry(2.55, 0.64), new THREE.MeshBasicMaterial({ map: tex }));
+      scr.position.set(0, 5.0, s * 0.07);
+      if (s < 0) scr.rotation.y = Math.PI;
+      g.add(scr);
+    }
+    this.statusBoards.push({ id, ctx, tex, last: '' });
+    // 아치에 전구
+    const bulbs = this.glow(0xffe08a, 2.4);
+    for (let k = 0; k < 9; k++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), bulbs);
+      b.position.set(-span / 2 + (span * k) / 8, 3.45, 0.2);
+      g.add(b);
+    }
+    // 줄 서는 곳 난간 (아치 안쪽 옆으로 지그재그)
+    const rail = std(0xc0c4c8, 0.3, 0.8);
+    for (let k = 0; k < 3; k++) {
+      const r = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 3.2), rail);
+      r.position.set(span / 2 + 0.9 + k * 0.85, 0.95, 1.2);
+      g.add(r);
+      for (const zz of [-0.4, 2.8]) {
+        const p = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1, 6), rail);
+        p.position.set(span / 2 + 0.9 + k * 0.85, 0.5, zz);
+        g.add(p);
+      }
+    }
+    // 아치는 입구에서 길 쪽으로 조금 나와서 선다 (입구 POI 와 겹치지 않게)
+    g.position.set(R.gate.x - Math.sin(ang) * 2.6, 0, R.gate.z - Math.cos(ang) * 2.6);
+    g.rotation.y = ang;
+    this.add(g);
+  }
+
+  /** 전광판 글자를 지금 운행표로 (바뀔 때만 다시 그린다) */
+  private drawBoards(nowMs: number) {
+    for (const b of this.statusBoards) {
+      const ck = rideClock(b.id, nowMs);
+      const text =
+        b.id === 'wheel'
+          ? '상시 운행 · 바로 탑승'
+          : ck.phase === 'boarding'
+            ? `탑승 중 · 출발 ${Math.ceil(ck.left)}초`
+            : ck.phase === 'running'
+              ? `운행 중 · 다음 ${Math.ceil(ck.nextBoard)}초`
+              : `곧 탑승 · ${Math.ceil(ck.nextBoard)}초`;
+      if (text === b.last) continue;
+      b.last = text;
+      const g = b.ctx;
+      g.fillStyle = '#050505';
+      g.fillRect(0, 0, 512, 128);
+      g.fillStyle = ck.phase === 'boarding' || b.id === 'wheel' ? '#47ff6b' : ck.phase === 'running' ? '#ffb020' : '#7fd8ff';
+      g.font = `800 50px ${FONT}`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(text, 256, 66, 496);
+      b.tex.needsUpdate = true;
+    }
+  }
+
+  // ───────────── 토네이도 (자이로 스윙) ─────────────
+
+  private gyroArm = new THREE.Group();
+  private gyroDisc = new THREE.Group();
+
+  private buildGyro() {
+    const frame = new THREE.Group();
+    const steel = std(0x5b2b9e, 0.4, 0.6);
+    const white = std(0xf1f1f1, 0.4, 0.3);
+    // A 자 다리 넷 (동서 양쪽에 둘씩)이 21m 축을 받친다
+    for (const sx of [-1, 1])
+      for (const sz of [-1, 1]) {
+        const top = new THREE.Vector3(sx * 4.2, GYRO.pivotY, 0);
+        const foot = new THREE.Vector3(sx * 5.6, 0, sz * 3.2);
+        const L = top.distanceTo(foot);
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.42, L, 10), steel);
+        leg.position.copy(top).add(foot).multiplyScalar(0.5);
+        leg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().sub(foot).normalize());
+        frame.add(leg);
+      }
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 9.2, 16), white);
+    axle.rotation.z = Math.PI / 2;
+    axle.position.y = GYRO.pivotY;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(7, 7.4, 0.4, 32), std(0x6b6f76, 0.8));
+    base.position.y = 0.2;
+    frame.add(axle, base);
+    const lights = this.glow(0xd77bff, 2.6);
+    for (const sx of [-1, 1]) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.1, GYRO.pivotY, 0.1), lights);
+      strip.position.set(sx * 4.9, GYRO.pivotY / 2, 0);
+      frame.add(strip);
+    }
+    const mf = mergeByMaterial(frame);
+    mf.position.set(GYRO.x, 0, GYRO.z);
+    this.add(mf);
+    // 팔 (축에서 아래로 15m) + 끝의 원판
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, GYRO.arm, 12), std(0xf2c14e, 0.35, 0.6));
+    arm.position.y = -GYRO.arm / 2;
+    const armLights = new THREE.Mesh(new THREE.BoxGeometry(0.08, GYRO.arm - 1, 0.08), lights);
+    armLights.position.set(0.5, -GYRO.arm / 2, 0);
+    this.gyroArm.add(arm, armLights);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(GYRO.ringR + 0.6, GYRO.ringR + 0.3, 0.6, 32), std(0x7b2fd8, 0.4, 0.4));
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(GYRO.ringR + 0.6, 0.12, 6, 48), this.glow(0xffe08a, 2.6));
+    rim.rotation.x = Math.PI / 2;
+    rim.position.y = 0.32;
+    this.gyroDisc.add(disc, rim);
+    const seatMat = std(0x1d1d24, 0.6);
+    const harness = std(0xffd23f, 0.35, 0.5);
+    for (let k = 0; k < GYRO.seats; k++) {
+      const a = (k * 2 * Math.PI) / GYRO.seats;
+      const s = new THREE.Group();
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.1, 0.15), seatMat);
+      back.position.set(0, 0.95, -0.3);
+      const cush = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, 0.5), seatMat);
+      cush.position.set(0, 0.42, 0);
+      const h1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.12), harness);
+      h1.position.set(0, 1.25, 0.05);
+      s.add(back, cush, h1);
+      s.position.set(Math.cos(a) * GYRO.ringR, 0.3, Math.sin(a) * GYRO.ringR);
+      s.rotation.y = Math.atan2(Math.cos(a), Math.sin(a));
+      this.gyroDisc.add(s);
+    }
+    const md = mergeByMaterial(this.gyroDisc);
+    this.gyroDisc = md;
+    md.position.y = -GYRO.arm;
+    this.gyroArm.add(md);
+    this.gyroArm.position.set(GYRO.x, GYRO.pivotY, GYRO.z);
+    this.add(this.gyroArm);
+    this.buildEntrance('gyro');
+  }
+
+  // ───────────── 스카이 스윙 (회오리 그네) ─────────────
+
+  private skyRig = new THREE.Group();
+  private skySwings: THREE.Group[] = [];
+
+  private buildSky() {
+    const mast = new THREE.Group();
+    const a = std(0x14a37f, 0.4, 0.4);
+    const b = std(0xf1f1f1, 0.4, 0.3);
+    for (let y = 0; y < SKY.mastH; y += 4) {
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.1, 4, 16), (y / 4) % 2 ? a : b);
+      seg.position.y = y + 2;
+      mast.add(seg);
+    }
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4, 16), std(0xf2c14e, 0.35, 0.6));
+    crown.position.y = SKY.mastH + 2;
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.8), this.glow(0xfff2a8, 4));
+    star.position.y = SKY.mastH + 5;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7, 0.4, 32), std(0x6b6f76, 0.8));
+    base.position.y = 0.2;
+    mast.add(crown, star, base);
+    const ml = mergeByMaterial(mast);
+    ml.position.set(SKY.x, 0, SKY.z);
+    this.add(ml);
+    // 회전판 (지붕 + 전구) + 16개 팔
+    const canopy = new THREE.Mesh(new THREE.ConeGeometry(SKY.armR + 1.2, 2.2, 32, 1, true), std(0x14a37f, 0.5, 0.2, { side: THREE.DoubleSide }));
+    canopy.position.y = 1.4;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(SKY.armR + 1.1, 0.1, 6, 64), this.glow(0xffe08a, 2.6));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.3;
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 1.2, 16), std(0xf2c14e, 0.35, 0.6));
+    this.skyRig.add(canopy, ring, collar);
+    const chainMat = std(0xbfc4c9, 0.3, 0.9);
+    const seatCols = [0xe8483b, 0x2f6fd8, 0xf2c14e, 0x1e9e5a];
+    for (let k = 0; k < SKY.seats; k++) {
+      const ang = (k * 2 * Math.PI) / SKY.seats;
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, SKY.armR), chainMat);
+      arm.position.set((Math.cos(ang) * SKY.armR) / 2, 0.1, (Math.sin(ang) * SKY.armR) / 2);
+      arm.rotation.y = Math.atan2(Math.cos(ang), Math.sin(ang));
+      this.skyRig.add(arm);
+      // 그네: 팔 끝에 매달린 고리 (+z = 바깥, 기울기는 x 축 회전)
+      const pivot = new THREE.Group();
+      pivot.position.set(Math.cos(ang) * SKY.armR, 0, Math.sin(ang) * SKY.armR);
+      pivot.rotation.order = 'YXZ';
+      pivot.rotation.y = Math.atan2(Math.cos(ang), Math.sin(ang));
+      for (const sx of [-0.25, 0.25]) {
+        const ch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, SKY.chain, 4), chainMat);
+        ch.position.set(sx, -SKY.chain / 2, 0);
+        pivot.add(ch);
+      }
+      const seat = new THREE.Group();
+      const cush = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.1, 0.5), std(seatCols[k % 4], 0.5));
+      cush.position.y = 0.42;
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.08), std(seatCols[k % 4], 0.5));
+      back.position.set(0, 0.75, -0.25);
+      seat.add(cush, back);
+      seat.position.y = -SKY.chain;
+      seat.rotation.y = -Math.PI / 2;
+      pivot.add(seat);
+      this.skyRig.add(pivot);
+      this.skySwings.push(pivot);
+    }
+    this.skyRig.position.set(SKY.x, SKY.base, SKY.z);
+    this.add(this.skyRig);
+    this.buildEntrance('sky');
+  }
+
+  // ───────────── 장식: 깃발 줄 · 꽃밭 · 벤치 · 풍선 가게 · 노점 더 ─────────────
+
+  private buildDecor() {
+    const r = rng(303);
+    // 깃발 줄: 대로를 가로질러 가로등 사이에 (12m 마다)
+    const flags: { x: number; y: number; z: number; ry: number }[] = [];
+    const flagCols = [0xe8483b, 0xf2c14e, 0x2f6fd8, 0x1e9e5a, 0xffffff, 0xd77bff];
+    for (let z = -74; z < 36; z += 12) {
+      for (let k = 0; k <= 14; k++) {
+        const u = k / 14;
+        flags.push({ x: -6 + 12 * u, y: 4.05 - Math.sin(Math.PI * u) * 0.7, z, ry: 0 });
+      }
+    }
+    for (let x = -24; x < 64; x += 12) {
+      for (let k = 0; k <= 12; k++) {
+        const u = k / 12;
+        flags.push({ x, y: 4.05 - Math.sin(Math.PI * u) * 0.6, z: 5 + 10 * u, ry: Math.PI / 2 });
+      }
+    }
+    const flagGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.22, 0, 0), new THREE.Vector3(0.22, 0, 0), new THREE.Vector3(0, -0.5, 0)]);
+    flagGeo.computeVertexNormals();
+    const flagMesh = new THREE.InstancedMesh(flagGeo, new THREE.MeshStandardMaterial({ roughness: 0.8, side: THREE.DoubleSide }), flags.length);
+    const col = new THREE.Color();
+    flags.forEach((f, i) => {
+      this._m.makeRotationY(f.ry).setPosition(f.x, f.y, f.z);
+      flagMesh.setMatrixAt(i, this._m);
+      flagMesh.setColorAt(i, col.setHex(flagCols[i % flagCols.length]));
+    });
+    this.scene.add(flagMesh);
+    // 꽃밭: 대로 양옆 (가로등 사이)
+    const beds: [number, number, number][] = [];
+    for (let z = -70; z < 32; z += 12) if (Math.abs(z - 10) > 8 && Math.abs(z + 27) > 6 && Math.abs(z + 66) > 6) beds.push([-7.6, z, 0], [7.6, z, 0]);
+    const bedBox = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, 0.4, 5).translate(0, 0.2, 0), std(0x8a6a4a, 0.9), beds.length);
+    const flowers = new THREE.InstancedMesh(new THREE.SphereGeometry(0.18, 6, 5), std(0xffffff, 0.8), beds.length * 18);
+    let fi = 0;
+    const fcol = [0xff5d8f, 0xffd23f, 0xff8a3d, 0xc77dff, 0xffffff];
+    beds.forEach(([x, z], i) => {
+      this._m.makeTranslation(x, 0, z);
+      bedBox.setMatrixAt(i, this._m);
+      for (let k = 0; k < 18; k++) {
+        this._m.makeTranslation(x - 0.4 + (k % 3) * 0.4, 0.5, z - 2.2 + Math.floor(k / 3) * 0.88);
+        flowers.setMatrixAt(fi, this._m);
+        flowers.setColorAt(fi++, col.setHex(fcol[(i + k) % fcol.length]));
+      }
+    });
+    this.scene.add(bedBox, flowers);
+    // 벤치: 대로 · 동서 길 옆
+    const benches: [number, number, number][] = [];
+    for (let z = -64; z < 30; z += 24) benches.push([-9.2, z + 6, Math.PI / 2], [9.2, z + 6, -Math.PI / 2]);
+    for (let x = -18; x < 60; x += 20) benches.push([x + 6, 16.6, Math.PI]);
+    const wood = std(0xa0663a, 0.8);
+    const iron = std(0x2d3a2e, 0.5, 0.6);
+    for (const [x, z, ry] of benches) {
+      const g = new THREE.Group();
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.08, 0.5), wood);
+      seat.position.y = 0.45;
+      const back = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.45, 0.06), wood);
+      back.position.set(0, 0.75, -0.24);
+      g.add(seat, back);
+      for (const s of [-0.8, 0.8]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.45, 0.5), iron);
+        leg.position.set(s, 0.22, 0);
+        g.add(leg);
+      }
+      g.position.set(x, 0, z);
+      g.rotation.y = ry;
+      this.add(g);
+    }
+    // 풍선 가게 (광장 옆)
+    const cart = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 0.9), std(0xffffff, 0.6));
+    body.position.y = 0.75;
+    cart.add(body);
+    for (let k = 0; k < 14; k++) {
+      const bx = (r() - 0.5) * 1.4;
+      const bz = (r() - 0.5) * 1.2;
+      const by = 3.2 + r() * 1.3;
+      const balloon = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), std(flagCols[k % flagCols.length], 0.3, 0.1));
+      balloon.scale.y = 1.15;
+      balloon.position.set(bx, by, bz);
+      const str = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, by - 1.2, 3), std(0xeeeeee, 0.9));
+      str.position.set(bx / 2, (by + 1.2) / 2, bz / 2);
+      str.lookAt(bx, by, bz);
+      str.rotateX(Math.PI / 2);
+      cart.add(balloon, str);
+    }
+    cart.position.set(-9, 0, 31);
+    this.add(cart);
+    // 노점 더: 아이스크림 · 팝콘 · 음료 · 닭꼬치 · 기념사진
+    const more: [number, number, number, string][] = [
+      [10, -14, 0xff8ab3, '아이스크림'],
+      [-10, -46, 0xf2b705, '팝콘'],
+      [36, 18, 0x14a37f, '음료'],
+      [-30, 18, 0xc8323c, '닭꼬치'],
+      [10, -76, 0x7b2fd8, '기념사진'],
+    ];
+    for (const [x, z, color, label] of more) {
+      const g = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(3, 2.2, 2.4), std(0xf4efe6, 0.8));
+      box.position.y = 1.1;
+      // 줄무늬 차양
+      for (let k = 0; k < 6; k++) {
+        const st = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.18, 3), std(k % 2 ? 0xffffff : color, 0.6));
+        st.position.set(-1.45 + k * 0.58, 2.5, 0);
+        st.rotation.x = 0.12;
+        g.add(st);
+      }
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), new THREE.MeshBasicMaterial({ map: signTexture(label, '#ffffff', '#333333', 512, 128) }));
+      sign.position.set(0, 3.05, 1.2);
+      g.add(box, sign);
+      g.position.set(x, 0, z);
+      // 간판이 가까운 길 쪽을 보게
+      const on = nearestOnPaths(x, z);
+      g.rotation.y = Math.atan2(on.x - x, on.z - z);
+      this.add(g);
+    }
+  }
+
   // ───────────── 매 프레임 ─────────────
 
   /** 놀이기구를 지금 시각(공유)에 맞춰 움직인다 */
@@ -878,6 +1406,18 @@ export class ThemeParkScene {
       this.cabins[k].rotation.z = Math.sin(nowMs / 900 + k) * 0.02;
     }
     this.carousel.rotation.y = (nowMs / 1000) * 0.45;
+    // 토네이도: 팔은 그네처럼, 원판은 팔을 축으로 빙글빙글
+    const gc = rideClock('gyro', nowMs);
+    const gy = gyroAt(gc.phase === 'running' ? gc.t : gc.phase === 'idle' ? GYRO_RUN : 0);
+    this.gyroArm.rotation.x = gy.th;
+    this.gyroDisc.rotation.y = -gy.spin;
+    // 스카이 스윙: 회전판이 탑을 따라 오르내리며 돌고, 그네는 바깥으로 기운다
+    const sc = rideClock('sky', nowMs);
+    const sk = skyAt(sc.phase === 'running' ? sc.t : sc.phase === 'idle' ? SKY_RUN : 0);
+    this.skyRig.position.y = sk.y;
+    this.skyRig.rotation.y = -sk.spin;
+    for (const sw of this.skySwings) sw.rotation.x = -sk.tilt;
+    this.drawBoards(nowMs);
   }
 
   // ───────────── 1인칭 탑승 카메라 ─────────────
@@ -908,7 +1448,7 @@ export class ThemeParkScene {
     cam.position.set(pose.x + u.x * eye + f.x * 0.12, pose.y + u.y * eye + f.y * 0.12, pose.z + u.z * eye + f.z * 0.12);
     // 흔들림: 바퀴 진동(빠른 떨림) + 큰 출렁임. 롤러코스터 > 자이로드롭 > 바이킹
     const v = pose.speed;
-    const k = kind === 'coaster' ? 1 : kind === 'drop' ? 0.7 : kind === 'viking' ? 0.35 : 0;
+    const k = kind === 'coaster' ? 1 : kind === 'drop' ? 0.7 : kind === 'gyro' ? 0.55 : kind === 'viking' ? 0.35 : kind === 'sky' ? 0.2 : 0;
     const amp = k * Math.min(0.06, 0.0009 * v * v + (pose.tag === 'lift' ? 0.004 : 0) + (pose.tag === 'brake' || pose.tag === 'trim' ? 0.02 : 0));
     const n1 = Math.sin(tSec * 61.3) * 0.6 + Math.sin(tSec * 37.1 + 1.3) * 0.4;
     const n2 = Math.sin(tSec * 53.7 + 2.1) * 0.6 + Math.sin(tSec * 29.3) * 0.4;

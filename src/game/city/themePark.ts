@@ -15,7 +15,7 @@ export interface Rect {
   z1: number;
 }
 
-export type RideId = 'coaster' | 'drop' | 'viking' | 'wheel';
+export type RideId = 'coaster' | 'drop' | 'viking' | 'wheel' | 'gyro' | 'sky';
 
 export const PARK = {
   bounds: { x0: -82, x1: 82, z0: -92, z1: 46 } as Rect,
@@ -484,6 +484,57 @@ export function vikingAt(t: number): number {
   return amp * Math.sin((2 * Math.PI * t) / period);
 }
 
+/**
+ * 토네이도 (자이로 스윙): 높이 21m 축에 매달린 15m 팔 끝 원판에 16명이 바깥을 보고 앉는다.
+ * 팔은 남북(z)으로 그네처럼 점점 크게 흔들려 120°까지 올라가고, 원판은 그동안 빙글빙글 돈다.
+ */
+export const GYRO = { x: -17, z: -30, pivotY: 21, arm: 15, ringR: 3.6, seats: 16 };
+export const GYRO_RUN = 50;
+
+/** 자이로 스윙 팔 각도 (라디안, + = 북쪽(-z)으로 올라감)와 원판 회전각 */
+export function gyroAt(t: number): { th: number; spin: number } {
+  const period = 7.2;
+  const AMP = (120 * Math.PI) / 180;
+  const amp = t < 20 ? (t / 20) * AMP : t < 36 ? AMP : Math.max(0, AMP * (1 - (t - 36) / 12));
+  const th = t >= 48 ? 0 : amp * Math.sin((2 * Math.PI * t) / period);
+  // 원판: 4초 동안 빨라져 초당 0.9 라디안으로 돌고, 끝날 때 4초 동안 천천히 멈춘다
+  const w = 0.9;
+  const spin = t < 4 ? (w * t * t) / 8 : t < 44 ? w * 2 + w * (t - 4) : w * 2 + w * 40 + w * Math.min(4, t - 44) * (1 - Math.min(4, t - 44) / 8);
+  return { th, spin };
+}
+
+/**
+ * 스카이 스윙 (회오리 그네): 48m 탑을 따라 그네 회전판이 올라가며 돌고, 그네는 원심력으로 바깥으로 날아간다.
+ * 0~12초 올라가며 빨라짐 → 12~36초 꼭대기에서 회전 → 36~46초 내려오며 느려짐
+ */
+export const SKY = { x: -17, z: -70, top: 40, base: 7.2, armR: 5.5, chain: 6.5, seats: 16, mastH: 48 };
+export const SKY_RUN = 46;
+
+export function skyAt(t: number): { y: number; spin: number; w: number; tilt: number } {
+  const W = 1.25; // 꼭대기 회전 속도 (rad/s)
+  const up = (u: number) => u * u * (3 - 2 * u);
+  let y: number, w: number, spin: number;
+  if (t < 12) {
+    const u = t / 12;
+    y = SKY.base + (SKY.top - SKY.base) * up(u);
+    w = W * u;
+    spin = (W * t * t) / 24;
+  } else if (t < 36) {
+    y = SKY.top;
+    w = W;
+    spin = W * 6 + W * (t - 12);
+  } else {
+    const u = Math.min(1, (t - 36) / 10);
+    y = SKY.top - (SKY.top - SKY.base) * up(u);
+    w = W * (1 - u);
+    spin = W * 6 + W * 24 + W * 10 * (u - (u * u) / 2);
+  }
+  // 그네 줄 기울기: tan β = ω² r / g (r = 팔 + 줄이 바깥으로 나간 만큼, 두 번 고쳐 계산)
+  let tilt = 0;
+  for (let i = 0; i < 3; i++) tilt = Math.atan((w * w * (SKY.armR + SKY.chain * Math.sin(tilt))) / 9.81);
+  return { y, spin, w, tilt };
+}
+
 export const WHEEL = { x: 46, z: -62, hubY: 24, r: 21, cabins: 16, period: 240 };
 
 /** 대관람차 칸 k 의 지금 각도 (0 = 맨 아래, 반시계) */
@@ -555,12 +606,34 @@ export const RIDES: Record<RideId, RideDef> = {
     period: WHEEL.period,
     solids: [{ x0: WHEEL.x - 4, x1: WHEEL.x + 4, z0: WHEEL.z - 4, z1: WHEEL.z + 3 }],
   },
+  gyro: {
+    id: 'gyro',
+    name: '토네이도 (자이로 스윙)',
+    icon: '🌀',
+    gate: { x: GYRO.x + 9, z: GYRO.z + 3 },
+    exit: { x: GYRO.x + 9, z: GYRO.z + 7 },
+    seats: GYRO.seats,
+    board: 18,
+    period: Math.ceil(18 + GYRO_RUN + 4),
+    solids: [{ x0: GYRO.x - 6, x1: GYRO.x + 6, z0: GYRO.z - 3.5, z1: GYRO.z + 3.5 }],
+  },
+  sky: {
+    id: 'sky',
+    name: '스카이 스윙 (회오리 그네)',
+    icon: '🪂',
+    gate: { x: SKY.x + 10, z: SKY.z + 4 },
+    exit: { x: SKY.x + 10, z: SKY.z + 8 },
+    seats: SKY.seats,
+    board: 18,
+    period: Math.ceil(18 + SKY_RUN + 4),
+    solids: [{ x0: SKY.x - 3, x1: SKY.x + 3, z0: SKY.z - 3, z1: SKY.z + 3 }],
+  },
 };
 
 export const RIDE_IDS = Object.keys(RIDES) as RideId[];
 
 export function runLength(id: RideId) {
-  return id === 'coaster' ? COASTER_RUN.duration : id === 'drop' ? DROP_RUN : id === 'viking' ? VIKING_RUN : WHEEL.period;
+  return id === 'coaster' ? COASTER_RUN.duration : id === 'drop' ? DROP_RUN : id === 'viking' ? VIKING_RUN : id === 'gyro' ? GYRO_RUN : id === 'sky' ? SKY_RUN : WHEEL.period;
 }
 
 /**
@@ -703,6 +776,22 @@ export function seatPose(id: RideId, seat: number, nowMs: number, out: SeatPose 
     out.speed = ck.phase === 'running' ? Math.abs(dth) * Math.hypot(L.y, L.z) : 0;
     return out;
   }
+  if (id === 'gyro') {
+    const ck = rideClock('gyro', nowMs);
+    const t = ck.phase === 'running' ? ck.t : ck.phase === 'idle' ? GYRO_RUN : 0;
+    const g = gyroPose(seat, t);
+    Object.assign(out, g);
+    const g2 = gyroPose(seat, t + 0.05);
+    out.speed = ck.phase === 'running' ? Math.hypot(g2.x - g.x, g2.y - g.y, g2.z - g.z) / 0.05 : 0;
+    return out;
+  }
+  if (id === 'sky') {
+    const ck = rideClock('sky', nowMs);
+    const t = ck.phase === 'running' ? ck.t : ck.phase === 'idle' ? SKY_RUN : 0;
+    Object.assign(out, skyPose(seat, t));
+    out.speed = ck.phase === 'running' ? skyAt(t).w * (SKY.armR + SKY.chain * Math.sin(skyAt(t).tilt)) : 0;
+    return out;
+  }
   const cabin = Math.floor(seat / 4) % WHEEL.cabins;
   const a = wheelAngle(cabin, nowMs);
   const L = wheelLocal(seat % 4);
@@ -721,3 +810,211 @@ export function seatPose(id: RideId, seat: number, nowMs: number, out: SeatPose 
 
 /** 대관람차는 탄 뒤 한 바퀴(period) 돌면 내린다 */
 export const WHEEL_RIDE_MS = WHEEL.period * 1000;
+
+/** 자이로 스윙 좌석: 원판 가장자리, 바깥을 보고 앉는다 (위쪽 = 축을 향함) */
+export function gyroPose(seat: number, t: number) {
+  const { th, spin } = gyroAt(t);
+  const c = Math.cos(th);
+  const sn = Math.sin(th);
+  // 팔 (축 → 원판): x 축으로 th 만큼 돌린 (0, -1, 0)
+  const ax = 0;
+  const ay = -c;
+  const az = -sn;
+  const cx = GYRO.x;
+  const cy = GYRO.pivotY + ay * GYRO.arm;
+  const cz = GYRO.z + az * GYRO.arm;
+  // 원판 면의 두 축: e1 = x, e2 = x 축으로 돌린 (0, 0, 1)
+  const a = (seat * 2 * Math.PI) / GYRO.seats + spin;
+  const ox = Math.cos(a);
+  const oy = Math.sin(a) * -sn;
+  const oz = Math.sin(a) * c;
+  return {
+    x: cx + ox * GYRO.ringR - ax * 0.4,
+    y: cy + oy * GYRO.ringR - ay * 0.4,
+    z: cz + oz * GYRO.ringR - az * 0.4,
+    fx: ox,
+    fy: oy,
+    fz: oz,
+    ux: -ax,
+    uy: -ay,
+    uz: -az,
+  };
+}
+
+/** 스카이 스윙 좌석: 팔 끝에서 줄에 매달려 바깥으로 기울어진 그네. 도는 방향을 본다 */
+export function skyPose(seat: number, t: number) {
+  const { y, spin, tilt } = skyAt(t);
+  const a = (seat * 2 * Math.PI) / SKY.seats + spin;
+  const ox = Math.cos(a);
+  const oz = Math.sin(a);
+  const sb = Math.sin(tilt);
+  const cb = Math.cos(tilt);
+  return {
+    x: SKY.x + ox * (SKY.armR + SKY.chain * sb),
+    y: y - SKY.chain * cb,
+    z: SKY.z + oz * (SKY.armR + SKY.chain * sb),
+    // 반시계로 돈다 (위에서 볼 때): 진행 방향 = (-sin, cos)
+    fx: -oz,
+    fy: 0,
+    fz: ox,
+    ux: -ox * sb,
+    uy: cb,
+    uz: -oz * sb,
+  };
+}
+
+// ───────────────────────── 산책로 (길 · 이정표 · 길찾기) ─────────────────────────
+
+/** 길 교차점 */
+export const PARK_NODES: Record<string, { x: number; z: number }> = {
+  gate: { x: 0, z: 42 },
+  south: { x: 0, z: 36 },
+  plaza: { x: 0, z: 22 },
+  cross: { x: 0, z: 10 },
+  gyroJ: { x: 0, z: -27 },
+  north: { x: 0, z: -66 },
+  top: { x: 0, z: -82 },
+  coasterW: { x: -24, z: 38.5 },
+  coasterG: { x: RIDES.coaster.gate.x, z: RIDES.coaster.gate.z },
+  west: { x: -24, z: 10 },
+  carousel: { x: 11, z: 22 },
+  east: { x: 28, z: 10 },
+  far: { x: 64, z: 10 },
+  vikJ: { x: 28, z: -6 },
+  vikingG: { x: RIDES.viking.gate.x, z: RIDES.viking.gate.z },
+  dropJ: { x: 28, z: -32 },
+  dropG: { x: RIDES.drop.gate.x, z: RIDES.drop.gate.z },
+  wheelJ: { x: 28, z: -56 },
+  wheelG: { x: RIDES.wheel.gate.x, z: RIDES.wheel.gate.z },
+  gyroG: { x: RIDES.gyro.gate.x, z: RIDES.gyro.gate.z },
+  skyG: { x: RIDES.sky.gate.x, z: RIDES.sky.gate.z },
+  station: { x: PARK.station.x, z: PARK.station.z - 2.2 },
+};
+
+/** 길: [교차점, 교차점, 폭, 대로?] */
+export const PARK_PATHS: [string, string, number, boolean][] = [
+  ['gate', 'south', 10, true],
+  ['south', 'plaza', 10, true],
+  ['plaza', 'cross', 10, true],
+  ['cross', 'gyroJ', 9, true],
+  ['gyroJ', 'north', 9, true],
+  ['north', 'top', 8, true],
+  ['cross', 'west', 8, true],
+  ['cross', 'east', 8, true],
+  ['east', 'far', 7, true],
+  ['south', 'coasterW', 6, false],
+  ['coasterW', 'coasterG', 6, false],
+  ['coasterW', 'west', 5, false],
+  ['plaza', 'carousel', 5, false],
+  ['east', 'vikJ', 6, false],
+  ['vikJ', 'vikingG', 5, false],
+  ['vikJ', 'dropJ', 6, false],
+  ['dropJ', 'dropG', 5, false],
+  ['dropJ', 'wheelJ', 6, false],
+  ['wheelJ', 'wheelG', 5, false],
+  ['gyroJ', 'gyroG', 5, false],
+  ['north', 'skyG', 5, false],
+  ['north', 'wheelJ', 5, false],
+  ['gyroJ', 'dropJ', 5, false],
+  ['south', 'station', 5, false],
+];
+
+/** 놀이기구 입구 교차점 */
+export const RIDE_NODE: Record<RideId, string> = { coaster: 'coasterG', drop: 'dropG', viking: 'vikingG', wheel: 'wheelG', gyro: 'gyroG', sky: 'skyG' };
+
+const adj = (() => {
+  const m = new Map<string, { to: string; d: number }[]>();
+  for (const [a, b] of PARK_PATHS) {
+    const d = Math.hypot(PARK_NODES[a].x - PARK_NODES[b].x, PARK_NODES[a].z - PARK_NODES[b].z);
+    (m.get(a) ?? m.set(a, []).get(a)!).push({ to: b, d });
+    (m.get(b) ?? m.set(b, []).get(b)!).push({ to: a, d });
+  }
+  return m;
+})();
+
+/** 두 교차점 사이 가장 짧은 길 (교차점 이름들) */
+export function parkRoute(from: string, to: string): string[] {
+  const dist = new Map<string, number>([[from, 0]]);
+  const prev = new Map<string, string>();
+  const open = new Set([from]);
+  while (open.size) {
+    let cur = '';
+    let best = Infinity;
+    for (const n of open) if ((dist.get(n) ?? Infinity) < best) [cur, best] = [n, dist.get(n)!];
+    open.delete(cur);
+    if (cur === to) break;
+    for (const e of adj.get(cur) ?? []) {
+      const nd = best + e.d;
+      if (nd < (dist.get(e.to) ?? Infinity)) {
+        dist.set(e.to, nd);
+        prev.set(e.to, cur);
+        open.add(e.to);
+      }
+    }
+  }
+  if (!dist.has(to)) return [];
+  const out = [to];
+  while (out[0] !== from) out.unshift(prev.get(out[0])!);
+  return out;
+}
+
+/** 이 점에서 가장 가까운 길 위의 점 (길 한가운데 선 기준)과 그 길의 두 끝 */
+export function nearestOnPaths(x: number, z: number): { x: number; z: number; a: string; b: string; d: number } {
+  let best = { x, z, a: 'gate', b: 'south', d: Infinity };
+  for (const [a, b] of PARK_PATHS) {
+    const A = PARK_NODES[a];
+    const B = PARK_NODES[b];
+    const vx = B.x - A.x;
+    const vz = B.z - A.z;
+    const L2 = vx * vx + vz * vz || 1;
+    const u = Math.max(0, Math.min(1, ((x - A.x) * vx + (z - A.z) * vz) / L2));
+    const px = A.x + vx * u;
+    const pz = A.z + vz * u;
+    const d = Math.hypot(x - px, z - pz);
+    if (d < best.d) best = { x: px, z: pz, a, b, d };
+  }
+  return best;
+}
+
+/**
+ * 지금 자리에서 목적지(교차점)까지 걸어갈 길 (점 목록): 가까운 길로 올라선 뒤 길을 따라간다.
+ * 길의 어느 쪽 끝으로 가는 게 빠른지 둘 다 계산해 짧은 쪽.
+ */
+export function parkPathTo(x: number, z: number, target: string): { x: number; z: number }[] {
+  const on = nearestOnPaths(x, z);
+  const len = (ns: string[]) => ns.reduce((s, n, i) => (i ? s + Math.hypot(PARK_NODES[n].x - PARK_NODES[ns[i - 1]].x, PARK_NODES[n].z - PARK_NODES[ns[i - 1]].z) : s), 0);
+  let best: { x: number; z: number }[] = [];
+  let bestLen = Infinity;
+  for (const end of [on.a, on.b]) {
+    const r = parkRoute(end, target);
+    if (!r.length) continue;
+    const L = Math.hypot(on.x - PARK_NODES[end].x, on.z - PARK_NODES[end].z) + len(r);
+    if (L < bestLen) {
+      bestLen = L;
+      best = [{ x: on.x, z: on.z }, ...r.map((n) => PARK_NODES[n])];
+    }
+  }
+  return best;
+}
+
+/** 이정표: 큰 교차점마다, 갈래길 방향별로 그쪽으로 가면 나오는 놀이기구 */
+export function signposts(): { x: number; z: number; arrows: { dir: number; labels: string[] }[] }[] {
+  const out: { x: number; z: number; arrows: { dir: number; labels: string[] }[] }[] = [];
+  for (const n of ['south', 'plaza', 'cross', 'gyroJ', 'north', 'east', 'vikJ', 'dropJ', 'wheelJ', 'coasterW', 'west']) {
+    const P = PARK_NODES[n];
+    const groups = new Map<string, string[]>();
+    for (const id of RIDE_IDS) {
+      const r = parkRoute(n, RIDE_NODE[id]);
+      if (r.length < 2) continue;
+      const list = groups.get(r[1]) ?? [];
+      list.push(`${RIDES[id].icon} ${RIDES[id].name.split(' (')[0]}`);
+      groups.set(r[1], list);
+    }
+    // 역 · 입구 방향도
+    const toGate = parkRoute(n, 'station');
+    if (toGate.length > 1) groups.set(toGate[1], [...(groups.get(toGate[1]) ?? []), '🚇 출구 · 역']);
+    const arrows = [...groups.entries()].map(([to, labels]) => ({ dir: Math.atan2(PARK_NODES[to].x - P.x, PARK_NODES[to].z - P.z), labels }));
+    if (arrows.length) out.push({ x: P.x + 5.6, z: P.z + 5.6, arrows });
+  }
+  return out;
+}

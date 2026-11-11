@@ -35,7 +35,7 @@ import { FishingSession, type FishPhase, type FishResult, type FishScene } from 
 import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
 import { weatherAt, type WeatherState } from './weather';
 import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt, sharedNow } from './worldClock';
-import { PARK, RIDES, WHEEL, WHEEL_RIDE_MS, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
+import { PARK, RIDES, RIDE_IDS, RIDE_NODE, WHEEL, WHEEL_RIDE_MS, parkPathTo, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
 
 export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store' | 'park';
 
@@ -1120,6 +1120,42 @@ export class CityWorld {
     this.moveTo('city', back.x, back.z, 0, 1);
     this.say('🚇 동네로 돌아왔어요', 2.5);
   }
+  /**
+   * 놀이공원 안에서 놀이기구(또는 역) 입구까지 길을 따라 걸어간다 (지도 · 가이드에서 누르면).
+   * @returns 안내 문구 (비어 있으면 출발)
+   */
+  parkNavigate(target: RideId | 'station'): string {
+    if (this.location !== 'park') return '놀이공원 안에서만 쓸 수 있어요';
+    if (this.ride) return '놀이기구에서 내린 뒤에 이동할 수 있어요';
+    this.rideQueue = null;
+    const node = target === 'station' ? 'station' : RIDE_NODE[target];
+    const path = parkPathTo(this.player.x, this.player.z, node);
+    if (!path.length) return '거기로는 갈 수 없어요';
+    const label = target === 'station' ? '🚇 한강공원역' : `${RIDES[target].icon} ${RIDES[target].name.split(' (')[0]}`;
+    this.autopilot = { path, i: 0, label };
+    this.parkTarget = target;
+    this.say(`🧭 ${label}(으)로 가는 중… (방향키를 누르면 취소)`, 2.5);
+    return '';
+  }
+
+  /** 놀이공원 안내 중인 목적지 (가이드 패널 · 화살표) */
+  parkTarget: RideId | 'station' | null = null;
+
+  /** 가이드 패널: 놀이기구마다 지금 상태 · 기다릴 시간 · 거리 */
+  parkGuide(): { id: RideId; icon: string; name: string; state: 'board' | 'run' | 'wait'; text: string; wait: number; dist: number }[] {
+    const now = this.parkClock();
+    const p = this.player;
+    return RIDE_IDS.map((id) => {
+      const R = RIDES[id];
+      const ck = rideClock(id, now);
+      const wait = this.waitSeconds(id, now);
+      const dist = Math.round(Math.hypot(p.x - R.gate.x, p.z - R.gate.z));
+      const state: 'board' | 'run' | 'wait' = id === 'wheel' ? (this.canBoard(id, now) ? 'board' : 'wait') : ck.phase === 'boarding' ? 'board' : ck.phase === 'running' ? 'run' : 'wait';
+      const text = id === 'wheel' ? (state === 'board' ? '지금 탑승 가능' : `다음 칸 ${wait}초`) : state === 'board' ? `탑승 중 · 출발 ${Math.ceil(ck.left)}초` : state === 'run' ? `운행 중 · 다음 탑승 ${wait}초` : `곧 탑승 · ${wait}초`;
+      return { id, icon: R.icon, name: R.name, state, text, wait, dist };
+    });
+  }
+
 
   private parkReturn: { x: number; z: number } | null = null;
 
@@ -1202,6 +1238,8 @@ export class CityWorld {
 
   /** 줄 서기 · 탑승 중 (매 프레임) */
   private stepRide(inp: CityInput) {
+        gyro: '🌀 하늘과 땅이 몇 번 뒤집혔는지 모르겠다…',
+        sky: '🪂 한강 위를 날아다닌 것 같았다',
     const now = this.parkClock();
     if (this.location !== 'park') {
       this.ride = null;
@@ -1677,7 +1715,7 @@ export class CityWorld {
   private followAutopilot(inp: CityInput) {
     const ap = this.autopilot;
     if (!ap) return;
-    const manual = !!inp.move || (inp.buttons ?? []).some(Boolean) || this.location !== 'city' || this.caughtAt !== null || !!this.ride;
+    const manual = !!inp.move || (inp.buttons ?? []).some(Boolean) || (this.location !== 'city' && this.location !== 'park') || this.caughtAt !== null || !!this.ride;
     if (manual) {
       this.autopilot = null;
       return;
@@ -1687,7 +1725,9 @@ export class CityWorld {
     while (wp && Math.hypot(wp.x - p.x, wp.z - p.z) < 0.7) wp = ap.path[++ap.i];
     if (!wp) {
       this.autopilot = null;
-      this.say(`📍 ${ap.label} 도착`, 2.5);
+      this.parkTarget = null;
+      this.parkTarget = null;
+      this.say(this.location === 'park' ? `📍 ${ap.label} 도착 — 입구에서 E 를 누르면 줄을 서요` : `📍 ${ap.label} 도착`, 2.5);
       return;
     }
     inp.move = { x: wp.x - p.x, z: wp.z - p.z };
