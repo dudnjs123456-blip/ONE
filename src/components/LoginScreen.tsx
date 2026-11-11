@@ -27,7 +27,7 @@ export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => vo
   return (
     <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-zinc-950 via-[#0b0d17] to-black px-6 text-white">
       <div className="w-full max-w-sm">
-        <h1 className="text-center text-5xl font-black italic tracking-tight text-amber-300">IRON FIST</h1>
+        <h1 className="text-center text-6xl font-title font-bold tracking-wide text-amber-300 drop-shadow-[0_3px_0_rgba(0,0,0,0.35)]">Together</h1>
         <p className="mt-2 text-center text-sm text-white/50">로그인하면 내 캐릭터와 기록을 그대로 이어서 할 수 있어요</p>
 
         <div className="mt-8 rounded-xl border border-white/10 bg-white/5 p-6">

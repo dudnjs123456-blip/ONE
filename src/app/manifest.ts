@@ -3,8 +3,8 @@ import type { MetadataRoute } from 'next';
 /** 폰에서 "홈 화면에 추가"하면 앱처럼 전체화면·가로로 열린다 */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'IRON FIST',
-    short_name: 'IRON FIST',
+    name: 'Together',
+    short_name: 'Together',
     description: '웹 3D 격투 RPG',
     start_url: '/',
     display: 'fullscreen',

@@ -1,4 +1,4 @@
-# IRON FIST — 웹 3D 격투 게임 프로토타입
+# Together — 웹 3D 격투 게임 프로토타입
 
 철권 스타일(3D 축 이동, 상·중·하단, 프레임 데이터, 띄우기 콤보)의 웹 격투 게임 기반 코드.
 Next.js 15 (App Router) + three.js + TypeScript.
