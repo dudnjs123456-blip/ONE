@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DASH_FRAMES, GETUP_FRAMES } from '../core/constants';
 import type { Fighter } from '../core/fighter';
+import { isPlantedKick } from '../core/reach';
 import { smooth, type FrameClock } from './clock';
 import { totalFrames, type MoveAnim, type MoveDef } from '../data/moves';
 
@@ -743,6 +744,61 @@ export function supportFootAnchor(f: Fighter, p: Pose, bank: number, d: LegDims,
   return { x: (ref.x - now.x) * w, z: (ref.z - now.z) * w };
 }
 
+/**
+ * 화면 디딤발 고정: 땅을 딛고 차는 발차기를 시작한 순간 디딤발의 월드 위치를 기억해 두고,
+ * 끝날 때까지 몸 전체를 옮겨 그 발이 그 자리에 붙어 있게 한다.
+ * (몸 방향 보간·클립 섞임·관절 스프링 등 계산으로 다 못 잡는 흔들림까지 한 번에 없앤다)
+ * 기술이 끝나면 옮긴 양을 몇 프레임에 걸쳐 0 으로 되돌린다.
+ */
+const _lockV = new THREE.Vector3();
+
+export class FootLock {
+  private serial = -1;
+  private ax = 0;
+  private az = 0;
+  private ox = 0;
+  private oz = 0;
+  /** 화면을 로직 위치에서 최대 이만큼만 옮긴다 (판정과 너무 어긋나지 않게) */
+  private static readonly MAX = 0.35;
+
+  /** 지금 고정할 디딤발 쪽 (없으면 null) */
+  static side(f: Fighter): 'L' | 'R' | null {
+    const m = f.move;
+    if (f.state !== 'attack' || !m || !isPlantedKick(m)) return null;
+    return SUPPORT_SIDE[m.anim] ?? null;
+  }
+
+  /**
+   * @param foot 몸을 옮기기 전 디딤발의 월드 위치 (고정할 때만)
+   * @returns 루트 위치에 더할 양
+   */
+  update(f: Fighter, foot: { x: number; z: number } | null, dt: number): { x: number; z: number } {
+    if (foot) {
+      if (this.serial !== f.moveSerial) {
+        // 새 발차기: 지금 보이는 발 자리(남아 있던 보정 포함)를 고정점으로
+        this.serial = f.moveSerial;
+        this.ax = foot.x + this.ox;
+        this.az = foot.z + this.oz;
+      }
+      let dx = this.ax - foot.x;
+      let dz = this.az - foot.z;
+      const d = Math.hypot(dx, dz);
+      if (d > FootLock.MAX) {
+        dx *= FootLock.MAX / d;
+        dz *= FootLock.MAX / d;
+      }
+      this.ox = dx;
+      this.oz = dz;
+    } else {
+      this.serial = -1;
+      const k = Math.pow(0.8, Math.max(0, dt * 60));
+      this.ox = Math.abs(this.ox) < 1e-4 ? 0 : this.ox * k;
+      this.oz = Math.abs(this.oz) < 1e-4 ? 0 : this.oz * k;
+    }
+    return { x: this.ox, z: this.oz };
+  }
+}
+
 /** 목표 포즈를 관절별 2차 스프링으로 따라가는 실제 표시 포즈 */
 export class PoseSpring {
   readonly x: Pose = { ...GUARD };
@@ -923,6 +979,7 @@ export class Mannequin implements CharacterView {
   private joints: Record<JointName, THREE.Group>;
   private spring = new PoseSpring();
   private heading = new Heading();
+  private footLock = new FootLock();
   private loco = new Locomotion();
   private mainMat!: THREE.MeshStandardMaterial;
 
@@ -1015,6 +1072,18 @@ export class Mannequin implements CharacterView {
     j.knL.rotation.x = p.knL;
     j.hpR.rotation.set(p.hpR, 0, -p.abR);
     j.knR.rotation.x = p.knR;
+
+    // 디딤발을 화면에서 그 자리에 고정
+    const side = FootLock.side(f);
+    let foot: { x: number; z: number } | null = null;
+    if (side) {
+      this.root.updateMatrixWorld(true);
+      const w = (side === 'L' ? j.knL : j.knR).localToWorld(_lockV.set(0, -SHIN, 0));
+      foot = { x: w.x, z: w.z };
+    }
+    const lock = this.footLock.update(f, foot, c.dt);
+    this.root.position.x += lock.x;
+    this.root.position.z += lock.z;
 
     if (this.head) this.animateHeroine(f, c, p);
   }

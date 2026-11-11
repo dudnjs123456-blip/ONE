@@ -96,3 +96,45 @@ for (const [id, side] of [['midKick', 'R'], ['highKick', 'L'], ['lowKick', 'L'],
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${id}: 실제 진행(이동 포함) 중에도 디딤발이 월드에서 제자리 (최대 이동 ${(maxD * 100).toFixed(1)}cm)`);
   if (!ok) process.exitCode = 1;
 }
+
+// 화면 그대로: 걷다가 차고, 차는 도중 몸 방향이 상대 쪽으로 돌아가도(도시 자동 조준·대전 방향 맞춤) 디딤발이 붙어 있다
+for (const [id, side] of [['midKick', 'R'], ['highKick', 'L'], ['lowKick', 'L'], ['sweep', 'R'], ['smallSilverBackTurnKick', 'L']] as const) {
+  const move = MOVES[id];
+  const f = new Fighter(0, 'A', { body: BODY_SPECS.female, canBlock: false });
+  const foe = new Fighter(1, 'D', { canBlock: false });
+  f.reset(0, 0, 0, 1);
+  foe.reset(0, 6, 0, -1);
+  const man = new Mannequin(0xffffff) as any;
+  const clock = { t: 0, dt: 1 / 60, alpha: 1, sub: 0 };
+  // 앞으로 걷는 중
+  for (let i = 0; i < 40; i++) {
+    f.feed({ dir: 6, buttons: [false, false, false, false] });
+    f.tick({ opponent: foe, awayX: 0, awayZ: -1 });
+    clock.t++;
+    man.update(f, clock);
+  }
+  f.queueMove(move);
+  let maxD = 0;
+  let start: THREE.Vector3 | null = null;
+  for (let i = 0; i < 120; i++) {
+    f.feed(NEUTRAL_INPUT);
+    f.tick({ opponent: foe, awayX: 0, awayZ: -1 });
+    if (f.state !== 'attack') break;
+    // 차는 도중 상대가 옆으로 비켜서 몸 방향이 40° 돌아간다
+    if (f.frame === 4) {
+      const a = (40 * Math.PI) / 180;
+      f.fx = Math.sin(a);
+      f.fz = Math.cos(a);
+    }
+    clock.t++;
+    man.update(f, clock);
+    man.root.updateMatrixWorld(true);
+    const knee = man.joints[side === 'L' ? 'knL' : 'knR'] as THREE.Object3D;
+    const p = knee.localToWorld(new THREE.Vector3(0, -SHIN, 0));
+    if (!start) start = p.clone();
+    maxD = Math.max(maxD, Math.hypot(p.x - start.x, p.z - start.z));
+  }
+  const ok = maxD < 0.03;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id}: 걷다가 차고 도중에 몸이 돌아도 디딤발이 화면에서 제자리 (최대 이동 ${(maxD * 100).toFixed(1)}cm)`);
+  if (!ok) process.exitCode = 1;
+}

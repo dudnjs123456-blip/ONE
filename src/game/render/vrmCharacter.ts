@@ -31,6 +31,7 @@ import {
   backTurnPivotPoint,
   backTurnSpin,
   supportFootAnchor,
+  FootLock,
   type LegDims,
   kicking,
   attackBoost,
@@ -105,6 +106,7 @@ const SEGMENTS = ['Proximal', 'Intermediate', 'Distal'] as const;
 const _e = new THREE.Euler();
 const _q = new THREE.Quaternion();
 const _axL = new THREE.Vector3();
+const _lockV = new THREE.Vector3();
 const _axR = new THREE.Vector3();
 
 /** 절차적 포즈가 직접 움직이지 않는 뼈. 매 프레임 기본 자세로 돌려서 클립이 끝난 뒤 자세가 남지 않게 */
@@ -395,6 +397,7 @@ export class VrmCharacter implements CharacterView {
   private disposed = false;
   private spring = new PoseSpring();
   private heading = new Heading();
+  private footLock = new FootLock();
   private loco = new Locomotion();
   private rig = { thigh: 0.42, shin: 0.42, hipsY: 0.85, hipX: 0.09 };
   /** 이 모델 다리 길이로 잰 걷기·달리기 보폭 (클립·모델 둘 다 불러온 뒤 한 번 계산) */
@@ -518,6 +521,18 @@ export class VrmCharacter implements CharacterView {
     const anchor = supportFootAnchor(f, p, bank, legs, c.sub);
     bone('hips')!.position.x += anchor.x;
     bone('hips')!.position.z += anchor.z;
+    // 디딤발을 화면에서 그 자리에 고정 (몸 방향 보간·클립 섞임까지 포함한 실제 발 위치 기준)
+    const lockSide = FootLock.side(f);
+    let lockFoot: { x: number; z: number } | null = null;
+    const lockNode = lockSide && bone(lockSide === 'L' ? 'leftFoot' : 'rightFoot');
+    if (lockNode) {
+      lockNode.updateWorldMatrix(true, false);
+      const w = lockNode.getWorldPosition(_lockV);
+      lockFoot = { x: w.x, z: w.z };
+    }
+    const lock = this.footLock.update(f, lockFoot, c.dt);
+    vrm.scene.position.x += lock.x;
+    vrm.scene.position.z += lock.z;
     vrm.scene.rotation.order = 'YXZ';
     vrm.scene.rotation.x = 0;
     vrm.scene.rotation.z = 0;
