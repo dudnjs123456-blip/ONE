@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Fredoka, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Sniglet } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -7,11 +7,11 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-// 게임 제목용 둥글고 귀여운 글꼴
-const fredoka = Fredoka({
-  variable: "--font-fredoka",
+// 게임 제목용 글꼴: 구름처럼 동글동글한 Sniglet
+const cloudFont = Sniglet({
+  variable: "--font-cloud",
   subsets: ["latin"],
-  weight: ["600", "700"],
+  weight: ["800"],
 });
 
 const geistMono = Geist_Mono({
@@ -42,7 +42,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${fredoka.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${cloudFont.variable} antialiased`}
       >
         {children}
       </body>

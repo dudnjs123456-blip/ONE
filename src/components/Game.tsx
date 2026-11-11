@@ -271,7 +271,7 @@ export default function Game() {
         <h1>
           <CloudTitle />
         </h1>
-        <p className="tg-subtitle mt-1 text-center">✨ 같이 살고, 같이 싸우는 서울 이야기 ✨</p>
+        <p className="tg-subtitle mt-5 text-center">✨ 같이 살고, 같이 싸우는 서울 이야기 ✨</p>
 
         {/* 내 캐릭터 */}
         <div className="tg-card mx-auto mt-8 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">

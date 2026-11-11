@@ -1,32 +1,17 @@
 /**
- * 구름처럼 둥글둥글한 흰색 게임 제목.
- * 둥근 글꼴 위에 같은 흰색 테두리를 둥근 이음(stroke-linejoin: round)으로 덧씌워
- * 글자 모서리를 부풀리고, 은은한 빛 번짐으로 구름 느낌을 낸다. 색은 흰색 한 가지.
+ * 게임 제목: 구름처럼 동글동글한 Sniglet 글꼴, 흰색 한 가지.
+ * 아래쪽에 옅은 보랏빛 그림자, 주변에 은은한 빛 번짐을 넣어 몽실몽실하게 띄운다.
  */
 export default function CloudTitle({ text = 'Together', className = '' }: { text?: string; className?: string }) {
   return (
-    <svg
-      viewBox="0 0 760 190"
-      role="img"
-      aria-label={text}
-      className={`mx-auto block w-full max-w-[38rem] drop-shadow-[0_0_18px_rgba(200,205,255,0.35)] ${className}`}
+    <span
+      className={`font-title block text-center text-7xl leading-none text-white sm:text-8xl ${className}`}
+      style={{
+        letterSpacing: '0.02em',
+        textShadow: '0 5px 0 rgba(150, 130, 230, 0.55), 0 0 24px rgba(255, 255, 255, 0.35), 0 10px 30px rgba(120, 90, 200, 0.5)',
+      }}
     >
-      <text
-        x="50%"
-        y="56%"
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fontSize={118}
-        fontWeight={600}
-        fill="#ffffff"
-        stroke="#ffffff"
-        strokeWidth={12}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        style={{ fontFamily: 'var(--font-fredoka), "Fredoka", ui-rounded, system-ui, sans-serif', letterSpacing: '10px' }}
-      >
-        {text}
-      </text>
-    </svg>
+      {text}
+    </span>
   );
 }
