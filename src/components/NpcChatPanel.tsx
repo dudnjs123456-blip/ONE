@@ -6,14 +6,7 @@ import { applyReply, ask, bondOf, giftFlower, greeting, type ChatLine } from '@/
 import { FLOWER_GIFTS, ITEMS } from '@/game/data/items';
 import { EMOTION_FACE, TALK_NPCS, type NpcEmotion, type PlayerMood } from '@/game/data/npcs';
 import { BODY_TYPES } from '@/game/render/looks';
-
-/**
- * 대화할 때 오른쪽 아래에 띄우는 플레이어 상반신 일러스트 (캐릭터 몸별).
- * 표정 그림이 생기면 여기에 기분별로 추가한다 — 없는 기분은 '기본' 그림을 쓴다.
- */
-const PORTRAITS: Record<string, Partial<Record<PlayerMood, string>>> = {
-  smallSilverGirl: { 기본: '/portraits/smallSilverGirl/default.png' },
-};
+import { PLAYER_PORTRAITS } from '@/game/data/portraits';
 
 /** 한 글자씩 찍히는 속도 (ms) */
 const TYPE_MS = 28;
@@ -32,7 +25,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
   const npc = TALK_NPCS[npcId];
   const body = world.profile.body ?? '';
   const myName = BODY_TYPES.find((b) => b.id === body)?.label ?? '나';
-  const portraits = PORTRAITS[body];
+  const portraits = PLAYER_PORTRAITS[body];
 
   const [lines, setLines] = useState<ChatLine[]>(() => [{ role: 'assistant', content: greeting(world, npcId) }]);
   const [shown, setShown] = useState<Shown>(() => ({ who: 'npc', text: lines[0].content }));

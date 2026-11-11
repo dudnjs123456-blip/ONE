@@ -44,6 +44,8 @@ import { WEATHER_LABEL, type WeatherKind } from '@/game/city/weather';
 import { sharedNow, syncWorldClock } from '@/game/city/worldClock';
 import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
+import MoodLinePop from './MoodLinePop';
+import { MOOD_LINES, moodLineKey } from '@/game/data/moodLines';
 import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
 import { tvPlay as tvPlayShared, tvPos, tvReset, tvState, type TvVideo } from '@/game/city/tvState';
 import { PerfProbe } from '@/game/render/perfProbe';
@@ -219,6 +221,8 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
   const [skillBody, setSkillBody] = useState(profile.body === 'smallSilverGirl');
   const [menu, setMenu] = useState(false);
   const [inventory, setInventory] = useState(false);
+  /** 숫자 키로 고른 대사 (n = 1~9, at = 누른 시각) */
+  const [moodPop, setMoodPop] = useState<{ n: number; at: number } | null>(null);
   const [bigMap, setBigMap] = useState(false);
   const [jobs, setJobs] = useState(false);
   const [calendar, setCalendar] = useState(false);
@@ -374,6 +378,12 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
           world.sofaAction(SOFA_ACTS[Number(n[2]) - 1].id);
           return;
         }
+      }
+      // 숫자 키 1~9: 기분에 맞는 대사 (머리 위 말풍선은 같은 곳의 마을 사람들에게도 보인다)
+      const ml = !e.repeat && !world.dialog && !world.staffTalk ? moodLineKey(e.code) : null;
+      if (ml) {
+        if (world.postChat(MOOD_LINES[ml - 1].text) === null) setMoodPop({ n: ml, at: Date.now() });
+        return;
       }
       if (e.code === 'KeyM' && !e.repeat && !world.dialog) setBigMap((v) => !v);
       if (e.code === 'Escape') {
@@ -699,6 +709,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         </div>
       )}
       {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}
+      {!loading && worldRef.current && <MoodLinePop body={profile.body} name={worldRef.current.netName || '나'} pop={moodPop} />}
       {!loading && <VoicePanel voice={voice} touch={touch} />}
       <div
         ref={perfRef}
@@ -826,7 +837,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
               {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리 ({bindLabel('run')} = 아래) · Esc 메뉴에서 키 설정
             </div>
             <div>싸울 때 C 숙이기 (상단 공격 피하기)</div>
-            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · B 1인칭 · V 음성 대화 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
+            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · B 1인칭 · V 음성 대화 · 1~9 표정 대사 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
           </div>
         </div>
       )}
