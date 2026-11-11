@@ -89,6 +89,17 @@ function textCanvas(w: number, h: number) {
   return { canvas, ctx: canvas.getContext('2d')! };
 }
 
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
 function spriteFrom(canvas: HTMLCanvasElement) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -151,7 +162,13 @@ export class FloatingTexts {
   }
 }
 
-/** 머리 위 이름 + HP 바. 값이 바뀔 때만 다시 그린다. */
+/**
+ * 머리 위 이름 + HP 바. 값이 바뀔 때만 다시 그린다.
+ * 캐릭터 어깨 폭쯤 되게 작게, 대신 그림은 고해상도(1024×256)로 그려 가까이서도 글자가 뭉개지지 않게.
+ * 어두운 반투명 바탕 + 굵은 외곽선으로 배경이 밝아도 또렷하게.
+ */
+const PW = 1024;
+const PH = 256;
 export class Nameplate {
   readonly sprite: THREE.Sprite;
   private canvas: HTMLCanvasElement;
@@ -159,11 +176,14 @@ export class Nameplate {
   private key = '';
 
   constructor(private hostile: boolean) {
-    const { canvas, ctx } = textCanvas(256, 64);
+    const { canvas, ctx } = textCanvas(PW, PH);
     this.canvas = canvas;
     this.ctx = ctx;
     this.sprite = spriteFrom(canvas);
-    this.sprite.scale.set(1.6, 0.4, 1);
+    (this.sprite.material.map as THREE.CanvasTexture).anisotropy = 4;
+    // 밤엔 블룸 문턱이 낮아져 흰 글자가 번져 흐려 보였다 → 문턱 아래로 살짝 눌러 둔다
+    this.sprite.material.color.setScalar(0.86);
+    this.sprite.scale.set(1.1, 1.1 * (PH / PW), 1);
   }
 
   draw(label: string, hp: number, maxHp: number) {
@@ -171,19 +191,43 @@ export class Nameplate {
     if (key === this.key) return;
     this.key = key;
     const { ctx } = this;
-    ctx.clearRect(0, 0, 256, 64);
-    ctx.font = 'bold 22px sans-serif';
+    ctx.clearRect(0, 0, PW, PH);
+    ctx.font = '800 78px "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
     ctx.textAlign = 'center';
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-    ctx.strokeText(label, 128, 24);
-    ctx.fillStyle = this.hostile ? '#ffd2c2' : '#d8f0ff';
-    ctx.fillText(label, 128, 24);
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
 
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(48, 36, 160, 12);
-    ctx.fillStyle = this.hostile ? '#e0443a' : '#46c06a';
-    ctx.fillRect(50, 38, 156 * Math.max(0, hp / maxHp), 8);
+    // 글자 뒤 어두운 알약 바탕 (글자 길이에 맞춰)
+    const tw = Math.min(PW - 24, ctx.measureText(label).width + 56);
+    ctx.fillStyle = 'rgba(8,10,16,0.55)';
+    roundRect(ctx, (PW - tw) / 2, 34, tw, 104, 52);
+    ctx.fill();
+
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+    ctx.strokeText(label, PW / 2, 88);
+    ctx.fillStyle = this.hostile ? '#ffb8a6' : '#ffffff';
+    ctx.fillText(label, PW / 2, 88);
+
+    // HP 바: 검은 테두리 + 어두운 칸 + 채움 (위쪽 밝은 줄로 입체감)
+    const bw = 460;
+    const bx = (PW - bw) / 2;
+    const by = 166;
+    const bh = 34;
+    ctx.fillStyle = 'rgba(0,0,0,0.92)';
+    roundRect(ctx, bx - 6, by - 6, bw + 12, bh + 12, 12);
+    ctx.fill();
+    ctx.fillStyle = '#2a2d33';
+    roundRect(ctx, bx, by, bw, bh, 7);
+    ctx.fill();
+    const r = Math.max(0, Math.min(1, hp / maxHp));
+    if (r > 0) {
+      ctx.fillStyle = this.hostile ? '#ff3b30' : r < 0.3 ? '#ffb020' : '#3ddc5c';
+      roundRect(ctx, bx, by, Math.max(14, bw * r), bh, 7);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.fillRect(bx + 4, by + 4, Math.max(6, bw * r - 8), 8);
+    }
     (this.sprite.material.map as THREE.CanvasTexture).needsUpdate = true;
   }
 
