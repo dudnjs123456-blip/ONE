@@ -37,6 +37,11 @@ export interface CosmeticDef {
   style?: AccStyle;
   /** 여자 캐릭터만 입을 수 있다 (비키니) */
   femaleOnly?: boolean;
+  /**
+   * 갈아입는 옷: 몸(캐릭터 id) → 옷 파일. 색만 칠하는 대신 옷 자체를 바꿔 입는다 (상의 칸, 하의 칸까지 차지).
+   * 옷은 그 캐릭터의 기본 몸에 맞춰 만든 것이라 목록에 있는 몸만 입을 수 있다 (scripts/outfit-transplant.mjs --garment)
+   */
+  garment?: Partial<Record<string, string>>;
   desc: string;
 }
 
@@ -53,6 +58,8 @@ export const COSMETICS: CosmeticDef[] = [
   C({ id: 'bunny-white', name: '화이트 토끼 머리띠', icon: '🐰', slot: 'hat', price: 240, color: 0xfbf8f4, color2: 0xf6b3c8, style: 'bunny', desc: '쫑긋 선 토끼 귀. 놀이공원 필수템.' }),
   C({ id: 'bunny-black', name: '블랙 토끼 머리띠', icon: '🐰', slot: 'hat', price: 240, color: 0x232127, color2: 0xe58fa8, style: 'bunny', desc: '시크한 검은 토끼.' }),
   // 비키니 (상의 칸): 입으면 원래 상의·하의·원피스를 감추고 몸에 수영복을 그린다. 하의 칸 코디는 무시. 여자 캐릭터만
+  C({ id: 'set-sporty-white', name: '화이트 스포티 셋업', icon: '🎽', slot: 'top', price: 650, color: 0xf2f2f4, garment: { smallSilverGirl: '/garments/a3/silver-set.vrm' }, desc: '민소매 집업 + 반바지. 가볍게 뛰기 좋은 옷. (작은은발소녀 전용)' }),
+  C({ id: 'set-denim-dress', name: '데님 재킷 원피스', icon: '👗', slot: 'top', price: 900, color: 0x9ab8d8, garment: { smallSilverGirl: '/garments/a3/pinky-denim.vrm' }, desc: '크림색 롱 원피스에 짧은 청재킷. 치마가 걸을 때 살랑인다. (작은은발소녀 전용)' }),
   C({ id: 'bikini-white', name: '화이트 비키니', icon: '👙', slot: 'top', price: 380, color: 0xf7f6f2, style: 'bikini', femaleOnly: true, desc: '여름 한강 수영장 갈 때. (여자 캐릭터만)' }),
   C({ id: 'tail-white', name: '화이트 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xfbf8f4, style: 'bunnyTail', desc: '엉덩이에 달린 몽실몽실 솜뭉치.' }),
   C({ id: 'tail-pink', name: '핑크 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xf7c3d4, style: 'bunnyTail', desc: '머리띠랑 맞춰 달면 더 귀엽다.' }),
@@ -227,6 +234,7 @@ const NO_BODY_UNDER_CLOTHES: readonly string[] = ['pink'];
 
 /** 이 캐릭터가 못 입는 이유 (입을 수 있으면 null). 비키니는 여자 캐릭터만, 옷 속 몸이 있는 모델만 */
 export function wearBlock(p: PlayerProfile, c: CosmeticDef): string | null {
+  if (c.garment && !c.garment[p.body ?? 'female']) return '아직 이 캐릭터에 맞는 옷이 없어요';
   if (!c.femaleOnly) return null;
   const body = p.body ?? 'female';
   if (MALE_BODIES.includes(body)) return '여자 캐릭터만 입을 수 있어요';
@@ -272,4 +280,13 @@ export function takeOffCosmetic(p: PlayerProfile, slot: CosmeticSlot): boolean {
 export function wornList(w: Wardrobe | undefined): string[] {
   if (!w) return [];
   return COSMETIC_SLOTS.map((s) => w.worn[s.id]).filter((x): x is string => !!x && !!COSMETIC_BY_ID[x]);
+}
+
+/** 입은 코디 중 갈아입는 옷이 있으면 이 몸에 맞는 옷 파일 주소 (없으면 null) */
+export function garmentFor(ids: readonly string[], body: string): string | null {
+  for (const id of ids) {
+    const url = COSMETIC_BY_ID[id]?.garment?.[body];
+    if (url) return url;
+  }
+  return null;
 }

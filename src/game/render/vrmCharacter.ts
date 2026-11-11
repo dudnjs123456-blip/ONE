@@ -7,6 +7,9 @@ import { smooth, type FrameClock } from './clock';
 import { track } from './loadTracker';
 import { OutfitDresser, keepFieldOutline } from './outfitKit';
 import { FACE_KEYS, MOOD_FACE, eyesBusy, type FaceKey } from './moodFace';
+import { Garment } from './garmentKit';
+import { garmentFor } from '../data/fashion';
+import { BODY_TYPES } from './looks';
 import type { PlayerMood } from '../data/npcs';
 import {
   CLIP_BONES,
@@ -409,6 +412,12 @@ export class VrmCharacter implements CharacterView {
   /** 코디 (모델을 불러오기 전에 정해지면 기다렸다 입힌다) */
   private dresser: OutfitDresser | null = null;
   private outfit: string[] = [];
+  /** 갈아입은 옷 (옷 파일) · 그 주소 ('' = 기본 옷) · 이 캐릭터의 몸 id */
+  private garment: Garment | null = null;
+  private garmentUrl = '';
+  private readonly bodyId: string;
+  /** 몸 재질의 림 라이트 (갈아입은 옷의 것은 따로 더한다) */
+  private baseRims: MToonRim[] = [];
   /** 숫자 키 대사 등으로 잠깐 짓는 표정 (until = performance.now 기준) */
   private faceMood: { mood: PlayerMood; until: number } | null = null;
   /** 지금 섞여 있는 표정 값 (부드럽게 바뀌도록) */
@@ -431,6 +440,7 @@ export class VrmCharacter implements CharacterView {
   private tmpV = new THREE.Vector3();
 
   constructor(url: string, fallback: HeroinePalette, tint?: number) {
+    this.bodyId = BODY_TYPES.find((b) => b.url === url)?.id ?? '';
     // 상자 인형은 VRM 을 못 불러왔을 때만 쓴다 (불러오는 동안 상자 몸이 비치지 않게 아무것도 안 보인다)
     this.fallback = new Mannequin({ kind: 'heroine', palette: fallback });
     loadClipLibrary().then((lib) => (this.lib = lib));
@@ -587,9 +597,13 @@ export class VrmCharacter implements CharacterView {
       this.flipV0(vrm);
     }
     vrm.update(Math.min(c.dt, 1 / 20));
+    this.garment?.update(Math.min(c.dt, 1 / 20));
     // 다음 프레임 계산은 다시 1.0 기준 값에서 이어간다
     if (this.v0) this.flipV0(vrm);
-    if (moved > 1) vrm.springBoneManager?.reset();
+    if (moved > 1) {
+      vrm.springBoneManager?.reset();
+      this.garment?.reset();
+    }
   }
 
   /** 1.0 기준 자세 ↔ 0.x 모델 자세 (두 번 하면 원래대로): 모든 정규화 뼈 회전의 x·z, 골반 위치의 x·z 부호를 뒤집는다 */
@@ -837,10 +851,36 @@ export class VrmCharacter implements CharacterView {
   setOutfit(ids: string[]) {
     this.outfit = ids;
     this.dresser?.apply(ids);
+    this.syncGarment();
+  }
+
+  /** 입은 코디에 갈아입는 옷이 있으면 그 옷 파일을 불러와 입힌다 (못 불러오면 기본 옷 그대로) */
+  private syncGarment() {
+    const want = garmentFor(this.outfit, this.bodyId) ?? '';
+    if (want === this.garmentUrl) return;
+    this.garment?.dispose();
+    this.garment = null;
+    this.rims = this.baseRims;
+    this.dresser?.setGarment(false);
+    this.garmentUrl = want;
+    const vrm = this.vrm;
+    if (!want || !vrm) return;
+    Garment.load(want, vrm)
+      .then((g) => {
+        if (this.disposed || this.vrm !== vrm || this.garmentUrl !== want) return g.dispose();
+        this.garment = g;
+        this.rims = [...this.baseRims, ...setupMToonRim(g.root)];
+        this.dresser?.setGarment(true);
+      })
+      .catch((e) => {
+        console.warn('옷 불러오기 실패, 기본 옷 그대로:', e);
+        if (this.garmentUrl === want) this.garmentUrl = '';
+      });
   }
 
   dispose() {
     this.disposed = true;
+    this.garment?.dispose();
     this.dresser?.dispose();
     if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
   }
@@ -932,12 +972,15 @@ export class VrmCharacter implements CharacterView {
     // 애니메이션 같은 또렷한 외곽선 (VRM 좌표는 미터 단위)
     addOutline(vrm.scene, 0.0035);
     keepFieldOutline(vrm.scene);
-    this.rims = setupMToonRim(vrm.scene);
+    this.rims = this.baseRims = setupMToonRim(vrm.scene);
     this.dresser = new OutfitDresser(vrm);
     if (this.outfit.length) this.dresser.apply(this.outfit);
     this.root.remove(this.fallback.root);
     this.root.add(vrm.scene);
     this.vrm = vrm;
+    // 불러오기 전에 정해 둔 갈아입는 옷이 있으면 이제 입힌다
+    this.garmentUrl = '';
+    this.syncGarment();
   }
 }
 

@@ -2,6 +2,7 @@
 //
 //   node scripts/outfit-transplant.mjs <옷 입은.vrm> <기본 몸.vrm> <결과.vrm> [옷 재질 앞부분 ...]
 //   예) node scripts/outfit-transplant.mjs a3.vrm a3수정.vrm a3-new.vrm Tops_ Shoes_ --foot
+//   --garment : 몸·얼굴·머리는 빼고 옷만 담는다 (게임에서 기본 몸에 갈아입히는 옷 파일, 뼈대·흔들림 설정은 함께)
 //   --foot : 굽 있는 신발이면 발 모양도 옷 입은 모델의 발(VRoid 가 신발에 맞춰 바꾼 모양)로 바꾼다
 //
 // 맞추는 방법
@@ -14,6 +15,7 @@ import fs from 'node:fs';
 
 const argv = process.argv.slice(2);
 const FOOT = argv.includes('--foot');
+const GARMENT = argv.includes('--garment');
 const [FROM, TO, OUT, ...prefixArgs] = argv.filter((a) => !a.startsWith('--'));
 const PREFIXES = prefixArgs.length ? prefixArgs : ['Tops_', 'Bottoms_', 'Shoes_'];
 if (!FROM || !TO || !OUT) {
@@ -424,23 +426,25 @@ for (let k = 0; k < V; k++) {
 console.log('\n몸 밖으로 밀어낸 정점', pushed);
 
 // 4) 옷 삼각형 사이로 몸이 뚫고 나온 곳: 그 옷 삼각형을 몸 바깥으로 밀어낸다 (신발 빼고)
-{
+const pokedAll = new Set();
+function fixPokes() {
   const tri = primIdx.flatMap((I, n) => (matName(src, clothPrims[n].material).startsWith('Shoes_') ? [] : Array.from({ length: I.length / 3 }, (_, t) => [I[t * 3], I[t * 3 + 1], I[t * 3 + 2]])));
   const P3 = (k) => [out[k * 3], out[k * 3 + 1], out[k * 3 + 2]];
   let fixed = 0;
-  for (let round = 0; round < 4; round++) {
+  for (let round = 0; round < 8; round++) {
     const push = new Float64Array(V * 3), cnt = new Float64Array(V);
     for (const i of newBody.verts) {
       const b = vtx(newBody, i);
       const bn = norm([newBody.N[i * 3], newBody.N[i * 3 + 1], newBody.N[i * 3 + 2]]);
-      let best = 0.02 ** 2, hit = null;
+      // 몸이 옷 밖으로 크게(4.5cm 까지) 튀어나온 곳도 찾는다. 옷 가장자리 밖(팔·다리 맨살)은 빼려고 삼각형 안쪽에 떨어지는 점만
+      let best = 0.045 ** 2, hit = null;
       for (const [a, c, d] of tri) {
         const A = P3(a), C = P3(c), Dd = P3(d);
         if (Math.abs(A[1] - b[1]) > 0.05) continue;
         const bc = closestBary(b, A, C, Dd);
         const q = add(add(mul(A, bc[0]), mul(C, bc[1])), mul(Dd, bc[2]));
         const dd = (q[0] - b[0]) ** 2 + (q[1] - b[1]) ** 2 + (q[2] - b[2]) ** 2;
-        if (dd < best) {
+        if (dd < best && (dd < 0.02 ** 2 || Math.min(...bc) > 0.01)) {
           best = dd;
           hit = { ids: [a, c, d], bc, q };
         }
@@ -458,12 +462,30 @@ console.log('\n몸 밖으로 밀어낸 정점', pushed);
     for (let k = 0; k < V; k++)
       if (cnt[k] > 0) {
         for (let c = 0; c < 3; c++) out[k * 3 + c] += push[k * 3 + c] / cnt[k];
+        pokedAll.add(k);
         n++;
       }
     fixed += n;
     if (!n) break;
   }
-  console.log('몸이 뚫고 나온 곳 고친 옷 정점', fixed);
+  return fixed;
+}
+console.log('몸이 뚫고 나온 곳 고친 옷 정점', fixPokes());
+// 5) 밀어낸 자리가 접히지 않게: 밀린 정점과 그 이웃을 주변 평균 쪽으로 부드럽게 → 다시 뚫린 곳 고치기
+{
+  const zone = new Set(pokedAll);
+  for (const k of pokedAll) for (const j of nbrs[k]) if (!isShoe[j]) zone.add(j);
+  for (let it = 0; it < 6; it++) {
+    const next = new Float32Array(out);
+    for (const k of zone) {
+      if (!nbrs[k].size) continue;
+      const avg = [0, 0, 0];
+      for (const j of nbrs[k]) for (let c = 0; c < 3; c++) avg[c] += out[j * 3 + c] / nbrs[k].size;
+      for (let c = 0; c < 3; c++) next[k * 3 + c] = out[k * 3 + c] * 0.5 + avg[c] * 0.5;
+    }
+    out.set(next);
+  }
+  console.log('부드럽게 다듬은 옷 정점', zone.size, '· 다시 고친 정점', fixPokes());
 }
 
 // ---------- 새 뼈 붙이기 ----------
@@ -480,7 +502,8 @@ function ensureNode(name) {
   const pname = S.nodes[S.parent.get(si)].name;
   const pi = ensureNode(pname);
   const { translation, rotation, scale } = S.nodes[si];
-  dst.json.nodes.push({ name, ...(translation && { translation }), ...(rotation && { rotation }), ...(scale && { scale }) });
+  // 옷만 담는 파일에서는 새로 붙인 뼈 이름 앞에 G_ 를 붙인다 (게임에서 입는 몸의 같은 이름 뼈와 헷갈리지 않게)
+  dst.json.nodes.push({ name: GARMENT ? `G_${name}` : name, ...(translation && { translation }), ...(rotation && { rotation }), ...(scale && { scale }) });
   const ni = dst.json.nodes.length - 1;
   (dst.json.nodes[pi].children ||= []).push(ni);
   D.byName.set(name, ni);
@@ -563,6 +586,8 @@ function remapTextures(o) {
   return r;
 }
 const baseMatCount = dst.json.materials.length;
+const basePrimCount = dstBodyMesh.primitives.length;
+const baseSpringCount = dst.json.extensions.VRMC_springBone.springs.length;
 const matMap = new Map();
 for (const p of clothPrims) {
   if (matMap.has(p.material)) continue;
@@ -606,5 +631,108 @@ console.log('옮긴 흔들림 사슬', takeSprings.length);
 // 기본 몸의 목걸이·팔찌는 VRoid 가 '원피스' 로 분류해 둔다 → 장신구 이름으로 바꿔 코디(색 칠하기)·비키니(옷 감추기)에서 빠지게
 for (const m of dst.json.materials.slice(0, baseMatCount)) if (/Onepiece_/.test(m.name)) m.name = m.name.replace('Onepiece_', 'Accessory_');
 
+if (GARMENT) stripToGarment();
+
 saveGlb(dst, OUT);
+
+/** 몸·얼굴·머리를 빼고 옛 옷 조각만 남긴 뒤, 쓰지 않는 그림·자료를 버려 파일을 줄인다 */
+function stripToGarment() {
+  const J = dst.json;
+  // 메쉬: 몸 메쉬의 옷 조각만 남기고 나머지 메쉬는 노드에서 뗀다
+  dstBodyMesh.primitives = dstBodyMesh.primitives.slice(basePrimCount);
+  J.nodes.forEach((n) => {
+    if (n.mesh !== undefined && n.mesh !== dstBodyIdx) {
+      delete n.mesh;
+      delete n.skin;
+    }
+  });
+  // 원래 몸의 흔들림(머리카락·가슴)은 빼고 옷의 흔들림만
+  const sb = J.extensions.VRMC_springBone;
+  sb.springs = sb.springs.slice(baseSpringCount);
+  // 표정·1인칭 설정은 얼굴 메쉬를 가리키므로 비운다. 썸네일도 뺀다
+  const vrmc = J.extensions.VRMC_vrm;
+  if (vrmc.expressions) vrmc.expressions = { preset: {}, custom: {} };
+  if (vrmc.firstPerson) vrmc.firstPerson = { meshAnnotations: [] };
+  if (vrmc.meta) delete vrmc.meta.thumbnailImage;
+
+  // ---- 쓰는 것만 모으기 ----
+  const usedAcc = new Set(), usedMat = new Set();
+  for (const pr of dstBodyMesh.primitives) {
+    Object.values(pr.attributes).forEach((a) => usedAcc.add(a));
+    if (pr.indices !== undefined) usedAcc.add(pr.indices);
+    if (pr.material !== undefined) usedMat.add(pr.material);
+  }
+  J.meshes = [dstBodyMesh];
+  J.nodes.forEach((n) => {
+    if (n.mesh !== undefined) n.mesh = 0;
+  });
+  const skinIdx = J.nodes.find((n) => n.mesh === 0).skin;
+  J.skins = [J.skins[skinIdx]];
+  J.nodes.forEach((n) => {
+    if (n.skin !== undefined) n.skin = 0;
+  });
+  usedAcc.add(J.skins[0].inverseBindMatrices);
+  const usedTex = new Set();
+  const walkTex = (o) => {
+    if (Array.isArray(o)) return o.forEach(walkTex);
+    if (!o || typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o)) {
+      if (/Texture$/.test(k) && v && typeof v.index === 'number') usedTex.add(v.index);
+      walkTex(v);
+    }
+  };
+  for (const m of usedMat) walkTex(J.materials[m]);
+  const usedImg = new Set([...usedTex].map((t) => J.textures[t].source));
+
+  // ---- 번호 다시 매기기 ----
+  const remapList = (arr, used) => {
+    const map = new Map();
+    const out = [];
+    arr.forEach((x, i) => {
+      if (used.has(i)) {
+        map.set(i, out.length);
+        out.push(x);
+      }
+    });
+    return { out, map };
+  };
+  const mats = remapList(J.materials, usedMat);
+  const texs = remapList(J.textures, usedTex);
+  const imgs = remapList(J.images, usedImg);
+  const accs = remapList(J.accessors, usedAcc);
+  const fixTex = (o) => {
+    if (Array.isArray(o)) return o.map(fixTex);
+    if (!o || typeof o !== 'object') return o;
+    const r = {};
+    for (const [k, v] of Object.entries(o)) r[k] = /Texture$/.test(k) && v && typeof v.index === 'number' ? { ...fixTex(v), index: texs.map.get(v.index) } : fixTex(v);
+    return r;
+  };
+  J.materials = mats.out.map(fixTex);
+  J.textures = texs.out.map((t) => ({ ...t, source: imgs.map.get(t.source) }));
+  for (const pr of dstBodyMesh.primitives) {
+    for (const k of Object.keys(pr.attributes)) pr.attributes[k] = accs.map.get(pr.attributes[k]);
+    if (pr.indices !== undefined) pr.indices = accs.map.get(pr.indices);
+    if (pr.material !== undefined) pr.material = mats.map.get(pr.material);
+  }
+  J.skins[0].inverseBindMatrices = accs.map.get(J.skins[0].inverseBindMatrices);
+
+  // ---- 자료 덩어리(bin) 다시 만들기: 쓰는 bufferView 만 ----
+  const oldViews = J.bufferViews;
+  const oldBin = dst.bin;
+  J.bufferViews = [];
+  dst.bin = Buffer.alloc(0);
+  const viewMap = new Map();
+  const copyView = (vi) => {
+    if (viewMap.has(vi)) return viewMap.get(vi);
+    const v = oldViews[vi];
+    const data = oldBin.subarray(v.byteOffset || 0, (v.byteOffset || 0) + v.byteLength);
+    const ni = appendView(dst, Buffer.from(data), v.target);
+    if (v.byteStride) J.bufferViews[ni].byteStride = v.byteStride;
+    viewMap.set(vi, ni);
+    return ni;
+  };
+  J.accessors = accs.out.map((a) => ({ ...a, bufferView: copyView(a.bufferView) }));
+  J.images = imgs.out.map((im) => ({ ...im, bufferView: copyView(im.bufferView) }));
+  console.log('옷만 남김: 조각', dstBodyMesh.primitives.length, '재질', J.materials.length, '그림', J.images.length, '흔들림 사슬', sb.springs.length);
+}
 console.log('저장:', OUT, (fs.statSync(OUT).size / 1e6).toFixed(1) + 'MB');

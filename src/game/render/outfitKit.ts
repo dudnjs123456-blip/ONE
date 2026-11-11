@@ -27,7 +27,7 @@ const SWIM_HIDE = ['Tops_', 'Bottoms_', 'Onepiece_'];
  * 몸의 어디인지(높이·좌우)를 삼각형 안에서 보간해 정한다 → 경계가 매끈하고 모델마다 몸에 맞는다.
  * 옷에 가려져 있던 몸통 그림은 비어 있거나 얼룩이 있어서, 비키니 밖 몸통은 다리에서 뽑은 피부색으로 먼저 채운다.
  */
-function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture, m: Metrics, color: number, root: THREE.Object3D): { map: THREE.Texture; shade: THREE.Texture } | null {
+function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture, m: Metrics, color: number | null, root: THREE.Object3D): { map: THREE.Texture; shade: THREE.Texture } | null {
   const img = src.image as CanvasImageSource & { width: number; height: number };
   const geo = mesh.geometry;
   const uv = geo.attributes.uv;
@@ -83,7 +83,7 @@ function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture
     }
   }
   const skin = sn ? [sr / sn, sg / sn, sb / sn] : [246, 224, 210];
-  const suit = new THREE.Color(color);
+  const suit = new THREE.Color(color ?? 0xffffff);
   const sc = suit.clone().convertLinearToSRGB();
   const suitRgb = [sc.r * 255, sc.g * 255, sc.b * 255];
   // 테두리: 수영복 색을 조금 어둡게 (흰 비키니도 속옷이 아니라 수영복으로 보이게)
@@ -105,6 +105,8 @@ function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture
   const zone = (q: THREE.Vector3) => {
     const dx = Math.abs(q.x - m.cx);
     const y = q.y;
+    // 수영복 없이 피부만 (갈아입는 옷 밑): 원래 속옷 자리만 피부로
+    if (color === null) return y > hipY - 0.3 && y < torsoTop && dx < 0.22 ? 1 : 0;
     const front = q.z > frontZ;
     // 컵: 가슴 가운데를 기준으로 위로 갈수록 좁아지는 삼각형 (앞쪽만)
     if (front && y > cupBot && y < cupBot + cupH) {
@@ -305,22 +307,55 @@ export class OutfitDresser {
   private clothMeshes: THREE.Object3D[] = [];
   private skin: { mesh: THREE.Mesh; mat: ClothMat; origMap: THREE.Texture | null; origShade: THREE.Texture | null }[] = [];
   private swim = '';
+  /** 갈아입는 옷을 입었다 (기본 옷을 감춘다) */
+  private garmentOn = false;
+
+  /** 기본 옷: 비키니나 갈아입는 옷을 입으면 감춘다 */
+  private syncCloth() {
+    for (const o of this.clothMeshes) o.visible = !this.swim && !this.garmentOn;
+  }
+
+  /** 갈아입는 옷을 입었나 (캐릭터가 옷 파일을 다 불러와 붙인 뒤에 부른다) */
+  setGarment(on: boolean) {
+    if (this.garmentOn === on) return;
+    this.garmentOn = on;
+    this.syncCloth();
+    this.syncSkin();
+  }
 
   /** 비키니: 옷을 감추고 피부 그림 위에 수영복을 그린다 (null = 원래대로) */
   private setSwim(c: CosmeticDef | null) {
     const id = c?.id ?? '';
     if (this.swim === id) return;
     this.swim = id;
-    for (const o of this.clothMeshes) o.visible = !c;
+    this.swimColor = c?.color ?? null;
+    this.syncCloth();
+    this.syncSkin();
+  }
+
+  private swimColor: number | null = null;
+  /** 갈아입는 옷 밑 피부 그림 (몸에 그려진 원래 속옷을 피부로 덮은 것) — 한 번 칠해 두고 다시 쓴다 */
+  private skinCover = new Map<THREE.Material, { map: THREE.Texture; shade: THREE.Texture }>();
+
+  /**
+   * 몸 그림: 비키니면 수영복을 그리고, 갈아입는 옷을 입었으면 원래 속옷(검은색)을 피부로 덮는다
+   * (몸이 옷 사이로 살짝 비쳐도 검은 얼룩으로 보이지 않게). 둘 다 아니면 원래 그림.
+   */
+  private syncSkin() {
     for (const k of this.skin) {
-      if (!c || !this.m || !k.origMap?.image) {
+      const cover = this.swimColor === null && this.garmentOn;
+      if ((this.swimColor === null && !cover) || !this.m || !k.origMap?.image) {
         if (k.origMap) k.mat.map = k.origMap;
         if (k.origShade) k.mat.shadeMultiplyTexture = k.origShade;
         continue;
       }
-      const tex = paintSwimsuit(k.mesh, k.mat, k.origMap, this.m, c.color, this.vrm.scene);
-      if (!tex) continue;
-      this.own.push(tex.map, tex.shade);
+      let tex = cover ? this.skinCover.get(k.mat) : undefined;
+      if (!tex) {
+        tex = paintSwimsuit(k.mesh, k.mat, k.origMap, this.m, this.swimColor, this.vrm.scene) ?? undefined;
+        if (!tex) continue;
+        this.own.push(tex.map, tex.shade);
+        if (cover) this.skinCover.set(k.mat, tex);
+      }
       k.mat.map = tex.map;
       if (k.origShade) k.mat.shadeMultiplyTexture = tex.shade;
     }
@@ -333,9 +368,9 @@ export class OutfitDresser {
       const c = COSMETIC_BY_ID[id];
       if (c) want.set(c.slot, c);
     }
-    // 비키니를 입으면 상의·하의 코디는 쓰지 않는다 (옷이 감춰진다)
+    // 비키니를 입으면 상의·하의 코디는 쓰지 않는다 (옷이 감춰진다). 갈아입는 옷도 상의·하의를 다 차지한다
     const swim = want.get('top')?.style === 'bikini' ? want.get('top')! : null;
-    if (swim) {
+    if (swim || want.get('top')?.garment) {
       want.delete('top');
       want.delete('bottom');
     }

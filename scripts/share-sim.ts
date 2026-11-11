@@ -3,6 +3,7 @@
 // - 소파엔 한 명만 눕는다
 // - TV 는 같은 집에 있으면 같은 영상·같은 위치
 import { CityWorld, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
+import { COSMETIC_BY_ID, garmentFor, wearBlock } from '../src/game/data/fashion';
 import type { PlayerProfile } from '../src/game/core/profile';
 import { gameTimeAt } from '../src/game/city/worldClock';
 import { parkPeople, visitorSeats } from '../src/game/city/parkPeople';
@@ -466,4 +467,12 @@ check('A sees B pet', !!pet && pet.sp === 'dog' && pet.x === 1 && pet.z === 2 &&
   ra.room = 'somewhere-else';
   B.receiveMood('a', '울음');
   check('voice: friend in another place hears nothing', heardB.length === 1);
+}
+
+// 갈아입는 옷: 같은 코디면 누구 화면에서든 같은 옷 파일 · 맞는 몸이 아니면 못 입는다
+{
+  check('garment: same outfit → same garment file for everyone', garmentFor(['cap-red', 'set-denim-dress'], 'smallSilverGirl') === '/garments/a3/pinky-denim.vrm');
+  check('garment: plain clothes have no garment file', garmentFor(['tee-pink', 'pants-denim'], 'smallSilverGirl') === null);
+  check('garment: other bodies cannot wear it', !!wearBlock({ body: 'silver' } as never, COSMETIC_BY_ID['set-sporty-white']));
+  check('garment: the fitted body can wear it', wearBlock({ body: 'smallSilverGirl' } as never, COSMETIC_BY_ID['set-sporty-white']) === null);
 }
