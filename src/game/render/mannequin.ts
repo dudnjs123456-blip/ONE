@@ -131,7 +131,7 @@ const EXTENDED: Record<
       shL: -0.85, elL: -2.3, arL: -0.28, shR: -0.8, elR: -2.35, arR: -0.32,
     },
     pose: {
-      hipYaw: -0.55, hpL: -1.75, knL: 0.0, abL: -0.12, lean: -0.3, twist: -0.25, roll: -0.06,
+      hipYaw: -0.05, hpL: -1.75, knL: 0.0, abL: -0.12, lean: -0.3, twist: -0.25, roll: -0.06,
       hpR: 0.15, knR: 0.28, shL: 0.55, elL: -0.35, arL: 0.18, shR: -1.0, elR: -2.3, arR: -0.35,
     },
   },
@@ -147,7 +147,7 @@ const EXTENDED: Record<
       shL: -1.0, elL: -2.25, arL: -0.3, shR: -0.55, elR: -2.2, arR: -0.12,
     },
     pose: {
-      hipYaw: 1.0, hpR: -2.1, knR: 0.04, abR: -0.12, lean: -0.5, twist: 0.55, roll: 0.36,
+      hipYaw: 0.5, hpR: -2.1, knR: 0.04, abR: -0.12, lean: -0.5, twist: 0.55, roll: 0.36,
       shR: 0.7, elR: -0.25, arR: 0.35, shL: -1.05, elL: -2.3, arL: -0.35, hpL: -0.05, knL: 0.25,
     },
   },
@@ -158,7 +158,7 @@ const EXTENDED: Record<
     overshoot: 0.2,
     chamber: { hpR: -1.1, knR: 1.9, twist: -0.2, shL: -0.95, elL: -2.25, arL: -0.3, shR: -0.7, elR: -2.2, arR: -0.2 },
     pose: {
-      hipYaw: 0.45, hpL: -1.15, knL: 1.85, hpR: -1.45, knR: 0.0, abR: -0.12, lean: 0.12, twist: 0.5,
+      hipYaw: 0.0, hpL: -1.15, knL: 1.85, hpR: -1.45, knR: 0.0, abR: -0.12, lean: 0.12, twist: 0.5,
       shR: 0.45, elR: -0.4, arR: 0.25, shL: -1.0, elL: -2.25, arL: -0.32,
     },
   },
@@ -203,7 +203,7 @@ const EXTENDED: Record<
       hpL: -0.88, knL: 1.65, shL: -0.92, elL: -2.05, shR: -0.7, elR: -2.0,
     },
     pose: {
-      hipYaw: 0.72, twist: 0.62, lean: -0.38, roll: 0.16,
+      hipYaw: 0.0, twist: 0.62, lean: -0.38, roll: 0.16,
       hpR: -2.18, knR: 0.02, abR: -0.1, hpL: -0.92, knL: 1.85,
       shR: 0.72, elR: -0.3, arR: 0.32, shL: -1.12, elL: -2.25, arL: -0.32,
     },
@@ -214,8 +214,8 @@ const EXTENDED: Record<
     base: GUARD,
     chamber: { hpR: 0.4, knR: 0.75, abR: 0.15, lean: 0.28, twist: -0.55 },
     pose: {
-      hipYaw: 0.1, twist: 0.3, lean: -0.12, roll: 0.22,
-      hpR: -0.2, knR: 0.03, abR: 1.35, hpL: -0.14, knL: 0.32, abL: 0.06,
+      hipYaw: 0.1, twist: 0.3, lean: -0.1, roll: -0.55,
+      hpR: -0.2, knR: 0.03, abR: 2.3, hpL: -0.14, knL: 0.32, abL: 0.06,
       shL: 0.6, elL: -0.4, arL: 0.25, shR: -0.9, elR: -2.25, arR: -0.32,
     },
   },
@@ -507,7 +507,8 @@ const PLANT: Partial<Pose> = { hpL: -0.14, knL: 0.32, abL: 0.06 };
 
 /**
  * 뒤돌려차기 (지상, 점프 없음): 왼발을 축으로 등 쪽으로 돌면서 오른발을 뒤아래에서 들어
- * 회전과 함께 바깥·위로 휘둘러 올려 머리 높이에서 맞힌다.
+ * 회전과 함께 바깥·위로 휘둘러 올려 머리 위 높이에서 맞힌다.
+ * 몸통을 차는 반대쪽(왼쪽, roll −)으로 크게 눕혀야 다리가 머리 위까지 올라간다.
  */
 function backTurnPose(fr: number, m: MoveDef): Pose {
   const s = m.startup;
@@ -517,14 +518,17 @@ function backTurnPose(fr: number, m: MoveDef): Pose {
     // 축발에 체중을 싣고 어깨를 감으며 뒤를 돌아본다. 오른발은 뒤아래로 빠진다
     [s * 0.3, { ...PLANT, twist: -0.55, hipYaw: -0.2, lean: 0.28, hpR: 0.4, knR: 0.75, abR: 0.15, shL: -0.9, elL: -2.2, shR: -0.7, elR: -2.2 }],
     // 등이 상대를 향함: 다리를 펴며 낮은 곳에서 바깥으로 들어 올리기 시작
-    [s * 0.65, { ...PLANT, twist: -0.1, lean: 0.3, roll: 0.08, hpR: 0.15, knR: 0.45, abR: 0.6, shL: -0.4, elL: -1.6, shR: -0.8, elR: -2.2 }],
-    // 타격: 옆으로 선 채 다리를 쭉 펴 머리 높이까지 올려 찬다
-    [s, { ...PLANT, twist: 0.3, hipYaw: 0.1, lean: -0.12, roll: 0.22, hpR: -0.2, knR: 0.03, abR: 1.35, shL: 0.6, elL: -0.4, arL: 0.25, shR: -0.9, elR: -2.25, arR: -0.32 }],
-    // 회전이 이어지며 발끝이 더 위로 빠져나간다
-    [e + 1, { ...PLANT, twist: 0.35, hipYaw: 0.12, lean: -0.18, roll: 0.26, hpR: -0.28, knR: 0.08, abR: 1.5, shL: 0.5, elL: -0.5, arL: 0.25, shR: -0.9, elR: -2.25, arR: -0.32 }],
-    // 무릎을 접으며 다리를 내린다
-    [e + 9, { ...PLANT, lean: 0.12, roll: 0.06, twist: 0, hpR: -0.5, knR: 1.6, abR: 0.45 }],
-    [e + 20, { hpR: 0.1, knR: 0.6, abR: 0.15 }],
+    [s * 0.65, { ...PLANT, abL: 0.21, twist: -0.1, lean: 0.25, roll: -0.15, hpR: 0.15, knR: 0.4, abR: 0.6, shL: -0.4, elL: -1.6, shR: -0.8, elR: -2.2 }],
+    // 몸을 왼쪽으로 기울이는 만큼(roll) 디딤다리는 반대로 벌려(abL) 땅에 수직으로 세운다
+    // 몸을 왼쪽으로 눕히며 다리가 어깨 높이를 지나 계속 올라간다
+    [s * 0.85, { ...PLANT, abL: 0.44, twist: 0.15, hipYaw: 0.05, lean: 0.05, roll: -0.38, hpR: -0.05, knR: 0.12, abR: 1.5, shL: 0.3, elL: -0.8, arL: 0.2, shR: -0.85, elR: -2.2 }],
+    // 타격: 옆으로 누운 몸에서 다리를 쭉 펴 머리 위까지 올려 찬다
+    [s, { ...PLANT, abL: 0.66, twist: 0.3, hipYaw: 0.1, lean: -0.1, roll: -0.6, hpR: -0.2, knR: 0.03, abR: 2.2, shL: 0.6, elL: -0.4, arL: 0.45, shR: -0.9, elR: -2.25, arR: -0.32 }],
+    // 회전이 이어지며 발끝이 위로 빠져나간다
+    [e + 1, { ...PLANT, abL: 0.68, twist: 0.35, hipYaw: 0.12, lean: -0.12, roll: -0.62, hpR: -0.28, knR: 0.06, abR: 2.3, shL: 0.5, elL: -0.5, arL: 0.45, shR: -0.9, elR: -2.25, arR: -0.32 }],
+    // 무릎을 접으며 다리를 천천히 내리고 몸을 세운다
+    [e + 12, { ...PLANT, abL: 0.21, lean: 0.12, roll: -0.15, twist: 0, hpR: -0.5, knR: 1.6, abR: 0.7 }],
+    [e + 24, { hpR: 0.1, knR: 0.6, abR: 0.15 }],
     [totalFrames(m), {}],
   ]);
 }
@@ -659,7 +663,7 @@ export function backTurnSpin(f: Fighter, sub = 0): number {
   if (f.state !== 'attack' || move?.anim !== 'backTurnKick') return 0;
   const fr = Math.max(0, f.frame + sub);
   const activeEnd = move.startup + move.active - 1;
-  const spinEnd = activeEnd + 14;
+  const spinEnd = activeEnd + 18;
   const impactSpin = (3 * Math.PI) / 2;
   // 처음엔 천천히 감다가 타격 직전에 가장 빠르게 돈다
   if (fr <= move.startup) return -impactSpin * Math.pow(fr / move.startup, 1.8);
@@ -992,7 +996,8 @@ export class Mannequin implements CharacterView {
     this.root.position.set(lp.x + pivot.x, lp.y, lp.z + pivot.z);
     this.root.rotation.y = yaw + spin;
 
-    const standY = Math.max(legHeight(p.hpL, p.knL, p.abL), legHeight(p.hpR, p.knR, p.abR)) + 0.06;
+    // 다리의 실제 벌림 = 다리 벌림 + 몸 기울기(roll). 몸을 기울이며 디딤다리를 세우면 키가 줄지 않는다
+    const standY = Math.max(legHeight(p.hpL, p.knL, p.abL + p.roll), legHeight(p.hpR, p.knR, p.abR - p.roll)) + 0.06;
     const anchor = supportFootAnchor(f, p, bank, legs, c.sub);
     this.body.position.x = anchor.x;
     this.body.position.z = anchor.z;

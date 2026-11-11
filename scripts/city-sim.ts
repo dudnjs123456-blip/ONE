@@ -1630,7 +1630,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
     if (pz.rise > 0.001 || pz.knL > 0.7) grounded = false;
   }
   check('small silver girl: back-turn kick keeps the support foot planted (no jump)', grounded);
-  backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup + MOVES.smallSilverBackTurnKick.active - 1 + 14;
+  backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup + MOVES.smallSilverBackTurnKick.active - 1 + 18;
   check('small silver girl: back-turn kick completes one full turn', Math.abs(backTurnSpin(backTurn.player) + Math.PI * 2) < 0.01);
 
   for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {

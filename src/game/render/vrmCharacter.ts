@@ -469,7 +469,7 @@ export class VrmCharacter implements CharacterView {
     // 골반 높이: 다리 각도로 발이 바닥에 닿는 높이를 계산 (누우면 바닥 가까이)
     const { thigh, shin, hipsY } = this.rig;
     const ext = (hp: number, kn: number, ab: number) => (thigh * Math.cos(hp) + shin * Math.cos(hp + kn)) * Math.cos(ab);
-    const grounded = hipsY - (thigh + shin - Math.max(ext(p.hpL, p.knL, p.abL), ext(p.hpR, p.knR, p.abR)));
+    const grounded = hipsY - (thigh + shin - Math.max(ext(p.hpL, p.knL, p.abL + p.roll), ext(p.hpR, p.knR, p.abR - p.roll)));
     const hips = bone('hips')!;
     hips.position.y = grounded * (1 - p.drop) + 0.12 * p.drop;
     hips.rotation.set(p.tilt, p.hipYaw, p.roll + bank);

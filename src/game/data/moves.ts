@@ -207,8 +207,9 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
   },
   smallSilverBackTurnKick: {
     name: '은빛 뒤돌려차기', notation: '캐릭터 스킬', input: null, characterOnly: true,
-    startup: 16, active: 4, recovery: 32, damage: 26, level: 'mid', weighty: true,
-    range: 1.5, tracking: 0.65, onBlock: -14, onHit: 3, pushback: 0.75, launch: 0.12, anim: 'backTurnKick',
+    // 크게 돌며 머리 위까지 올려 차는 만큼 느리다 (발생 24F)
+    startup: 24, active: 5, recovery: 38, damage: 26, level: 'mid', weighty: true,
+    range: 1.5, tracking: 0.65, onBlock: -16, onHit: 3, pushback: 0.75, launch: 0.12, anim: 'backTurnKick',
   },
 
   // ───── 보스 전용 (input: null → 플레이어는 못 씀, AI 가 직접 발동) ─────
