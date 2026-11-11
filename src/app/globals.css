@@ -10,7 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-title: var(--font-cloud);
+  --font-title: var(--font-logo);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -27,7 +27,7 @@ body {
 }
 
 /* =========================================================
-   Together 귀여운 테마 — 검은 밤하늘, 별, 위쪽의 은은한 구름
+   Together 귀여운 테마 — 검은 밤하늘, 별, 위쪽에서 흘러가는 구름
    메뉴·로그인 화면이 함께 쓴다
    ========================================================= */
 .tg-sky {
@@ -36,20 +36,8 @@ body {
   color: #fff;
   isolation: isolate;
   background:
-    /* 위쪽 은은한 구름: 동그란 뭉치를 겹쳐 몽실한 구름 모양을 만든다 */
-    radial-gradient(circle 6vw at 8% 9%, rgba(215, 210, 255, 0.09) 0%, rgba(215, 210, 255, 0.05) 45%, transparent 72%),
-    radial-gradient(circle 7.5vw at 14% 6%, rgba(215, 210, 255, 0.1) 0%, rgba(215, 210, 255, 0.055) 45%, transparent 72%),
-    radial-gradient(circle 6vw at 21% 9%, rgba(215, 210, 255, 0.09) 0%, rgba(215, 210, 255, 0.05) 45%, transparent 72%),
-    radial-gradient(circle 9vw at 14% 12%, rgba(215, 210, 255, 0.06) 0%, rgba(215, 210, 255, 0.033) 45%, transparent 72%),
-    radial-gradient(circle 6.5vw at 66% 5%, rgba(215, 210, 255, 0.09) 0%, rgba(215, 210, 255, 0.05) 45%, transparent 72%),
-    radial-gradient(circle 8vw at 73% 3%, rgba(215, 210, 255, 0.1) 0%, rgba(215, 210, 255, 0.055) 45%, transparent 72%),
-    radial-gradient(circle 6vw at 81% 6%, rgba(215, 210, 255, 0.09) 0%, rgba(215, 210, 255, 0.05) 45%, transparent 72%),
-    radial-gradient(circle 10vw at 74% 9%, rgba(215, 210, 255, 0.06) 0%, rgba(215, 210, 255, 0.033) 45%, transparent 72%),
-    radial-gradient(circle 4.5vw at 40% 15%, rgba(215, 210, 255, 0.06) 0%, rgba(215, 210, 255, 0.033) 45%, transparent 72%),
-    radial-gradient(circle 5.5vw at 45% 13%, rgba(215, 210, 255, 0.07) 0%, rgba(215, 210, 255, 0.039) 45%, transparent 72%),
-    radial-gradient(circle 4.5vw at 50% 15%, rgba(215, 210, 255, 0.06) 0%, rgba(215, 210, 255, 0.033) 45%, transparent 72%),
-    radial-gradient(circle 4vw at 93% 15%, rgba(215, 210, 255, 0.05) 0%, rgba(215, 210, 255, 0.028) 45%, transparent 72%),
-    radial-gradient(circle 5vw at 97% 13%, rgba(215, 210, 255, 0.06) 0%, rgba(215, 210, 255, 0.033) 45%, transparent 72%),
+    /* 위쪽 옅은 안개 */
+    radial-gradient(70% 22% at 50% 0%, rgba(190, 185, 255, 0.08), transparent 70%),
     /* 검은 밤하늘 */
     linear-gradient(180deg, #06060d 0%, #07070f 45%, #0c0b18 100%);
   background-attachment: fixed;
@@ -86,7 +74,7 @@ body {
 
 /* 제목: 말랑한 글꼴 + 분홍·노랑 그라데이션 + 보라 그림자 */
 .tg-title {
-  font-family: var(--font-cloud), "Sniglet", ui-rounded, system-ui, sans-serif;
+  font-family: var(--font-logo), "Nothing You Could Do", cursive, system-ui, sans-serif;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.01em;
@@ -188,4 +176,52 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tg-sky::after { animation: none; }
   .tg-btn, .tg-cta { transition: none; }
+}
+
+/* 흘러가는 구름 (SkyClouds) — 동그란 뭉치 세 개 + 납작한 바닥을 겹쳐 몽실한 구름 모양 */
+.tg-clouds {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 38vh;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  -webkit-mask-image: linear-gradient(180deg, black 55%, transparent 100%);
+  mask-image: linear-gradient(180deg, black 55%, transparent 100%);
+}
+.tg-cloud {
+  position: absolute;
+  left: 0;
+  width: 8em;
+  height: 3.4em;
+  --c: rgb(226, 222, 255);
+  background:
+    radial-gradient(circle 1.35em at 2.2em 2.1em, var(--c) 96%, transparent 100%),
+    radial-gradient(circle 1.85em at 3.9em 1.75em, var(--c) 96%, transparent 100%),
+    radial-gradient(circle 1.45em at 5.6em 2.15em, var(--c) 96%, transparent 100%),
+    radial-gradient(ellipse 3.3em 0.95em at 3.9em 2.55em, var(--c) 96%, transparent 100%);
+  filter: blur(0.35em);
+  animation-name: tg-drift, tg-bob;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  will-change: transform;
+}
+@keyframes tg-drift {
+  from { translate: -10em 0; }
+  to { translate: calc(100vw + 2em) 0; }
+}
+@keyframes tg-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(0.25em); }
+}
+/* 로고 반짝이 */
+.tg-sparkle { animation: tg-sparkle 2.6s ease-in-out infinite; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.9)); }
+.tg-sparkle + .tg-sparkle { animation-delay: -1.3s; }
+@keyframes tg-sparkle {
+  0%, 100% { opacity: 0.35; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-cloud { animation: none; translate: var(--x, 0) 0; }
+  .tg-sparkle { animation: none; }
 }

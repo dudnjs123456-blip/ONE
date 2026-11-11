@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Sniglet } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -7,11 +8,11 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-// 게임 제목용 글꼴: 구름처럼 동글동글한 Sniglet
-const cloudFont = Sniglet({
-  variable: "--font-cloud",
-  subsets: ["latin"],
-  weight: ["800"],
+// 게임 제목용 글꼴: 손글씨 Nothing You Could Do (SIL OFL, 저장소에 포함 — 인터넷 없이도 같은 모양)
+const logoFont = localFont({
+  src: "./fonts/NothingYouCouldDo-Regular.ttf",
+  variable: "--font-logo",
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -42,7 +43,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${cloudFont.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${logoFont.variable} antialiased`}
       >
         {children}
       </body>

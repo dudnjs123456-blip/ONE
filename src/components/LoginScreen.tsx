@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { signIn, signUp, type Account } from '@/game/net/auth';
-import CloudTitle from './CloudTitle';
+import GameTitle from './GameTitle';
+import SkyClouds from './SkyClouds';
 
 /** 접속하면 처음 보는 화면: 아이디·비밀번호로 로그인 (또는 가입) */
 export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => void }) {
@@ -27,9 +28,10 @@ export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => vo
 
   return (
     <main className="tg-sky flex items-center justify-center px-6">
-      <div className="w-full max-w-sm">
-        <h1 className="-mx-12">
-          <CloudTitle />
+      <SkyClouds />
+      <div className="relative z-10 w-full max-w-sm">
+        <h1>
+          <GameTitle size="md" />
         </h1>
         <p className="tg-subtitle mt-5 text-center text-sm">로그인하면 내 캐릭터와 기록을 그대로 이어서 할 수 있어요</p>
 

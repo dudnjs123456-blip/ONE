@@ -6,7 +6,8 @@ import type { MatchMode } from '@/game/core/match';
 import { loadLegacyProfile, loadProfile, loadStoredProfile, newProfile, saveProfile, setProfileAccount, type PlayerProfile } from '@/game/core/profile';
 import { currentAccount, signOut, type Account } from '@/game/net/auth';
 import LoginScreen from './LoginScreen';
-import CloudTitle from './CloudTitle';
+import GameTitle from './GameTitle';
+import SkyClouds from './SkyClouds';
 import KeySettings from './KeySettings';
 import TouchGuide from './TouchGuide';
 import { notationArrows } from '@/game/data/notation';
@@ -238,6 +239,7 @@ export default function Game() {
 
   return (
     <main className="tg-sky px-6 py-12">
+      <SkyClouds />
       {/*
         오른쪽 아래 캐릭터 (서울 거리 배경이 있는 그림, 두 겹)
         1) 같은 그림을 크게 흐리게 번진 복사본 — 그림 속 밤거리 색이 검은 배경 쪽으로 퍼져 나가 경계를 감춘다
@@ -245,7 +247,7 @@ export default function Game() {
       */}
       <div
         aria-hidden
-        className="pointer-events-none fixed bottom-0 right-0 z-0 hidden h-[74vh] w-[calc(52vh*843/1264*2.1)] opacity-50 md:block xl:opacity-80"
+        className="pointer-events-none fixed bottom-0 right-0 z-0 hidden h-[74vh] w-[calc(52vh*843/1264*2.1)] opacity-60 md:block xl:opacity-90"
         style={{
           backgroundImage: 'url(/images/menu-character-city.webp)',
           backgroundSize: 'cover',
@@ -257,31 +259,32 @@ export default function Game() {
       />
       <div
         aria-hidden
-        className="pointer-events-none fixed bottom-0 -right-8 z-0 hidden h-[52vh] w-[calc(52vh*843/1264)] opacity-60 md:block xl:opacity-100"
+        className="pointer-events-none fixed bottom-0 -right-8 z-0 hidden h-[52vh] w-[calc(52vh*843/1264)] opacity-75 md:block xl:opacity-100"
         style={{
           backgroundImage: 'url(/images/menu-character-city.webp)',
           backgroundSize: 'cover',
           backgroundPosition: 'center bottom',
-          maskImage: 'radial-gradient(ellipse 50% 62% at 50% 62%, black 58%, transparent 100%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 50% 62% at 50% 62%, black 58%, transparent 100%)',
+          filter: 'saturate(1.08) contrast(1.05) drop-shadow(0 0 22px rgba(255, 220, 240, 0.18))',
+          maskImage: 'radial-gradient(ellipse 52% 70% at 50% 64%, black 64%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 52% 70% at 50% 64%, black 64%, transparent 100%)',
         }}
       />
-      {/* 왼쪽 아래 두 번째 캐릭터 (한복): 동그란 수묵화 배경이 달처럼 은은하게 번진다 */}
+      {/* 왼쪽 아래 두 번째 캐릭터 (한복): 동그란 수묵화 배경, 주인공보다 한발 물러나 은은하게 */}
       <div
         aria-hidden
-        className="pointer-events-none fixed bottom-0 left-6 z-0 hidden h-[34vh] w-[calc(34vh*821/1228)] opacity-60 md:block xl:opacity-100"
+        className="pointer-events-none fixed bottom-0 left-6 z-0 hidden h-[34vh] w-[calc(34vh*821/1228)] opacity-35 md:block xl:opacity-50"
         style={{
           backgroundImage: 'url(/images/menu-character-2.webp)',
           backgroundSize: 'contain',
           backgroundRepeat: 'no-repeat',
           backgroundPosition: 'center bottom',
-          filter: 'brightness(0.92) drop-shadow(0 0 18px rgba(220, 210, 255, 0.25))',
+          filter: 'brightness(0.85) saturate(0.8) blur(0.5px)',
         }}
       />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
       <div className="relative z-10 mx-auto max-w-4xl">
         <h1>
-          <CloudTitle />
+          <GameTitle size="lg" />
         </h1>
         <p className="tg-subtitle mt-5 text-center">✨ 같이 살고, 같이 싸우는 서울 이야기 ✨</p>
 
