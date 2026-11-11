@@ -379,10 +379,13 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
           return;
         }
       }
-      // 숫자 키 1~9: 기분에 맞는 대사 (머리 위 말풍선은 같은 곳의 마을 사람들에게도 보인다)
+      // 숫자 키 1~9: 기분에 맞는 대사 + 3D 얼굴 표정 (말풍선·표정은 같은 곳의 마을 사람들에게도 보인다)
       const ml = !e.repeat && !world.dialog && !world.staffTalk ? moodLineKey(e.code) : null;
       if (ml) {
-        if (world.postChat(MOOD_LINES[ml - 1].text) === null) setMoodPop({ n: ml, at: Date.now() });
+        if (world.postChat(MOOD_LINES[ml - 1].text) === null) {
+          world.postMood(MOOD_LINES[ml - 1].mood);
+          setMoodPop({ n: ml, at: Date.now() });
+        }
         return;
       }
       if (e.code === 'KeyM' && !e.repeat && !world.dialog) setBigMap((v) => !v);

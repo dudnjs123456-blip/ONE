@@ -27,6 +27,8 @@ import { bodyUrl, playerLook } from './looks';
 import { wornList } from '../data/fashion';
 import { HEROINE, type CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
+import { MOOD_LINE_MS } from '../data/moodLines';
+import type { PlayerMood } from '../data/npcs';
 import { GroundKit, type GroundKind } from './groundKit';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { FacadeKit, villaSet, type FacadeSet } from './facadeKit';
@@ -739,6 +741,11 @@ export class CityRenderer {
     const nowMs = performance.now();
     for (const c of world.chatBubbles.splice(0)) if (c.emote) this.chatBubbles.addEmote(c.who, c.text, nowMs);
       else this.chatBubbles.add(c.who, c.name, c.text, nowMs);
+    // 숫자 키 대사의 표정: 나 또는 그 친구의 3D 얼굴이 잠깐 그 표정을 짓는다
+    for (const f of world.faces.splice(0)) {
+      const v = (f.who === 'me' ? this.player : this.remoteViews.get(f.who)?.view) as { setFace?(m: PlayerMood, ms: number): void } | undefined;
+      v?.setFace?.(f.mood, MOOD_LINE_MS);
+    }
     const chatScene = this.sceneOf(view);
     if (this.chatBubbles.layer.parent !== chatScene) chatScene.add(this.chatBubbles.layer);
     this.chatBubbles.update(nowMs, (who) => {

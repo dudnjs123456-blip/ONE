@@ -116,7 +116,7 @@ export const MOM: NpcDef = {
 ## 출력 항목
 - reply: 엄마의 대사.
 - emotion: 지금 엄마의 표정 하나.
-- playerMood: 자식의 마지막 말에서 느껴지는 자식의 기분 하나 (기본·웃음·울음·화남·놀람·부끄러움). 평범하면 기본.
+- playerMood: 자식의 마지막 말에서 느껴지는 자식의 기분 하나 (기본·웃음·울음·화남·놀람·부끄러움·윙크·졸림·고민). 평범하면 기본.
 - affinity: 이번 말로 엄마 마음이 얼마나 따뜻해졌는지 -3 ~ +3 (평범하면 0, 다정하면 +1~+2, 버릇없으면 음수).
 - memory: 이번 대화에서 다음에도 기억해 둘 만한 것을 30자 이내 한 줄로. 별 내용 없으면 빈 문자열.
 - gift: 지금 밥을 차려 주면 true.`,
@@ -135,7 +135,7 @@ export const MOM: NpcDef = {
 export const TALK_NPCS: Record<string, NpcDef> = { [SENIOR_GUARD.id]: SENIOR_GUARD, [MOM.id]: MOM };
 
 /** 대화할 때 플레이어 쪽 기분 (스탠딩 일러스트 표정을 고른다) */
-export const PLAYER_MOODS = ['기본', '웃음', '울음', '화남', '놀람', '부끄러움'] as const;
+export const PLAYER_MOODS = ['기본', '웃음', '울음', '화남', '놀람', '부끄러움', '윙크', '졸림', '고민'] as const;
 export type PlayerMood = (typeof PLAYER_MOODS)[number];
 
 export const NPC_EMOTIONS = ['평온', '기쁨', '웃음', '걱정', '짜증', '진지', '졸림'] as const;

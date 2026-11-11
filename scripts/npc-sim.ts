@@ -1,6 +1,9 @@
 // 박 반장 대화 헤드리스 검증: npx tsx scripts/npc-sim.ts
 import { CityWorld, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import { applyReply, ask, buildContext, greeting } from '../src/game/city/npcChat';
+import { MOOD_LINES } from '../src/game/data/moodLines';
+import { PLAYER_PORTRAITS } from '../src/game/data/portraits';
+import { MOOD_FACE } from '../src/game/render/moodFace';
 
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`);
@@ -83,3 +86,11 @@ for (let i = 0; i < 60 * 12; i++) w.step();
 const pp = w.seniorAI.poi();
 check('while patrolling the talk spot follows him', !pp || (pp.label.includes('순찰') && Math.hypot(pp.x - w.senior.x, pp.z - w.senior.z) < 1e-6), w.seniorAI.status);
 })();
+
+// 숫자 키 1~9 대사: 키마다 다른 기분 · 그 기분의 상반신 그림과 3D 표정이 다 있다
+{
+  const moods = MOOD_LINES.map((l) => l.mood);
+  check('mood lines: 9 keys, 9 different moods', moods.length === 9 && new Set(moods).size === 9, `(${moods.join(',')})`);
+  check('mood lines: every mood has a portrait', moods.every((m) => !!PLAYER_PORTRAITS.smallSilverGirl[m]));
+  check('mood lines: every mood has a 3D face', moods.every((m) => !!MOOD_FACE[m]));
+}

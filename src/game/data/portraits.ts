@@ -12,6 +12,9 @@ export const PLAYER_PORTRAITS: Record<string, Partial<Record<PlayerMood, string>
     화남: '/portraits/smallSilverGirl/angry.png',
     놀람: '/portraits/smallSilverGirl/surprised.png',
     부끄러움: '/portraits/smallSilverGirl/shy.png',
+    윙크: '/portraits/smallSilverGirl/wink.png',
+    졸림: '/portraits/smallSilverGirl/sleepy.png',
+    고민: '/portraits/smallSilverGirl/think.png',
   },
 };
 

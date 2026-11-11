@@ -429,3 +429,18 @@ check('A sees B pet', !!pet && pet.sp === 'dog' && pet.x === 1 && pet.z === 2 &&
   check('park people: both players see the same visitors', JSON.stringify(parkPeople(A.parkClock())) === JSON.stringify(parkPeople(B.parkClock())));
   check('park people: same visitor seats on the coaster', [...visitorSeats('coaster', A.parkClock())].join() === [...visitorSeats('coaster', B.parkClock())].join());
 }
+
+// 숫자 키 대사 표정: A 가 지은 표정이 B 화면의 A 얼굴에도 똑같이 (모르는 기분은 버린다)
+{
+  const A = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) }, newProfile(), 21);
+  const B = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) }, newProfile(), 22);
+  A.postMood('윙크');
+  const sent = A.moodOut.splice(0);
+  for (const m of sent) B.receiveMood('a', m);
+  check('mood: my own face changes', A.faces.some((f) => f.who === 'me' && f.mood === '윙크'));
+  check('mood: friend sees the same face', B.faces.length === 1 && B.faces[0].who === 'a' && B.faces[0].mood === '윙크');
+  B.faces.length = 0;
+  B.receiveMood('a', '<script>');
+  B.receiveMood('a', 3);
+  check('mood: unknown moods are ignored', B.faces.length === 0);
+}

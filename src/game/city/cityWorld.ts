@@ -9,6 +9,7 @@ import { BODY_SPECS, bodySpecFor } from '../data/bodies';
 import { ITEMS, ITEM_IDS } from '../data/items';
 import { SHOPS, type ShopDef } from '../data/shops';
 import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine } from './chat';
+import { PLAYER_MOODS, type PlayerMood } from '../data/npcs';
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
@@ -770,6 +771,10 @@ export class CityWorld {
   chatBubbles: { who: string; name: string; text: string; emote?: boolean }[] = [];
   /** 보낼 감정 표현 (마을 연결이 가져가서 보낸다) */
   emoteOut: string[] = [];
+  /** 3D 얼굴 표정으로 띄울 것 (화면이 가져간다). who = 'me' 또는 친구 id */
+  faces: { who: string; mood: PlayerMood }[] = [];
+  /** 보낼 표정 (마을 연결이 가져가서 보낸다) */
+  moodOut: PlayerMood[] = [];
   private lastEmoteAt = -Infinity;
   private lastChatAt = -Infinity;
   /** 지금 들어가 있는 집의 주인 (null = 내 집) */
@@ -2195,6 +2200,17 @@ export class CityWorld {
     this.chatBubbles.push({ who: 'me', name: this.netName || '나', text: e, emote: true });
     this.emoteOut.push(e);
     return true;
+  }
+
+  /** 숫자 키 대사의 표정: 내 3D 얼굴에 짓고 마을로 보낸다 (같은 곳의 친구 화면에서도 같은 표정) */
+  postMood(mood: PlayerMood) {
+    this.faces.push({ who: 'me', mood });
+    this.moodOut.push(mood);
+  }
+
+  /** 친구가 지은 표정 (목록에 있는 기분만) */
+  receiveMood(id: string, mood: unknown) {
+    if ((PLAYER_MOODS as readonly unknown[]).includes(mood)) this.faces.push({ who: id, mood: mood as PlayerMood });
   }
 
   /** 친구의 감정 표현 (목록에 있는 이모지만) */

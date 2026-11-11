@@ -6,6 +6,8 @@ import type { Fighter } from '../core/fighter';
 import { smooth, type FrameClock } from './clock';
 import { track } from './loadTracker';
 import { OutfitDresser, keepFieldOutline } from './outfitKit';
+import { FACE_KEYS, MOOD_FACE, eyesBusy, type FaceKey } from './moodFace';
+import type { PlayerMood } from '../data/npcs';
 import {
   CLIP_BONES,
   CLIP_PARENTS,
@@ -404,6 +406,10 @@ export class VrmCharacter implements CharacterView {
   /** 코디 (모델을 불러오기 전에 정해지면 기다렸다 입힌다) */
   private dresser: OutfitDresser | null = null;
   private outfit: string[] = [];
+  /** 숫자 키 대사 등으로 잠깐 짓는 표정 (until = performance.now 기준) */
+  private faceMood: { mood: PlayerMood; until: number } | null = null;
+  /** 지금 섞여 있는 표정 값 (부드럽게 바뀌도록) */
+  private faceNow: Partial<Record<FaceKey, number>> = {};
 
   // 모션캡처 클립 재생 상태
   private lib: ClipLibrary | null = null;
@@ -531,10 +537,26 @@ export class VrmCharacter implements CharacterView {
       const blink = (t + this.blinkSeed) % 230 < 6;
       const sf = this.sofaFace as VrmCharacter['sofaFace']; // applySofa 가 바꿨을 수 있다
       const asleep = sf ? sf.blink > 0.5 : !!this.rest && this.rest.t > 0.85;
-      em.setValue('blink', hurt || down || blink || asleep ? 1 : 0);
-      em.setValue('angry', f.state === 'attack' ? 0.7 : 0);
-      em.setValue('aa', f.state === 'attack' && f.isInActiveFrames() ? 0.6 : hurt ? 0.5 : (sf?.aa ?? 0));
-      em.setValue('happy', sf?.happy ?? 0);
+      // 기분 표정 (숫자 키 대사): 맞거나 공격하거나 소파 동작 중이 아닐 때만
+      const fm = this.faceMood;
+      if (fm && performance.now() > fm.until) this.faceMood = null;
+      const mood = this.faceMood && !hurt && !down && !asleep && !sf && f.state !== 'attack' ? MOOD_FACE[this.faceMood.mood] : null;
+      const want: Partial<Record<FaceKey, number>> = mood
+        ? { ...mood, blink: Math.max(mood.blink ?? 0, blink && !eyesBusy(mood) ? 1 : 0) }
+        : {
+            blink: hurt || down || blink || asleep ? 1 : 0,
+            angry: f.state === 'attack' ? 0.7 : 0,
+            aa: f.state === 'attack' && f.isInActiveFrames() ? 0.6 : hurt ? 0.5 : (sf?.aa ?? 0),
+            happy: sf?.happy ?? 0,
+          };
+      // 깜빡임은 바로, 나머지 표정은 몇 프레임에 걸쳐 바뀐다
+      for (const k of FACE_KEYS) {
+        const target = want[k] ?? 0;
+        const cur = this.faceNow[k] ?? 0;
+        const v = k === 'blink' && !mood ? target : cur + (target - cur) * 0.25;
+        this.faceNow[k] = Math.abs(v - target) < 0.01 ? target : v;
+        em.setValue(k, this.faceNow[k]!);
+      }
     }
 
     updateMToonRim(this.rims);
@@ -791,6 +813,11 @@ export class VrmCharacter implements CharacterView {
     }
   }
 
+  /** ms 동안 이 기분의 표정을 짓는다 (숫자 키 대사) */
+  setFace(mood: PlayerMood, ms: number) {
+    this.faceMood = MOOD_FACE[mood] ? { mood, until: performance.now() + ms } : null;
+  }
+
   /** 코디 옷 입히기 (data/fashion id 목록) */
   setOutfit(ids: string[]) {
     this.outfit = ids;
@@ -900,7 +927,7 @@ export class VrmCharacter implements CharacterView {
 }
 
 /** 외형 정의로 캐릭터 표현을 만든다 */
-export function createCharacter(look: number | Appearance): CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void; loaded?: boolean } {
+export function createCharacter(look: number | Appearance): CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void; setFace?(mood: PlayerMood, ms: number): void; loaded?: boolean } {
   if (typeof look !== 'number' && look.kind === 'vrm') {
     const v = new VrmCharacter(look.url, look.fallback, look.tint);
     if (look.outfit?.length) v.setOutfit(look.outfit);
