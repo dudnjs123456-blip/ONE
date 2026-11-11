@@ -239,7 +239,7 @@ export default function Game() {
   return (
     <main className="tg-sky px-6 py-12">
       {/* 오른쪽 아래 캐릭터 (배경 없는 그림): 뒤쪽 후광 + 발밑 그림자로 밤하늘 위에 자연스럽게 세운다 */}
-      <div aria-hidden className="pointer-events-none fixed bottom-4 right-8 z-0 hidden h-[64vh] w-[calc(64vh*432/1211)] opacity-60 md:block xl:opacity-100">
+      <div aria-hidden className="pointer-events-none fixed bottom-6 right-16 z-0 hidden h-[44vh] w-[calc(44vh*432/1211)] opacity-60 md:block xl:opacity-100">
         {/* 후광 */}
         <div
           className="absolute left-1/2 top-[38%] h-[85%] w-[260%] -translate-x-1/2 -translate-y-1/2 rounded-full"
@@ -262,6 +262,18 @@ export default function Game() {
           }}
         />
       </div>
+      {/* 왼쪽 아래 두 번째 캐릭터 (한복): 동그란 수묵화 배경이 달처럼 은은하게 번진다 */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed bottom-0 left-6 z-0 hidden h-[34vh] w-[calc(34vh*821/1228)] opacity-60 md:block xl:opacity-100"
+        style={{
+          backgroundImage: 'url(/images/menu-character-2.webp)',
+          backgroundSize: 'contain',
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center bottom',
+          filter: 'brightness(0.92) drop-shadow(0 0 18px rgba(220, 210, 255, 0.25))',
+        }}
+      />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
       <div className="relative z-10 mx-auto max-w-4xl">
         <h1>

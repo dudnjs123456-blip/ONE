@@ -28,7 +28,7 @@ export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => vo
   return (
     <main className="tg-sky flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <h1>
+        <h1 className="-mx-12">
           <CloudTitle />
         </h1>
         <p className="tg-subtitle mt-5 text-center text-sm">로그인하면 내 캐릭터와 기록을 그대로 이어서 할 수 있어요</p>
