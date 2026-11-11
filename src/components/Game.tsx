@@ -164,23 +164,23 @@ export default function Game() {
   if (gate === 'busy' || gate === 'kicked') {
     const acc = gate === 'busy' ? pending : account;
     return (
-      <main className="flex min-h-screen items-center justify-center bg-black p-6 text-white">
-        <div className="max-w-md rounded-xl border border-white/15 bg-white/5 p-6 text-center">
+      <main className="tg-sky flex items-center justify-center p-6">
+        <div className="tg-card max-w-md p-6 text-center">
           <div className="mb-2 text-3xl">{gate === 'busy' ? '🔒' : '🔌'}</div>
           <div className="mb-2 text-lg font-bold">{gate === 'busy' ? '이미 다른 창에서 접속 중이에요' : '다른 창에서 접속해서 여기는 끊겼어요'}</div>
-          <div className="mb-5 text-sm text-white/60">
+          <div className="tg-muted mb-5 text-sm">
             한 아이디는 한 곳에서만 접속할 수 있어요{acc ? ` (${acc.username})` : ''}.
             <br />
             {gate === 'busy' ? '다른 창을 닫고 다시 시도하거나, 여기서 접속하면 다른 창은 끊겨요.' : '여기서 다시 접속하면 다른 창이 끊겨요.'}
           </div>
           <div className="flex flex-col gap-2">
             {gate === 'busy' && acc && (
-              <button onClick={() => void enter(acc)} className="rounded-lg bg-white/10 py-2 text-sm hover:bg-white/20">
+              <button onClick={() => void enter(acc)} className="rounded-full bg-white/15 py-2 text-sm font-bold hover:bg-white/25">
                 다시 시도
               </button>
             )}
             {acc && (
-              <button onClick={() => void enter(acc, true)} className="rounded-lg bg-amber-500 py-2 text-sm font-bold text-black hover:bg-amber-400">
+              <button onClick={() => void enter(acc, true)} className="tg-cta text-sm">
                 여기서 접속하기 (다른 창은 끊겨요)
               </button>
             )}
@@ -193,7 +193,7 @@ export default function Game() {
     );
   }
   if (gate === 'checking')
-    return <main className="flex min-h-screen items-center justify-center bg-black text-white/60">불러오는 중…</main>;
+    return <main className="tg-sky tg-muted flex items-center justify-center">불러오는 중… ✨</main>;
 
   const go = (next: Screen) => {
     saveProfile(profile);
@@ -236,8 +236,8 @@ export default function Game() {
   const bossesCleared = BOSSES.filter((b) => profile.bossClears[b.id]).length;
 
   return (
-    <main className="relative min-h-screen bg-gradient-to-b from-zinc-950 via-[#0b0d17] to-black px-6 py-12 text-white">
-      {/* 오른쪽 아래 캐릭터 일러스트: 캐릭터는 선명하게 두고, 좌우·위쪽 배경만 그라데이션 마스크로 지워 검은 화면에 녹인다 */}
+    <main className="tg-sky px-6 py-12">
+      {/* 오른쪽 아래 캐릭터 일러스트: 캐릭터는 선명하게 두고, 좌우·위쪽 배경만 그라데이션 마스크로 지워 밤하늘 배경에 녹인다 */}
       <div
         aria-hidden
         className="pointer-events-none fixed bottom-0 right-4 z-0 hidden h-[70vh] w-[calc(70vh*843/1264)] opacity-60 md:block xl:opacity-100"
@@ -253,27 +253,27 @@ export default function Game() {
       />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
       <div className="relative z-10 mx-auto max-w-4xl">
-        <h1 className="text-center text-7xl font-title font-bold tracking-wide text-amber-300 drop-shadow-[0_3px_0_rgba(0,0,0,0.35)]">Together</h1>
-        <p className="mt-2 text-center text-white/50">웹 3D 격투 RPG 프로토타입</p>
+        <h1 className="tg-title text-center text-7xl sm:text-8xl">Together</h1>
+        <p className="tg-subtitle mt-4 text-center">✨ 같이 살고, 같이 싸우는 서울 이야기 ✨</p>
 
         {/* 내 캐릭터 */}
-        <div className="mx-auto mt-8 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-white/10 bg-white/5 px-4 py-3">
-          <div className="text-2xl font-black text-amber-300">Lv.{profile.level}</div>
+        <div className="tg-card mx-auto mt-8 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+          <div className="tg-title text-3xl">Lv.{profile.level}</div>
           <div className="min-w-[12rem] flex-1">
-            <div className="h-1.5 overflow-hidden rounded bg-black/60">
-              <div className="h-full bg-lime-400" style={{ width: `${(profile.exp / expToNext(profile.level)) * 100}%` }} />
+            <div className="tg-bar">
+              <div style={{ width: `${(profile.exp / expToNext(profile.level)) * 100}%` }} />
             </div>
-            <div className="mt-1 flex justify-between gap-3 whitespace-nowrap text-xs text-white/60">
-              <span>{profile.gold.toLocaleString()} G</span>
-              <span>처치 {profile.kills}</span>
+            <div className="tg-muted mt-1.5 flex justify-between gap-3 whitespace-nowrap text-xs">
+              <span>🪙 {profile.gold.toLocaleString()} G</span>
+              <span>⚔️ 처치 {profile.kills}</span>
               <span>
-                보스 {bossesCleared}/{BOSSES.length}
+                👑 보스 {bossesCleared}/{BOSSES.length}
               </span>
             </div>
           </div>
           <SyncBadge sync={sync} />
           {account && (
-            <button onClick={() => void logout()} title="로그아웃" className="whitespace-nowrap text-[11px] text-white/60 hover:text-white">
+            <button onClick={() => void logout()} title="로그아웃" className="tg-muted whitespace-nowrap text-[11px] hover:text-white">
               👤 {account.username} · 로그아웃
             </button>
           )}
@@ -284,39 +284,39 @@ export default function Game() {
               saveProfile(fresh);
               setProfile(fresh);
             }}
-            className="text-[11px] text-white/40 hover:text-white/80"
+            className="text-[11px] text-white/45 hover:text-white/80"
           >
             초기화
           </button>
         </div>
 
-        <h2 className="mb-3 mt-10 text-sm font-bold tracking-widest text-white/50">라이프</h2>
+        <h2 className="tg-section">🏠 라이프</h2>
         <button
           onClick={() => go({ kind: 'city' })}
-          className="w-full rounded-lg border border-sky-300/25 bg-gradient-to-r from-sky-400/10 to-amber-300/10 p-5 text-left transition hover:border-sky-300"
+          className="tg-card tg-btn tg-tint-sky"
         >
           <div className="flex items-center justify-between">
             <span className="text-2xl font-bold">서울 · 내 집</span>
-            <span className="rounded bg-black/40 px-2 py-0.5 text-xs font-bold text-sky-300">NEW</span>
+            <span className="tg-pill">NEW ✨</span>
           </div>
-          <div className="mt-1 text-sm text-white/60">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 코인노래방 · 친구와 같은 동네에서 만나기</div>
+          <div className="tg-muted mt-1 text-sm">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 코인노래방 · 친구와 같은 동네에서 만나기</div>
         </button>
 
-        <h2 className="mb-3 mt-8 text-sm font-bold tracking-widest text-white/50">RPG</h2>
+        <h2 className="tg-section">🗡️ RPG</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           {RPG_MODES.map((m) => (
             <button
               key={m.label}
               onClick={() => go(m.screen)}
-              className="rounded-lg border border-amber-300/20 bg-amber-300/5 p-5 text-left transition hover:border-amber-300 hover:bg-amber-300/10"
+              className="tg-card tg-btn tg-tint-lemon"
             >
               <div className="flex items-center justify-between">
                 <span className="text-2xl font-bold">{m.label}</span>
-                <span className="rounded bg-black/40 px-2 py-0.5 text-xs font-bold text-amber-300">{m.tag}</span>
+                <span className="tg-pill">{m.tag}</span>
               </div>
-              <div className="mt-1 text-sm text-white/60">{m.desc}</div>
+              <div className="tg-muted mt-1 text-sm">{m.desc}</div>
               {/* 내 진행 상황 */}
-              <div className="mt-2 text-xs text-amber-200/80">
+              <div className="tg-accent mt-2 text-xs font-bold">
                 {m.screen.kind === 'field'
                   ? `누적 처치 ${profile.kills.toLocaleString()}마리`
                   : `클리어 ${BOSSES.filter((b) => profile.bossClears[b.id]).length}/${BOSSES.length} 보스`}
@@ -325,32 +325,32 @@ export default function Game() {
           ))}
         </div>
 
-        <h2 className="mb-3 mt-8 text-sm font-bold tracking-widest text-white/50">대전</h2>
+        <h2 className="tg-section">🥊 대전</h2>
         <div className="grid gap-4 sm:grid-cols-3">
           {VERSUS_MODES.map((m) => (
             <button
               key={m.mode}
               onClick={() => go({ kind: 'match', mode: m.mode })}
-              className="rounded-lg border border-white/15 bg-white/5 p-5 text-left transition hover:border-amber-300 hover:bg-white/10"
+              className="tg-card tg-btn tg-tint-pink"
             >
               <div className="text-xl font-bold">{m.label}</div>
-              <div className="mt-1 text-sm text-white/60">{m.desc}</div>
-              {m.mode === 'cpu' && cpuInfo && <div className="mt-2 text-xs text-amber-200/80">{cpuInfo}</div>}
+              <div className="tg-muted mt-1 text-sm">{m.desc}</div>
+              {m.mode === 'cpu' && cpuInfo && <div className="tg-accent mt-2 text-xs font-bold">{cpuInfo}</div>}
             </button>
           ))}
         </div>
 
         <div className="mt-10 grid gap-6 sm:grid-cols-2">
-          <section className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm">
+          <section className="tg-card p-5 text-sm">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-bold">조작</h2>
-              <button onClick={() => setKeys(true)} className="rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/20">
+              <h2 className="text-lg font-bold">🎮 조작</h2>
+              <button onClick={() => setKeys(true)} className="rounded-full bg-white/15 px-3 py-1 text-xs font-bold hover:bg-white/25">
                 ⌨️ 키 설정
               </button>
             </div>
             <TouchGuide />
             <table className="w-full">
-              <thead className="text-white/50">
+              <thead className="tg-muted">
                 <tr><th className="text-left font-normal"></th><th className="text-left font-normal">P1</th><th className="text-left font-normal">P2</th></tr>
               </thead>
               <tbody className="font-mono">
@@ -360,7 +360,7 @@ export default function Game() {
                 <tr><td className="font-sans text-white/70">점프</td><td>{bindLabel('jump')}</td><td>Num0</td></tr>
               </tbody>
             </table>
-            <ul className="mt-4 space-y-1 text-white/70">
+            <ul className="tg-muted mt-4 space-y-1">
               <li>· 뒤로 / 가만히 있기 = 상·중단 가드, 앉기(아래·아래뒤) = 하단 가드</li>
               <li>· 앞앞 대시, 뒤뒤 백대시</li>
               <li>· 위 톡 = 화면 안쪽 횡이동, 아래 톡 = 바깥쪽 횡이동 (누르고 있으면 계속 옆으로 걷는 횡보)</li>
@@ -371,13 +371,13 @@ export default function Game() {
             </ul>
           </section>
 
-          <section className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm">
-            <h2 className="mb-3 text-lg font-bold">기술표</h2>
+          <section className="tg-card p-5 text-sm">
+            <h2 className="mb-3 text-lg font-bold">📜 기술표</h2>
             <table className="w-full">
               <tbody>
                 {PLAYER_MOVE_LIST.map((m) => (
-                  <tr key={m.id} className="border-t border-white/5">
-                    <td className="whitespace-nowrap py-1 pr-2 font-mono text-amber-300">{notationArrows(m.notation)}</td>
+                  <tr key={m.id} className="border-t border-white/10">
+                    <td className="whitespace-nowrap py-1 pr-2 font-mono text-pink-200">{notationArrows(m.notation)}</td>
                     <td className="py-1 pr-2">{m.name}</td>
                     <td className="whitespace-nowrap py-1 pr-2 text-white/60">{LEVEL_LABEL[m.level]}</td>
                     <td className="whitespace-nowrap py-1 font-mono text-white/60">{playerStartup(m)}F</td>
