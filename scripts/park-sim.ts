@@ -171,6 +171,11 @@ for (const id of RIDE_IDS) {
   const x0 = A.player.x;
   for (let i = 0; i < 30; i++) A.step();
   check('ride: cannot walk while seated', Math.abs(A.player.x - x0) < 1e-6);
+  // 고개를 돌린 뒤 방향키를 떼도 그 방향을 계속 본다
+  A.rideLookYaw = 0.8;
+  A.rideLookPitch = -0.3;
+  for (let i = 0; i < 60; i++) A.step();
+  check('ride: look direction stays after releasing the keys', A.rideLookYaw === 0.8 && A.rideLookPitch === -0.3);
   // 운행 → 끝나면 내린다
   now += (RIDES.coaster.board + 10) * 1000;
   A.step();

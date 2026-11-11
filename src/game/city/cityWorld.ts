@@ -1350,14 +1350,11 @@ export class CityWorld {
     }
     const r = this.ride!;
     const ck = rideClock(r.id, now);
-    // 고개 돌리기: 방향키 (손을 떼면 천천히 앞으로)
+    // 고개 돌리기: 방향키. 손을 떼도 돌린 방향 그대로 본다
     const mv = inp.move;
     if (mv) {
       this.rideLookYaw = Math.max(-1.9, Math.min(1.9, this.rideLookYaw - mv.x * 0.035));
       this.rideLookPitch = Math.max(-1.0, Math.min(0.9, this.rideLookPitch - mv.z * 0.025));
-    } else {
-      this.rideLookYaw *= 0.97;
-      this.rideLookPitch *= 0.97;
     }
     // 좌석은 그 자리에 고정: 걷기·공격·점프 입력은 쓰지 않는다
     const leave = inp.interact;

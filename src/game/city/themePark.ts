@@ -498,7 +498,7 @@ export function gyroAt(t: number): { th: number; spin: number } {
   const amp = t < 20 ? (t / 20) * AMP : t < 36 ? AMP : Math.max(0, AMP * (1 - (t - 36) / 12));
   const th = t >= 48 ? 0 : amp * Math.sin((2 * Math.PI * t) / period);
   // 원판: 4초 동안 빨라져 초당 0.9 라디안으로 돌고, 끝날 때 4초 동안 천천히 멈춘다
-  const w = 0.9;
+  const w = 1.15;
   const spin = t < 4 ? (w * t * t) / 8 : t < 44 ? w * 2 + w * (t - 4) : w * 2 + w * 40 + w * Math.min(4, t - 44) * (1 - Math.min(4, t - 44) / 8);
   return { th, spin };
 }
@@ -511,7 +511,7 @@ export const SKY = { x: -17, z: -70, top: 40, base: 7.2, armR: 5.5, chain: 6.5, 
 export const SKY_RUN = 46;
 
 export function skyAt(t: number): { y: number; spin: number; w: number; tilt: number } {
-  const W = 1.25; // 꼭대기 회전 속도 (rad/s)
+  const W = 1.35; // 꼭대기 회전 속도 (rad/s)
   const up = (u: number) => u * u * (3 - 2 * u);
   let y: number, w: number, spin: number;
   if (t < 12) {

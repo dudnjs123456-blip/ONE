@@ -64,7 +64,7 @@ export class RideAudio {
     const v = pose.speed;
     const t = ctx.currentTime;
     // 바람: 속도² 에 비례, 빠를수록 높은 소리
-    const w = Math.min(0.9, (v / 30) ** 2 * 0.9);
+    const w = Math.min(1, (v / 26) ** 2);
     this.wind!.gain.gain.setTargetAtTime(w, t, 0.08);
     this.wind!.filter.frequency.setTargetAtTime(380 + v * 45, t, 0.1);
     // 레일 굉음: 롤러코스터만 (터널 안은 울려서 더 크게)
