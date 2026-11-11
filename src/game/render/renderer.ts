@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pixelRatioFor } from './graphics';
 import { FIGHTER_RADIUS, HIT_WIDTH, STAGE_RADIUS } from '../core/constants';
 import type { CombatEvent } from '../core/combat';
 import type { Fighter } from '../core/fighter';
@@ -86,7 +87,8 @@ export class GameRenderer {
     this.theme = THEMES[opts.theme ?? 'dojo'];
     this.damageNumbers = opts.damageNumbers ?? false;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // 저사양 그래픽이면 고해상도 화면에서도 1배로만 그린다
+    this.renderer.setPixelRatio(pixelRatioFor(this.renderer.getContext()));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 

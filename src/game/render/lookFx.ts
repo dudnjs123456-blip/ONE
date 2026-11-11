@@ -181,6 +181,29 @@ export class LookFx {
     }
     this.bloom.enabled = level < 3;
     this.ao.enabled = level <= 0;
+    // 4 = 후처리 통째로 끄고 화면에 바로 그린다 (가장 가벼움, 색 보정·비네트 없음)
+    this.direct = level >= 4;
+  }
+
+  /** 후처리 없이 화면에 바로 그리기 (최저 화질) */
+  private direct = false;
+  private fadeScene: THREE.Scene | null = null;
+  private fadeMat: THREE.MeshBasicMaterial | null = null;
+  private fadeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  /** 바로 그리기 모드의 화면 암전: 검은 판을 한 장 덮는다 */
+  private drawFade() {
+    if (this.fade <= 0) return;
+    if (!this.fadeScene) {
+      this.fadeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
+      this.fadeScene = new THREE.Scene();
+      this.fadeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.fadeMat));
+    }
+    this.fadeMat!.opacity = Math.min(1, this.fade);
+    const auto = this.renderer.autoClear;
+    this.renderer.autoClear = false;
+    this.renderer.render(this.fadeScene, this.fadeCam);
+    this.renderer.autoClear = auto;
   }
 
   setSize(w: number, h: number) {
@@ -213,10 +236,18 @@ export class LookFx {
     const t = this.grade.uniforms.tint.value as THREE.Color;
     if (indoor) t.setRGB(1.02, 1.0, 0.97);
     else t.setRGB(1 + dusk * 0.06 - night * 0.06, 1 - night * 0.02, 1 - dusk * 0.06 + night * 0.08);
+    if (this.direct) {
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(scene, camera);
+      this.drawFade();
+      return;
+    }
     this.composer.render();
   }
 
   dispose() {
+    this.fadeMat?.dispose();
+    (this.fadeScene?.children[0] as THREE.Mesh | undefined)?.geometry.dispose();
     this.ao.dispose();
     this.bloom.dispose();
     this.composer.dispose();

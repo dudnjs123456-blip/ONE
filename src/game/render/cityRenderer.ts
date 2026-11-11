@@ -6,6 +6,7 @@ import { buildLobbyScene } from './lobbyScene';
 import { glassMaterial, initGlassEnv } from './glassKit';
 import { UnitWindow, coverPlate } from './unitWindows';
 import { LookFx, SkyDome, toonify } from './lookFx';
+import { MODE_LEVEL, QUALITY_MAX, TIER_START, detectGpu, getGfxMode, onGfxMode, type GfxMode } from './graphics';
 import { PersonView, ROBBER_SKIN } from './personView';
 import { makeKitBuilding } from './cityKit';
 import { allLoaded } from './loadTracker';
@@ -438,10 +439,43 @@ export class CityRenderer {
     // 비·눈은 툰 재질로 바꾸지 않는다 (위에서 바꾼 뒤에 붙인다)
     this.weatherFx = new WeatherFx(this.city);
     this.fx = new LookFx(this.renderer);
-    // 지난번에 이 컴퓨터에서 쓰던 화질로 시작한다 (매번 최고 화질에서 한 단계씩 내려가며 버벅이지 않게)
+    // 지난번에 이 컴퓨터에서 쓰던 화질로 시작한다 (매번 최고 화질에서 한 단계씩 내려가며 버벅이지 않게).
+    // 처음 접속이면 그래픽카드 이름으로 사양을 가늠해서 시작 단계를 정한다
+    const gpu = detectGpu(this.renderer.getContext());
     const saved = loadQuality();
-    if (saved > 0) this.setQuality(saved);
+    this.applyMode(getGfxMode(), saved ?? TIER_START[gpu.tier]);
+    this.offMode = onGfxMode((m) => this.applyMode(m, this.quality));
   }
+
+  /** 메뉴에서 고른 화질 (자동이면 start 단계부터 프레임을 보며 맞춘다) */
+  private applyMode(m: GfxMode, start: number) {
+    this.qualityFixed = m !== 'auto';
+    this.qualityCeiling = 0;
+    this.raisedTo = -1;
+    this.slowFrames = 0;
+    this.fastFrames = 0;
+    this.setQuality(m === 'auto' ? Math.min(QUALITY_MAX, Math.max(0, start)) : MODE_LEVEL[m]);
+  }
+
+  private qualityFixed = false;
+  private offMode: () => void = () => {};
+
+  /**
+   * 그림자를 끈 화질이면 그 장면의 그림자 조명도 끈다 (렌더러만 끄면 셰이더가 그림자 지도를 계속 읽는다).
+   * 장면마다 화질이 바뀐 뒤 처음 그릴 때 한 번만 훑는다
+   */
+  private syncShadowLights(sc: THREE.Scene) {
+    const on = this.renderer.shadowMap.enabled;
+    if (sc.userData.shadowsOn === on) return;
+    sc.userData.shadowsOn = on;
+    sc.traverse((o) => {
+      const l = o as THREE.Light;
+      if (!l.isLight || !l.shadow) return;
+      if (l.userData.castShadow === undefined) l.userData.castShadow = l.castShadow;
+      l.castShadow = on && l.userData.castShadow;
+    });
+  }
+
 
   resize(width: number, height: number) {
     this.size = { w: width, h: height };
@@ -478,18 +512,19 @@ export class CityRenderer {
   private lastTris = 0;
 
   private autoQuality(dt: number) {
-    if (dt <= 0 || dt > 0.25) return;
+    if (this.qualityFixed || dt <= 0 || dt > 0.25) return;
     this.frameEma += (dt - this.frameEma) * 0.05;
     // 평균 40fps 아래가 2초쯤 이어지면 한 단계 낮춘다
     this.slowFrames = this.frameEma > 1 / 40 ? this.slowFrames + 1 : 0;
     // 잠깐 렉(로딩 등)으로 내려간 화질은, 평균 57fps 이상이 10초 이어지면 한 단계씩 되돌린다
     this.fastFrames = this.frameEma < 1 / 57 ? this.fastFrames + 1 : 0;
-    if (this.slowFrames > 120 && this.quality < 5) {
+    if (this.slowFrames > 120 && this.quality < QUALITY_MAX) {
       this.slowFrames = 0;
       // 방금 올린 단계에서 다시 느려졌다면 그 단계는 이 컴퓨터에 무겁다
       if (this.raisedTo === this.quality) this.qualityCeiling = this.quality + 1;
       this.raisedTo = -1;
-      this.setQuality(this.quality + 1);
+      // 20fps 도 안 나오면 두 단계씩 내린다 (저사양에서 오래 버벅이지 않게)
+      this.setQuality(Math.min(QUALITY_MAX, this.quality + (this.frameEma > 1 / 20 ? 2 : 1)));
     } else if (this.fastFrames > 600 && this.quality > this.qualityCeiling) {
       this.fastFrames = 0;
       this.setQuality(this.quality - 1);
@@ -497,12 +532,20 @@ export class CityRenderer {
     }
   }
 
-  /** 화질 단계: 0 = 최고 … 5 = 가장 가벼움 (계단 방지 → 해상도 1배 → 계단 방지 끔 → 블룸 끔 → 그림자 해상도) */
+  /**
+   * 화질 단계: 0 = 최고 … 8 = 가장 가벼움 (자세한 건 graphics.ts)
+   * 계단 방지 → 해상도 1배 → 계단 방지 끔 → 블룸 끔 → 그림자 해상도 → 후처리 끔 → 그림자 끔 → 해상도 0.75배
+   */
   private setQuality(q: number) {
     this.quality = q;
-    saveQuality(q);
-    this.fx.setQuality(q <= 0 ? 0 : q <= 2 ? 1 : q === 3 ? 2 : 3);
-    const ratio = q >= 2 ? 1 : Math.min(window.devicePixelRatio, 1.25);
+    if (!this.qualityFixed) saveQuality(q);
+    this.fx.setQuality(q <= 0 ? 0 : q <= 2 ? 1 : q === 3 ? 2 : q <= 5 ? 3 : 4);
+    const shadowsOn = q < 7;
+    if (this.renderer.shadowMap.enabled !== shadowsOn) {
+      this.renderer.shadowMap.enabled = shadowsOn;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    const ratio = q >= 8 ? 0.75 : q >= 2 ? 1 : Math.min(window.devicePixelRatio, 1.25);
     if (this.renderer.getPixelRatio() !== ratio) {
       this.renderer.setPixelRatio(ratio);
       this.resize(this.size.w, this.size.h);
@@ -851,7 +894,9 @@ export class CityRenderer {
     this.fx.fade = world.screenFade;
     this.renderer.info.reset();
     const outside = view === 'city' || view === 'park';
-    this.fx.render(this.sceneOf(view), cam, outside ? this.fxNight : 0, outside ? this.fxDusk : 0, !outside);
+    const drawn = this.sceneOf(view);
+    this.syncShadowLights(drawn);
+    this.fx.render(drawn, cam, outside ? this.fxNight : 0, outside ? this.fxDusk : 0, !outside);
     this.drawTvHole(view === 'home' && !!tvState.now, cam);
     this.lastCalls = this.renderer.info.render.calls;
     this.lastTris = this.renderer.info.render.triangles;
@@ -1252,6 +1297,7 @@ export class CityRenderer {
   }
 
   dispose() {
+    this.offMode();
     this.chatBubbles.dispose();
     this.fx.dispose();
     this.weatherFx.dispose();
@@ -2636,13 +2682,14 @@ const HOME_WIN = { x0: -2.6, x1: 1.6, y0: 0.95, y1: 2.35 };
 
 const QUALITY_KEY = 'iron-fist.cityQuality';
 
-/** 이 브라우저에서 마지막으로 맞춰진 화질 단계 (없으면 0 = 최고) */
-function loadQuality(): number {
+/** 이 브라우저에서 마지막으로 맞춰진 화질 단계 (처음 접속이면 null) */
+function loadQuality(): number | null {
   try {
-    const q = Number(localStorage.getItem(QUALITY_KEY));
-    return Number.isInteger(q) && q >= 0 && q <= 5 ? q : 0;
+    const v = localStorage.getItem(QUALITY_KEY);
+    const q = Number(v);
+    return v !== null && Number.isInteger(q) && q >= 0 && q <= QUALITY_MAX ? q : null;
   } catch {
-    return 0;
+    return null;
   }
 }
 

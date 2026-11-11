@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pixelRatioFor } from './graphics';
 import { mulberry32 } from '../core/controllers';
 import { FIELD_HALF, type FieldWorld, type FloatText } from '../core/field';
 import type { Fighter } from '../core/fighter';
@@ -45,7 +46,8 @@ export class FieldRenderer {
   constructor(canvas: HTMLCanvasElement, opts: { zoom?: number } = {}) {
     this.camOffset = CAM_OFFSET.clone().multiplyScalar(opts.zoom ?? 1);
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // 저사양 그래픽이면 고해상도 화면에서도 1배로만 그린다
+    this.renderer.setPixelRatio(pixelRatioFor(this.renderer.getContext()));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 

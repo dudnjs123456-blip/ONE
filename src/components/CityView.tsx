@@ -50,6 +50,7 @@ import { TownLink } from '@/game/net/town';
 import { VoiceLink } from '@/game/net/voice';
 import type { Account } from '@/game/net/auth';
 import { attachZoomControls } from './zoomControls';
+import { GraphicsSettings, SoftwareGpuNotice } from './GraphicsSettings';
 
 interface CityHud {
   location: 'city' | 'home' | 'lobby' | 'corridor' | 'store' | 'park';
@@ -520,7 +521,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         const s = st;
         const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
         perfRef.current.textContent =
-          `FPS ${s.fps.toFixed(0)}  화질 ${s.quality}/5\n` +
+          `FPS ${s.fps.toFixed(0)}  화질 ${s.quality}/8\n` +
           `그리기 ${s.calls}회  삼각형 ${(s.tris / 1000).toFixed(0)}k\n` +
           `지오메트리 ${s.geometries}  텍스처 ${s.textures}  셰이더 ${s.programs}` +
           (mem ? `\nJS 메모리 ${(mem.usedJSHeapSize / 1048576).toFixed(0)}MB` : '') +
@@ -968,6 +969,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       )}
 
       {keys && <KeySettings onClose={() => setKeys(false)} />}
+      <SoftwareGpuNotice />
       {menu && !keys && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div className="flex w-64 flex-col gap-3 rounded-lg border border-white/20 bg-zinc-900/90 p-6">
@@ -978,6 +980,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
             <button onClick={() => setKeys(true)} className="rounded bg-white/10 py-2 hover:bg-white/20">
               ⌨️ 키 설정
             </button>
+            <GraphicsSettings />
             <button onClick={onExit} className="rounded bg-white/10 py-2 hover:bg-white/20">
               메인 메뉴
             </button>
