@@ -14,7 +14,8 @@ export const BODY_TYPES = [
   { id: 'pink', label: '핑크', icon: '🎀', url: '/models/pinky.vrm' },
   { id: 'silver', label: '은발', icon: '🤍', url: '/models/silver.vrm' },
   { id: 'silverboy', label: '은발 소년', icon: '🧑', url: '/models/silverboy.vrm' },
-  { id: 'smallSilverGirl', label: '작은은발소녀', icon: '👧', url: '/models/a3.vrm' },
+  // ?v= : 모델 파일을 바꾸면 숫자를 올린다 (브라우저가 하루 동안 예전 파일을 쓰지 않게)
+  { id: 'smallSilverGirl', label: '작은은발소녀', icon: '👧', url: '/models/a3.vrm?v=2' },
 ] as const;
 
 export type BodyType = (typeof BODY_TYPES)[number]['id'];
