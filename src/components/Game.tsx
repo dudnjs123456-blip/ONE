@@ -238,19 +238,32 @@ export default function Game() {
 
   return (
     <main className="tg-sky px-6 py-12">
-      {/* 오른쪽 아래 캐릭터 일러스트: 캐릭터는 선명하게 두고, 좌우·위쪽 배경만 그라데이션 마스크로 지워 밤하늘 배경에 녹인다 */}
+      {/*
+        오른쪽 아래 캐릭터 일러스트 (두 겹)
+        1) 같은 그림을 크게 흐리게 번진 복사본 — 그림 속 하늘색이 검은 배경 쪽으로 자연스럽게 퍼져 나가 경계를 감춘다
+        2) 선명한 원본 — 캐릭터는 또렷하게, 가장자리만 타원형으로 부드럽게 지운다
+      */}
       <div
         aria-hidden
-        className="pointer-events-none fixed bottom-0 right-4 z-0 hidden h-[58vh] w-[calc(58vh*843/1264)] opacity-60 md:block xl:opacity-100"
+        className="pointer-events-none fixed bottom-0 right-0 z-0 hidden h-[82vh] w-[calc(58vh*843/1264*2.1)] opacity-50 md:block xl:opacity-80"
         style={{
           backgroundImage: 'url(/images/menu-character.webp)',
           backgroundSize: 'cover',
           backgroundPosition: 'center bottom',
-          filter: 'brightness(0.88) saturate(0.95)',
-          maskImage: 'linear-gradient(to right, transparent 0%, black 34%, black 66%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 38%)',
-          maskComposite: 'intersect',
-          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 34%, black 66%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 38%)',
-          WebkitMaskComposite: 'source-in',
+          filter: 'blur(48px) brightness(0.6) saturate(1.1)',
+          maskImage: 'radial-gradient(ellipse 50% 55% at 62% 78%, black 30%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 50% 55% at 62% 78%, black 30%, transparent 100%)',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none fixed bottom-0 -right-10 z-0 hidden h-[58vh] w-[calc(58vh*843/1264)] opacity-60 md:block xl:opacity-100"
+        style={{
+          backgroundImage: 'url(/images/menu-character.webp)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center bottom',
+          maskImage: 'radial-gradient(ellipse 50% 62% at 50% 62%, black 58%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 50% 62% at 50% 62%, black 58%, transparent 100%)',
         }}
       />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
