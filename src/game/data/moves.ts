@@ -106,12 +106,12 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
   midKick: {
     name: '미들 킥', notation: '3', input: { dir: 'n', button: 3 },
     startup: 18, active: 4, recovery: 26, damage: 17, level: 'mid', lunge: 0.02, weighty: true,
-    range: 0.75, tracking: 0.15, onBlock: -7, onHit: 4, pushback: 0.55, anim: 'midKickL',
+    range: 0.72, tracking: 0.15, onBlock: -7, onHit: 4, pushback: 0.55, anim: 'midKickL',
   },
   highKick: {
     name: '하이 킥', notation: '4', input: { dir: 'n', button: 4 },
     startup: 17, active: 4, recovery: 27, damage: 20, level: 'high', lunge: 0.015, weighty: true,
-    range: 1.1, tracking: 0.4, onBlock: -9, onHit: 8, pushback: 0.6, anim: 'highKickR',
+    range: 0.9, tracking: 0.4, onBlock: -9, onHit: 8, pushback: 0.6, anim: 'highKickR',
   },
   dfJab: {
     name: '중단 잽', notation: 'df+1', input: { dir: 'df', button: 1 },
@@ -131,7 +131,7 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
   lowKick: {
     name: '로우 킥', notation: 'd+4', input: { dir: 'd', button: 4 },
     startup: 15, active: 3, recovery: 22, damage: 9, level: 'low', crouching: true, weighty: true,
-    range: 0.88, tracking: 0.1, onBlock: -13, onHit: -2, pushback: 0.2, anim: 'lowKickR',
+    range: 0.95, tracking: 0.1, onBlock: -13, onHit: -2, pushback: 0.2, anim: 'lowKickR',
   },
   sweep: {
     name: '다리 후리기 (다운)', notation: 'db+3', input: { dir: 'db', button: 3 },

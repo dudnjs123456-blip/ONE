@@ -128,11 +128,11 @@ export const EXTENDED: Record<
     windup: 0.7,
     overshoot: 0.24,
     chamber: {
-      hipYaw: 0.15, hpL: -1.75, knL: 2.2, lean: 0.18, twist: 0.05, hpR: 0.0, knR: 0.6,
+      hipYaw: 0, hpL: -1.75, knL: 2.2, abL: 0, lean: 0.18, twist: 0, roll: 0, hpR: 0.0, knR: 0.6,
       shL: -0.85, elL: -2.3, arL: -0.28, shR: -0.8, elR: -2.35, arR: -0.32,
     },
     pose: {
-      hipYaw: -0.05, hpL: -1.75, knL: 0.0, abL: -0.12, lean: -0.3, twist: -0.25, roll: -0.06,
+      hipYaw: 0, hpL: -1.75, knL: 0.0, abL: 0, lean: -0.3, twist: 0, roll: 0,
       hpR: 0.15, knR: 0.28, shL: 0.55, elL: -0.35, arL: 0.18, shR: -1.0, elR: -2.3, arR: -0.35,
     },
   },
@@ -144,11 +144,11 @@ export const EXTENDED: Record<
     windup: 0.68,
     overshoot: 0.26,
     chamber: {
-      hipYaw: 0.25, hpR: -1.55, knR: 2.15, abR: 0.22, twist: -0.4, lean: -0.05, roll: 0.12, hpL: -0.15, knL: 0.55,
+      hipYaw: 0, hpR: -1.55, knR: 2.15, abR: 0, twist: 0, lean: -0.05, roll: 0, hpL: -0.15, knL: 0.55,
       shL: -1.0, elL: -2.25, arL: -0.3, shR: -0.55, elR: -2.2, arR: -0.12,
     },
     pose: {
-      hipYaw: 0.64, hpR: -2.1, knR: 0.04, abR: -0.12, lean: -0.5, twist: 0.55, roll: 0.36,
+      hipYaw: 0, hpR: -2.1, knR: 0.04, abR: 0, lean: -0.5, twist: 0, roll: 0,
       shR: 0.7, elR: -0.25, arR: 0.35, shL: -1.05, elL: -2.3, arL: -0.35, hpL: -0.05, knL: 0.25,
     },
   },
@@ -157,9 +157,9 @@ export const EXTENDED: Record<
     rechamber: true,
     windup: 0.6,
     overshoot: 0.2,
-    chamber: { hpR: -1.1, knR: 1.9, twist: -0.2, shL: -0.95, elL: -2.25, arL: -0.3, shR: -0.7, elR: -2.2, arR: -0.2 },
+    chamber: { hipYaw: 0, hpR: -1.1, knR: 1.9, abR: 0, twist: 0, shL: -0.95, elL: -2.25, arL: -0.3, shR: -0.7, elR: -2.2, arR: -0.2 },
     pose: {
-      hipYaw: 0.0, hpL: -1.15, knL: 1.85, hpR: -1.45, knR: 0.0, abR: -0.12, lean: 0.12, twist: 0.5,
+      hipYaw: 0, hpL: -1.15, knL: 1.85, hpR: -1.45, knR: 0.0, abR: 0, lean: 0.12, twist: 0,
       shR: 0.45, elR: -0.4, arR: 0.25, shL: -1.0, elL: -2.25, arL: -0.32,
     },
   },

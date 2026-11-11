@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { Fighter } from '../src/game/core/fighter';
 import { MOVES } from '../src/game/data/moves';
-import { Mannequin } from '../src/game/render/mannequin';
+import { Mannequin, poseFor } from '../src/game/render/mannequin';
 import { BODY_SPECS } from '../src/game/data/bodies';
 import { NEUTRAL_INPUT } from '../src/game/core/input';
 
@@ -136,5 +136,34 @@ for (const [id, side] of [['midKick', 'R'], ['highKick', 'L'], ['lowKick', 'L'],
   }
   const ok = maxD < 0.03;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${id}: 걷다가 차고 도중에 몸이 돌아도 디딤발이 화면에서 제자리 (최대 이동 ${(maxD * 100).toFixed(1)}cm)`);
+  if (!ok) process.exitCode = 1;
+}
+
+// 기본 발차기는 옆차기·돌려차기가 아니라 앞차기: 골반·몸이 정면을 유지하고, 발은 고관절 바로 앞의 직선 위로만 움직인다
+for (const id of ['midKick', 'highKick', 'lowKick'] as const) {
+  const m = MOVES[id];
+  const f = new Fighter(0, 'T');
+  f.reset(0, 0, 0, 1);
+  const man = new Mannequin(0xffffff) as any;
+  const clock = { t: 0, dt: 1 / 60, alpha: 1, sub: 0 };
+  for (let i = 0; i < 30; i++) man.update(f, clock);
+  f.state = 'attack';
+  f.move = m;
+  const side = m.anim.endsWith('L') ? 'L' : 'R';
+  let maxSide = 0;
+  let maxYaw = 0;
+  for (let fr = 0; fr <= m.startup + m.active - 1; fr++) {
+    f.frame = fr;
+    man.update(f, clock);
+    man.root.updateMatrixWorld(true);
+    const hip = (man.joints[side === 'L' ? 'hpL' : 'hpR'] as THREE.Object3D).getWorldPosition(new THREE.Vector3());
+    const foot = (man.joints[side === 'L' ? 'knL' : 'knR'] as THREE.Object3D).localToWorld(new THREE.Vector3(0, -SHIN, 0));
+    if (fr >= m.startup * 0.5) maxSide = Math.max(maxSide, Math.abs(foot.x - hip.x));
+    const p = poseFor(f, 0);
+    // 처음 몇 프레임은 비스듬한 기본 자세에서 정면으로 돌아오는 중
+    if (fr >= m.startup * 0.5) maxYaw = Math.max(maxYaw, Math.abs(p.hipYaw), Math.abs(p.roll), Math.abs(p.twist));
+  }
+  const ok = maxSide < 0.06 && maxYaw < 0.05;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${id}: 옆이 아니라 앞으로 찬다 (발이 고관절 앞에서 벗어난 폭 ${(maxSide * 100).toFixed(1)}cm, 몸 돌림 ${maxYaw.toFixed(2)})`);
   if (!ok) process.exitCode = 1;
 }
