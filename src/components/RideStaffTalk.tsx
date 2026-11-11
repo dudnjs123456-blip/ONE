@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
 import { RIDES } from '@/game/city/themePark';
 import { RIDE_MAP_COLOR } from './parkMapDraw';
+import { playerPortrait } from '@/game/data/portraits';
 
 /** 한 글자씩 찍히는 속도 (ms) */
 const TYPE_MS = 26;
@@ -71,9 +72,27 @@ export default function RideStaffTalk({ world }: { world: CityWorld }) {
   const R = RIDES[t.ride];
   const staff = line.who === 'staff';
   const last = t.i === t.lines.length - 1 && t.lines.length > 2;
+  const portrait = playerPortrait(world.profile.body);
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-6 z-40 flex justify-center px-3" onClick={next}>
+      <style>{'@keyframes portrait-in{from{opacity:.5;transform:translateY(10px)}to{opacity:1;transform:none}}'}</style>
       <div className="relative w-full max-w-2xl cursor-pointer select-none rounded-2xl border-2 bg-[#14101d]/92 px-5 pb-4 pt-6 text-white shadow-2xl" style={{ borderColor: RIDE_MAP_COLOR[t.ride] }}>
+        {/* 내 캐릭터 상반신: 대사창 오른쪽 위에 걸쳐 선다. 직원이 말할 땐 살짝 어둡게 */}
+        {portrait && (
+          <div
+            className="pointer-events-none absolute bottom-[calc(100%-1.5rem)] right-2 aspect-[4/5] w-[34vw] max-w-[260px] overflow-hidden sm:right-6"
+            style={{ maskImage: 'linear-gradient(to bottom, black 78%, transparent)', WebkitMaskImage: 'linear-gradient(to bottom, black 78%, transparent)' }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={portrait}
+              alt=""
+              draggable={false}
+              className="absolute left-0 top-0 w-full select-none drop-shadow-[0_6px_18px_rgba(0,0,0,0.5)] transition-[filter] duration-300"
+              style={{ animation: 'portrait-in 0.3s ease-out', filter: staff ? 'brightness(0.72) saturate(0.85)' : 'none' }}
+            />
+          </div>
+        )}
         {/* 이름표: 직원은 왼쪽, 나는 오른쪽 */}
         <div
           className={`absolute -top-4 rounded-lg px-3 py-1 text-sm font-black shadow ${staff ? 'left-5' : 'right-5'}`}
