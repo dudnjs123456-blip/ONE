@@ -245,6 +245,8 @@ const CARE_GRACE = 30 * 60;
 const CARE_SPARES = 2;
 const FRIDGE_MAX = 10;
 const FRIDGE_POS = { x: -3.8, z: 0 };
+/** 엄마가 서 있는 곳 (집 주방 싱크대 앞) */
+export const MOM_SPOT = { x: -3.55, z: -1.9 };
 
 /** 자동 행동 한 단계 */
 type CareStep =
@@ -712,6 +714,8 @@ export class CityWorld {
   pen: PenSim | null = null;
   /** 가게 주인 (계산대 뒤) */
   readonly keeper: Fighter;
+  /** 집에 있는 엄마 (대화형 NPC) */
+  readonly mom: Fighter;
   /** 내 애완동물 */
   readonly pets: PetCare;
   /** 엘리베이터 안: 층 고르는 창이 열려 있다 (플레이어는 멈춘다) */
@@ -824,6 +828,8 @@ export class CityWorld {
     for (let k = 0; k < 26; k++) this.npcs.push(this.makeNpc());
     this.pets = new PetCare(profile, (t, s) => this.say(t, s), (s) => this.pushSpeech(s));
     this.keeper = new Fighter(898, 'npc', { canBlock: false });
+    this.mom = new Fighter(897, 'npc', { canBlock: false });
+    this.mom.reset(MOM_SPOT.x, MOM_SPOT.z, 1, 0);
   }
 
   /**
@@ -1030,6 +1036,7 @@ export class CityWorld {
       blockedAtHome: (x, z) => HOME.furniture.some((f) => x > f.rect.x0 - 0.3 && x < f.rect.x1 + 0.3 && z > f.rect.z0 - 0.3 && z < f.rect.z1 + 0.3),
     });
     if (this.location === 'store') this.stepStore();
+    if (this.location === 'home') this.stepMom();
     if (!frozen) this.hitRemotes();
 
     this.regenHp(inp);
@@ -1113,13 +1120,6 @@ export class CityWorld {
     this.say('🎡 한강랜드에 도착! 놀이기구 앞에서 E 를 누르면 줄을 서요', 4);
   }
 
-  /** 놀이공원 역에서 다시 동네(한강공원역)로 */
-  private leavePark() {
-    const st = this.map.pois.find((q) => q.kind === 'subway');
-    const back = this.parkReturn ?? (st ? { x: st.x, z: st.z + 1.5 } : { x: this.map.home.x, z: this.map.home.z + 1 });
-    this.moveTo('city', back.x, back.z, 0, 1);
-    this.say('🚇 동네로 돌아왔어요', 2.5);
-  }
   /**
    * 놀이공원 안에서 놀이기구(또는 역) 입구까지 길을 따라 걸어간다 (지도 · 가이드에서 누르면).
    * @returns 안내 문구 (비어 있으면 출발)
@@ -1156,6 +1156,13 @@ export class CityWorld {
     });
   }
 
+  /** 놀이공원 역에서 다시 동네(한강공원역)로 */
+  private leavePark() {
+    const st = this.map.pois.find((q) => q.kind === 'subway');
+    const back = this.parkReturn ?? (st ? { x: st.x, z: st.z + 1.5 } : { x: this.map.home.x, z: this.map.home.z + 1 });
+    this.moveTo('city', back.x, back.z, 0, 1);
+    this.say('🚇 동네로 돌아왔어요', 2.5);
+  }
 
   private parkReturn: { x: number; z: number } | null = null;
 
@@ -1231,6 +1238,8 @@ export class CityWorld {
         drop: '🗼 심장이 아직도 쿵쾅거린다',
         viking: '🏴‍☠️ 속이 울렁울렁…',
         wheel: '🎡 한강이 한눈에 보였다',
+        gyro: '🌀 하늘과 땅이 몇 번 뒤집혔는지 모르겠다…',
+        sky: '🪂 한강 위를 날아다닌 것 같았다',
       };
       this.say(msg[r.id], 3.5);
     }
@@ -1238,8 +1247,6 @@ export class CityWorld {
 
   /** 줄 서기 · 탑승 중 (매 프레임) */
   private stepRide(inp: CityInput) {
-        gyro: '🌀 하늘과 땅이 몇 번 뒤집혔는지 모르겠다…',
-        sky: '🪂 한강 위를 날아다닌 것 같았다',
     const now = this.parkClock();
     if (this.location !== 'park') {
       this.ride = null;
@@ -1718,6 +1725,7 @@ export class CityWorld {
     const manual = !!inp.move || (inp.buttons ?? []).some(Boolean) || (this.location !== 'city' && this.location !== 'park') || this.caughtAt !== null || !!this.ride;
     if (manual) {
       this.autopilot = null;
+      this.parkTarget = null;
       return;
     }
     const p = this.player;
@@ -1725,7 +1733,6 @@ export class CityWorld {
     while (wp && Math.hypot(wp.x - p.x, wp.z - p.z) < 0.7) wp = ap.path[++ap.i];
     if (!wp) {
       this.autopilot = null;
-      this.parkTarget = null;
       this.parkTarget = null;
       this.say(this.location === 'park' ? `📍 ${ap.label} 도착 — 입구에서 E 를 누르면 줄을 서요` : `📍 ${ap.label} 도착`, 2.5);
       return;
@@ -1763,6 +1770,37 @@ export class CityWorld {
 
   closeNpcChat() {
     this.npcChat = null;
+  }
+
+  /** 엄마: 주방 앞에 서서 나를 바라본다. 부딪히면 밀어낸다 */
+  private stepMom() {
+    const m = this.mom;
+    m.snapshot();
+    m.freeMove = null;
+    const dx = this.player.x - m.x;
+    const dz = this.player.z - m.z;
+    const d = Math.hypot(dx, dz);
+    // 가까이 오면 나를 보고, 멀면 싱크대(서쪽) 쪽을 보며 일한다
+    if (d < 3.2 && d > 0.1) {
+      m.fx = dx / d;
+      m.fz = dz / d;
+    } else {
+      m.fx = -1;
+      m.fz = 0;
+    }
+    m.feed(NEUTRAL_INPUT);
+    m.tick({ opponent: m, awayX: 0, awayZ: -1 });
+    m.x = MOM_SPOT.x;
+    m.z = MOM_SPOT.z;
+    const r = FIGHTER_RADIUS * 1.6;
+    const p = this.player;
+    if (d < r) {
+      if (d < 1e-6) p.x += r;
+      else {
+        p.x = m.x + (dx / d) * r;
+        p.z = m.z + (dz / d) * r;
+      }
+    }
   }
 
   /** 가게 주인이 들려주는 동네 이야기. 방금 근처에서 사람을 때렸다면 그 소문이 먼저 돈다 */
@@ -2893,6 +2931,10 @@ export class CityWorld {
         this.autopilot = null;
         this.npcChat = { npc: 'senior' };
         return;
+      case 'mom':
+        this.autopilot = null;
+        this.npcChat = { npc: 'mom' };
+        return;
       case 'desk':
         if (this.job) {
           if (!this.seat) this.sitAtDesk();
@@ -3858,7 +3900,13 @@ export class CityWorld {
         bestD = d;
       }
     }
-    const sp = this.location === 'lobby' || this.location === 'corridor' ? this.seniorAI.poi() : null;
+    // 내 집에선 엄마와 대화할 수 있다
+    const sp =
+      this.location === 'lobby' || this.location === 'corridor'
+        ? this.seniorAI.poi()
+        : this.location === 'home' && !this.homeOwner
+          ? ({ id: 'mom', kind: 'home', label: '엄마와 대화하기', x: MOM_SPOT.x + 0.45, z: MOM_SPOT.z, radius: 1.1 } as Poi)
+          : null;
     if (sp) {
       const d = Math.hypot(sp.x - p.x, sp.z - p.z);
       if (d < sp.radius && d < bestD) best = sp;
