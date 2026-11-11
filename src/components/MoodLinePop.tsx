@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { MOOD_LINES, MOOD_LINE_MS } from '@/game/data/moodLines';
 import { PLAYER_PORTRAITS, playerPortrait } from '@/game/data/portraits';
+import { isMuted } from '@/game/render/sfx';
 
 /** 한 글자씩 찍히는 속도 (ms) */
 const TYPE_MS = 32;
@@ -48,6 +49,7 @@ export default function MoodLinePop({ body, name, pop }: { body: string | undefi
           {line.text.slice(0, typed)}
           {typed < line.text.length && <span className="animate-pulse">▍</span>}
         </p>
+        {isMuted() && <p className="mt-1 text-[11px] text-white/50">🔇 소리가 꺼져 있어요 (Esc 메뉴에서 켜기)</p>}
         <span className="absolute -right-2 bottom-5 h-4 w-4 rotate-45 border-r-2 border-t-2 border-amber-400/80 bg-[#14101d]" />
       </div>
       {portrait && (

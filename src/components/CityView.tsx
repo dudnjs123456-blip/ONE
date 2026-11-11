@@ -49,6 +49,7 @@ import { MOOD_LINES, moodLineKey } from '@/game/data/moodLines';
 import { PLAYER_MOODS } from '@/game/data/npcs';
 import { playerVoice } from '@/game/data/voices';
 import { playVoiceLine, preloadVoices } from '@/game/render/voiceLine';
+import SoundToggle from './SoundToggle';
 import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
 import { tvPlay as tvPlayShared, tvPos, tvReset, tvState, type TvVideo } from '@/game/city/tvState';
 import { PerfProbe } from '@/game/render/perfProbe';
@@ -1003,6 +1004,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
               ⌨️ 키 설정
             </button>
             <GraphicsSettings />
+            <SoundToggle className="!py-2" />
             <button onClick={onExit} className="rounded bg-white/10 py-2 hover:bg-white/20">
               메인 메뉴
             </button>
