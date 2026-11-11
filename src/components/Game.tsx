@@ -236,10 +236,24 @@ export default function Game() {
   const bossesCleared = BOSSES.filter((b) => profile.bossClears[b.id]).length;
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-950 via-[#0b0d17] to-black px-6 py-12 text-white">
+    <main className="relative min-h-screen bg-gradient-to-b from-zinc-950 via-[#0b0d17] to-black px-6 py-12 text-white">
+      {/* 오른쪽 아래 캐릭터 일러스트: 캐릭터는 선명하게 두고, 좌우·위쪽 배경만 그라데이션 마스크로 지워 검은 화면에 녹인다 */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed bottom-0 right-4 z-0 hidden h-[70vh] w-[calc(70vh*843/1264)] opacity-60 md:block xl:opacity-100"
+        style={{
+          backgroundImage: 'url(/images/menu-character.webp)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center bottom',
+          maskImage: 'linear-gradient(to right, transparent 0%, black 28%, black 72%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 22%)',
+          maskComposite: 'intersect',
+          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 28%, black 72%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 22%)',
+          WebkitMaskComposite: 'source-in',
+        }}
+      />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
-      <div className="mx-auto max-w-4xl">
-        <h1 className="text-center text-6xl font-black italic tracking-tight text-amber-300">IRON FIST</h1>
+      <div className="relative z-10 mx-auto max-w-4xl">
+        <h1 className="text-center text-7xl font-title font-bold tracking-wide text-amber-300 drop-shadow-[0_3px_0_rgba(0,0,0,0.35)]">Together</h1>
         <p className="mt-2 text-center text-white/50">웹 3D 격투 RPG 프로토타입</p>
 
         {/* 내 캐릭터 */}
