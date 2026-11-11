@@ -28,6 +28,8 @@ import {
 import { NEUTRAL_INPUT, isBack, isDown, isForward, isUp, type RelInput } from './input';
 import type { Button, Dir } from './types';
 import { DASH_MOVES, JUMP_MOVES, MOVES, findMove, hasComboWith, totalFrames, type MoveDef } from '../data/moves';
+import type { BodySpec } from '../data/bodies';
+import { stepDistance } from './reach';
 
 export type FighterState =
   | 'idle'
@@ -77,7 +79,26 @@ export interface FighterOptions {
   runSpeed?: number;
   /** 동작 속도 배율. 1.3 이면 기술 발생/후딜과 이동이 1.3배 빠르다 (프레임 이득은 유지) */
   tempo?: number;
+  /** 몸 치수·반응 속도. 있으면 주먹/발이 실제로 닿을 때만 맞힌다 (사람 캐릭터) */
+  body?: BodySpec;
+  /** 나를 보고 있을 때 날아오는 공격을 보고 자동으로 뒤로 피한다 */
+  autoDodge?: boolean;
+  /** 사람이 조작하는 캐릭터 (조작 중엔 자동 회피를 끈다) */
+  manual?: boolean;
+  /** 몸 크기 배율 (몸 치수가 없는 몬스터·보스의 맞는 몸통 크기) */
+  size?: number;
 }
+
+/**
+ * 띄워진 몸: 중력과 띄우는 속도를 같은 비율로 줄여 체공 시간은 그대로, 높이만 낮춘다.
+ * 몸이 주먹·발이 닿는 높이에 머물러야 공중 콤보가 실제로 닿는다.
+ */
+const AIR_SCALE = 0.5;
+/** 처음 띄울 때 최소 높이 (낮게 뜨는 기술도 이만큼은 떠야 이어 칠 수 있다) */
+const LAUNCH_MIN_HEIGHT = 0.9;
+
+/** 입력을 뗀 뒤 이 프레임 동안은 아직 '조작 중' 으로 본다 */
+const CONTROL_GRACE = 20;
 
 interface Buffered {
   button: Button;
@@ -107,6 +128,22 @@ export class Fighter {
   canBlock: boolean;
   runSpeed: number;
   readonly tempo: number;
+  /** 몸 치수·반응 속도 (없으면 예전 사거리 판정) */
+  body: BodySpec | null;
+  /** 자동 회피를 하는 캐릭터인가 */
+  autoDodge: boolean;
+  /** 몸 크기 배율 (몬스터·보스) */
+  readonly size: number;
+  /** 마지막으로 피한 공격 (같은 공격에 두 번 반응하지 않게) */
+  dodged: { from: Fighter; serial: number } | null = null;
+  /** 사람이 직접 움직이는 캐릭터: 조작하는 동안엔 자동 회피를 끈다 */
+  readonly manual: boolean;
+  private inputClock = 0;
+  private lastControlAt = -9999;
+  /** 띄워진 동안의 중력 (띄운 기술마다 높이가 달라 따로 정한다) */
+  private airGravity = GRAVITY * AIR_SCALE;
+  /** 이번 기술에서 파고드는 1프레임당 전진 거리 */
+  private stepPerFrame = 0;
   private tempoMoves = new Map<string, MoveDef>();
   /** 필드 자유 이동 방향 (월드 기준). null 이면 1:1 대전식 이동 */
   freeMove: { x: number; z: number } | null = null;
@@ -189,6 +226,28 @@ export class Fighter {
     this.canBlock = opts.canBlock ?? true;
     this.tempo = opts.tempo ?? 1;
     this.runSpeed = (opts.runSpeed ?? RUN_SPEED) * this.tempo;
+    this.body = opts.body ?? null;
+    this.autoDodge = opts.autoDodge ?? false;
+    this.manual = opts.manual ?? false;
+    this.size = opts.size ?? 1;
+  }
+
+  /** 사람이 지금 조작 중인가: 방향키·버튼을 누르고 있거나 막 뗀 직후(0.33초) */
+  isUnderControl(): boolean {
+    return this.manual && this.inputClock - this.lastControlAt <= CONTROL_GRACE;
+  }
+
+  /** 공격을 보고 피한다: 상대를 마주 본 채 뒤로 물러서는 백대시 모션 */
+  dodgeFrom(att: Fighter) {
+    this.dodged = { from: att, serial: att.moveSerial };
+    const dx = att.x - this.x;
+    const dz = att.z - this.z;
+    const len = Math.hypot(dx, dz);
+    if (len > 1e-4) {
+      this.fx = dx / len;
+      this.fz = dz / len;
+    }
+    this.enter('backdash');
   }
 
   reset(x: number, z: number, fx: number, fz: number) {
@@ -310,6 +369,9 @@ export class Fighter {
   /** 입력만 기록한다. 히트스톱 중에도 호출되어 선입력이 쌓인다. */
   feed(input: RelInput) {
     const prev = this.prevInput;
+    this.inputClock++;
+    const fm = this.freeMove;
+    if (input.dir !== 5 || input.buttons.some(Boolean) || (fm && Math.hypot(fm.x, fm.z) > 1e-4)) this.lastControlAt = this.inputClock;
 
     if (this.buffered && ++this.buffered.age > BUFFER_FRAMES) this.buffered = null;
     for (let i = 0; i < 4; i++) {
@@ -424,7 +486,7 @@ export class Fighter {
         break;
       case 'launched':
         this.y += this.vy;
-        this.vy -= GRAVITY;
+        this.vy -= this.airGravity;
         if (this.y <= 0 && this.vy < 0) {
           this.y = 0;
           this.vy = 0;
@@ -511,7 +573,17 @@ export class Fighter {
     if (airborne || mv.launch || this.hp <= 0) {
       // 공중 콤보(저글): 맞을 때마다 조금씩 덜 뜬다
       const pop = Math.max(0.04, JUGGLE_POP - this.juggleCount * 0.012);
-      this.vy = airborne ? Math.max(pop, (mv.launch ?? 0) * 0.6) : Math.max(mv.launch ?? 0, 0.13);
+      if (airborne) {
+        this.vy = Math.max(pop, (mv.launch ?? 0) * 0.6) * AIR_SCALE;
+      } else {
+        // 처음 띄울 때: 체공 시간은 그대로 두고 높이만 정한다 (높이 뜨는 기술은 낮추고, 낮게 뜨는 기술은 최소 높이 보장)
+        const v = Math.max(mv.launch ?? 0, 0.13);
+        const air = (2 * v) / GRAVITY;
+        const h = (v * v) / (2 * GRAVITY);
+        const target = Math.max(Math.min(h, LAUNCH_MIN_HEIGHT), h * AIR_SCALE);
+        this.vy = (4 * target) / air;
+        this.airGravity = (8 * target) / (air * air);
+      }
       this.y = Math.max(this.y, 0.01);
       this.juggleCount++;
       this.slide = mv.pushback / 5;
@@ -690,6 +762,8 @@ export class Fighter {
     this.moveSerial++;
     this.moveHits = [];
     this.queuedCancel = null;
+    // 사람 캐릭터: 주먹/발이 사거리 끝까지 실제로 닿도록 발생 동안 한 발 파고든다
+    this.stepPerFrame = this.body ? stepDistance(mv) / Math.max(1, mv.startup) : 0;
   }
 
   /**
@@ -801,6 +875,7 @@ export class Fighter {
         break;
       case 'attack':
         if (this.move?.lunge && this.frame <= this.move.startup) fwd = this.move.lunge;
+        if (this.move && this.frame <= this.move.startup) fwd += this.stepPerFrame;
         fwd += this.carry;
         this.carry *= this.move?.aerial ? 0.985 : 0.9; // 공중에선 기세가 거의 안 줄어든다
         break;

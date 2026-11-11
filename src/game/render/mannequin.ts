@@ -56,7 +56,7 @@ const HIGH_GUARD: Partial<Pose> = { shL: -0.8, elL: -2.25, arL: -0.32, shR: -0.6
  * 기술별 자세. base 에서 pose(타격 순간)로 간다.
  * chamber 가 있으면 발차기 곡선: 무릎을 먼저 접어 올렸다가(챔버) 맞기 직전에 확 뻗는다.
  */
-const EXTENDED: Record<
+export const EXTENDED: Record<
   MoveAnim,
   {
     base: Pose;
@@ -73,7 +73,7 @@ const EXTENDED: Record<
   // 잽: 준비 동작 없이 앞손을 곧게 찌르고, 앞무릎을 굽히며 어깨를 넣는다
   jabL: {
     base: GUARD,
-    pose: { hipYaw: -0.32, shL: -1.55, elL: -0.04, arL: -0.05, twist: -0.62, lean: 0.2, hpL: -0.42, knL: 0.48, shR: -0.5, elR: -2.2, arR: -0.26 },
+    pose: { hipYaw: -0.32, shL: -1.55, elL: -0.04, arL: -0.05, twist: -0.19, lean: 0.2, hpL: -0.42, knL: 0.48, shR: -0.5, elR: -2.2, arR: -0.26 },
   },
   // 스트레이트: 허리를 젖혀 장전 → 뒷발로 밀며 허리를 돌려 오른손을 끝까지 뻗고, 왼손은 턱으로 당긴다
   straightR: {
@@ -82,7 +82,7 @@ const EXTENDED: Record<
     overshoot: 0.06,
     chamber: { hipYaw: -0.3, twist: -0.48, lean: 0.06, shR: -0.35, elR: -2.3, arR: -0.2, knR: 0.42 },
     pose: {
-      hipYaw: 0.42, shR: -1.58, elR: -0.03, arR: -0.05, twist: 0.82, lean: 0.34, roll: -0.05,
+      hipYaw: 0.42, shR: -1.58, elR: -0.03, arR: -0.05, twist: 0.1, lean: 0.34, roll: -0.05,
       hpR: 0.52, knR: 0.08, hpL: -0.5, knL: 0.6, shL: -0.3, elL: -2.05, arL: -0.32,
     },
   },
@@ -93,7 +93,7 @@ const EXTENDED: Record<
     overshoot: 0.06,
     chamber: { lean: 0.22, knL: 0.6, knR: 0.55, shL: -0.6, elL: -2.0 },
     pose: {
-      hipYaw: -0.3, shL: -1.32, elL: -0.06, arL: -0.08, twist: -0.55, lean: 0.4, hpL: -0.62, knL: 0.82, hpR: -0.1, knR: 0.7,
+      hipYaw: -0.3, shL: -1.32, elL: -0.06, arL: -0.08, twist: -0.18, lean: 0.4, hpL: -0.62, knL: 0.82, hpR: -0.1, knR: 0.7,
       shR: -0.45, elR: -2.2, arR: -0.26,
     },
   },
@@ -104,7 +104,7 @@ const EXTENDED: Record<
     overshoot: 0.04,
     chamber: { hipYaw: -0.25, lean: 0.28, twist: -0.4, shR: 0.25, elR: -1.5, arR: -0.08, hpL: -0.62, knL: 0.85, hpR: -0.12, knR: 0.72 },
     pose: {
-      hipYaw: 0.38, shR: -1.95, elR: -1.4, arR: -0.12, twist: 0.6, lean: -0.22,
+      hipYaw: 0.38, shR: -1.35, elR: -1.1, arR: -0.12, twist: 0.14, lean: 0.15,
       hpL: -0.22, knL: 0.12, hpR: 0.25, knR: 0.05, shL: -0.2, elL: -1.9, arL: -0.32,
     },
   },
@@ -115,7 +115,7 @@ const EXTENDED: Record<
     overshoot: 0.08,
     chamber: { hipYaw: -0.3, twist: -0.42, lean: 0.22, shR: -0.3, elR: -1.6, arR: 0.25, hpL: -0.42, knL: 0.62 },
     pose: {
-      hipYaw: 0.48, shR: -1.32, elR: -0.55, arR: 0.18, twist: 0.78, lean: 0.5,
+      hipYaw: 0.48, shR: -1.32, elR: -0.55, arR: 0.18, twist: 0.24, lean: 0.5,
       hpL: -0.78, knL: 0.78, hpR: 0.56, knR: 0.15, shL: -0.3, elL: -2.0, arL: -0.32,
     },
   },
@@ -147,7 +147,7 @@ const EXTENDED: Record<
       shL: -1.0, elL: -2.25, arL: -0.3, shR: -0.55, elR: -2.2, arR: -0.12,
     },
     pose: {
-      hipYaw: 0.5, hpR: -2.1, knR: 0.04, abR: -0.12, lean: -0.5, twist: 0.55, roll: 0.36,
+      hipYaw: 0.64, hpR: -2.1, knR: 0.04, abR: -0.12, lean: -0.5, twist: 0.55, roll: 0.36,
       shR: 0.7, elR: -0.25, arR: 0.35, shL: -1.05, elL: -2.3, arL: -0.35, hpL: -0.05, knL: 0.25,
     },
   },
@@ -179,7 +179,7 @@ const EXTENDED: Record<
     windup: 0.5,
     overshoot: 0.06,
     chamber: { shR: -0.6, elR: -2.3, twist: -0.3 },
-    pose: { hipYaw: 0.2, shR: -1.2, elR: -0.05, twist: 0.6, lean: 0.45, shL: -0.4, elL: -2.0 },
+    pose: { hipYaw: 0.2, shR: -1.2, elR: -0.05, twist: 0.26, lean: 0.45, shL: -0.4, elL: -2.0 },
   },
   // 날아차기: 한 다리는 접고 다른 다리를 쭉 뻗어 상체를 젖히며 날아든다
   flyKick: {
@@ -188,7 +188,7 @@ const EXTENDED: Record<
     overshoot: 0.08,
     chamber: { hpR: -1.3, knR: 2.0, hpL: -0.9, knL: 1.8, lean: -0.05 },
     pose: {
-      hipYaw: 0.3, hpR: -1.55, knR: 0.0, abR: -0.08, hpL: -0.8, knL: 1.9, lean: -0.35, twist: 0.0,
+      hipYaw: -0.01, hpR: -1.55, knR: 0.0, abR: -0.08, hpL: -0.8, knL: 1.9, lean: -0.35, twist: 0.0,
       shL: -1.0, elL: -2.2, arL: -0.3, shR: 0.55, elR: -0.35, arR: 0.3,
     },
   },
@@ -204,7 +204,7 @@ const EXTENDED: Record<
     },
     pose: {
       hipYaw: 0.0, twist: 0.62, lean: -0.38, roll: 0.16,
-      hpR: -2.18, knR: 0.02, abR: -0.1, hpL: -0.92, knL: 1.85,
+      hpR: -1.62, knR: 0.02, abR: -0.1, hpL: -0.92, knL: 1.85,
       shR: 0.72, elR: -0.3, arR: 0.32, shL: -1.12, elL: -2.25, arL: -0.32,
     },
   },
@@ -588,7 +588,8 @@ export function poseFor(f: Fighter, t: number, sub = 0, loco?: Locomotion): Pose
       return { ...GUARD, lean: -0.45, twist: 0.2, shL: 0.1, elL: -0.5, shR: 0.2, elR: -0.6, hpL: 0.1, knL: 0.5 };
     case 'launched':
       return {
-        ...GUARD, tilt: Math.max(-2.2, -0.6 - fr * 0.05), shL: -1.5, elL: -0.7, arL: 0.35, shR: -0.35, elR: -1.1, arR: 0.6,
+        // 공중에 뜬 몸: 누운 몸의 중심이 띄운 높이(y)에 오도록 골반을 내린다 (drop)
+        ...GUARD, drop: 0.85, tilt: Math.max(-2.2, -0.6 - fr * 0.05), shL: -1.5, elL: -0.7, arL: 0.35, shR: -0.35, elR: -1.1, arR: 0.6,
         hpL: -0.6, knL: 0.8, hpR: -0.3, knR: 0.4,
       };
     case 'knockdown':

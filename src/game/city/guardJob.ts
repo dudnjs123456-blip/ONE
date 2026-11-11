@@ -1,6 +1,7 @@
 import { Fighter, type FighterState } from '../core/fighter';
 import { saveProfile } from '../core/profile';
-import { applyHit, detectHit, type CombatEvent } from '../core/combat';
+import { applyHit, autoDodge, detectHit, type CombatEvent } from '../core/combat';
+import { BODY_SPECS } from '../data/bodies';
 import { NEUTRAL_INPUT } from '../core/input';
 import { GUARD_GIFTS, JOB_BY_ID, ROBBER_TIERS, robberStats, type RobberTier } from '../data/jobs';
 import { MOVES } from '../data/moves';
@@ -481,7 +482,7 @@ export class GuardShift {
     const upstairs = w.random() < 0.7 ? L.elevator : L.stairs;
     const from = goingIn ? L.door : upstairs;
     const exit = goingIn ? upstairs : L.door;
-    const f = new Fighter(this.nextId++, 'npc', { runSpeed: 0.032 + w.random() * 0.01, maxHp: 60, canBlock: false });
+    const f = new Fighter(this.nextId++, 'npc', { runSpeed: 0.032 + w.random() * 0.01, maxHp: 60, canBlock: false, body: BODY_SPECS.npc, autoDodge: true });
     f.reset(from.x, from.z, 0, 1);
     const name = NAMES[Math.floor(w.random() * NAMES.length)];
     this.people.push({
@@ -505,7 +506,7 @@ export class GuardShift {
       tier = ROBBER_TIERS.find((t) => (roll -= t.weight) < 0) ?? ROBBER_TIERS[0];
     }
     const st = robberStats(tier, w.profile.level);
-    const f = new Fighter(this.nextId++, 'npc', { runSpeed: tier.speed, maxHp: st.maxHp, power: st.power, canBlock: false });
+    const f = new Fighter(this.nextId++, 'npc', { runSpeed: tier.speed, maxHp: st.maxHp, power: st.power, canBlock: false, body: BODY_SPECS.npc, autoDodge: true });
     // 숨는 강도: 1층 로비 ~ 꼭대기 층 중 아무 데나
     const where = hidden ? 1 + Math.floor(w.random() * w.villaFloors) : 1;
     if (where === 1) f.reset(hidden ? 3.6 : LOBBY_PATH.door.x, hidden ? 1.6 : LOBBY_PATH.door.z, 0, -1);
@@ -647,6 +648,8 @@ export class GuardShift {
       if (h.kind !== 'visitor' || h.reaction !== 'help' || h.koFrames >= 0) continue;
       const r = this.robberAt(h.where);
       if (!r) continue;
+      autoDodge(r.f, h.f);
+      autoDodge(h.f, r.f);
       const hit = detectHit(h.f, r.f);
       if (hit) {
         const out = applyHit(hit);
@@ -733,6 +736,7 @@ export class GuardShift {
     }
     // 강도의 공격이 경비에게 맞았나
     if (p.hp > 0) {
+      autoDodge(p, f);
       const h = detectHit(f, p);
       if (h) {
         const out = applyHit(h);
@@ -751,6 +755,7 @@ export class GuardShift {
     const p = w.player;
     for (const v of [...this.people]) {
       if (v.koFrames >= 0 || v.where !== this.guardPlace) continue;
+      autoDodge(v.f, p);
       const h = detectHit(p, v.f);
       if (!h) continue;
       const out = applyHit(h);

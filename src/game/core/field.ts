@@ -1,6 +1,7 @@
 import { FIGHTER_RADIUS, FPS, PLAYER_TEMPO } from './constants';
 import { BOSSES } from '../data/bosses';
-import { applyHit, detectHit, type CombatEvent, type PendingHit } from './combat';
+import { applyHit, autoDodge, detectHit, type CombatEvent, type PendingHit } from './combat';
+import { bodySpecFor } from '../data/bodies';
 import { mulberry32 } from './controllers';
 import { Fighter } from './fighter';
 import { NEUTRAL_INPUT, makeInput, type RelInput } from './input';
@@ -183,7 +184,7 @@ export class FieldWorld {
     seed = 7,
   ) {
     this.rng = mulberry32(seed);
-    this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO });
+    this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     this.player.reset(0, 0, 0, -1);
     this.spawnTimers = FIELD_SPAWNS.map(() => 0);
     this.updateSpawns();
@@ -365,6 +366,7 @@ export class FieldWorld {
     const p = this.player;
     const hits: PendingHit[] = [];
     for (const m of this.monsters) {
+      autoDodge(p, m.fighter);
       const h1 = detectHit(p, m.fighter);
       if (h1) hits.push(h1);
       const h2 = detectHit(m.fighter, p);
@@ -454,6 +456,7 @@ export class FieldWorld {
         power: type.power,
         canBlock: false,
         runSpeed: type.runSpeed,
+        size: type.scale,
       });
       const a = this.rng() * Math.PI * 2;
       f.reset(def.x, def.z, Math.cos(a), Math.sin(a));

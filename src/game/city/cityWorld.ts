@@ -4,7 +4,8 @@ import { Fighter, type FighterState } from '../core/fighter';
 import { NEUTRAL_INPUT, dirFrom } from '../core/input';
 import { gainExp, saveProfile, type FridgeFood, type PlayerProfile } from '../core/profile';
 import type { Buttons } from '../core/types';
-import { applyHit, detectHit, type CombatEvent } from '../core/combat';
+import { applyHit, autoDodge, detectHit, type CombatEvent } from '../core/combat';
+import { BODY_SPECS, bodySpecFor } from '../data/bodies';
 import { ITEMS, ITEM_IDS } from '../data/items';
 import { SHOPS, type ShopDef } from '../data/shops';
 import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine } from './chat';
@@ -815,8 +816,8 @@ export class CityWorld {
     // 체력은 레벨에 따라 오르고, 도시에서 남은 체력은 프로필에 이어진다
     // 길거리에선 철권식 자동 가드가 없다: 피하거나 먼저 때려야 한다
     ensureGear(profile);
-    this.player = new Fighter(0, 'ME', { ...playerStats(profile), tempo: PLAYER_TEMPO, canBlock: false });
-    this.senior = new Fighter(899, 'npc', { canBlock: false });
+    this.player = new Fighter(0, 'ME', { ...playerStats(profile), tempo: PLAYER_TEMPO, canBlock: false, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
+    this.senior = new Fighter(899, 'npc', { canBlock: false, body: BODY_SPECS.npc, autoDodge: true });
     this.seniorAI = new SeniorAI(this, this.senior);
     this.player.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
     this.player.hp = Math.max(1, Math.min(this.player.maxHp, Math.round(profile.life.hp ?? this.player.maxHp)));
@@ -828,8 +829,8 @@ export class CityWorld {
     this.spawnCars();
     for (let k = 0; k < 26; k++) this.npcs.push(this.makeNpc());
     this.pets = new PetCare(profile, (t, s) => this.say(t, s), (s) => this.pushSpeech(s));
-    this.keeper = new Fighter(898, 'npc', { canBlock: false });
-    this.mom = new Fighter(897, 'npc', { canBlock: false });
+    this.keeper = new Fighter(898, 'npc', { canBlock: false, body: BODY_SPECS.npc, autoDodge: true });
+    this.mom = new Fighter(897, 'npc', { canBlock: false, body: BODY_SPECS.npc, autoDodge: true });
     this.mom.reset(MOM_SPOT.x, MOM_SPOT.z, 1, 0);
   }
 
@@ -918,6 +919,8 @@ export class CityWorld {
   }
 
   step() {
+    // 코디 창에서 외형을 바꾸면 팔다리 길이·반응 속도도 따라 바뀐다
+    this.player.body = bodySpecFor(this.profile.body);
     this.frame++;
     this.stepRemotes();
     // 시계는 누구도 빨리 감지 않는다 (잠자기·근무 중에도 실제 시각대로)
@@ -1583,6 +1586,8 @@ export class CityWorld {
         p.x -= (dx / d) * k;
         p.z -= (dz / d) * k;
       }
+      // 행인 상태는 마을을 계산하는 사람(호스트)이 정한다: 피하기도 호스트 화면에서만
+      if (host) autoDodge(f, p);
       const h = detectHit(p, f);
       if (!h) continue;
       const remaining = totalFrames(h.mv) - p.frame + 1;
@@ -2047,7 +2052,7 @@ export class CityWorld {
           break;
         }
         for (let k = 0; k < 2; k++) {
-          const o = new Fighter(900 + k, 'police', { runSpeed: OFFICER_SPEED, maxHp: 99999, canBlock: false });
+          const o = new Fighter(900 + k, 'police', { runSpeed: OFFICER_SPEED, maxHp: 99999, canBlock: false, body: BODY_SPECS.police, autoDodge: true });
           o.reset(c.x + (k ? 1.2 : -1.2), c.z + 2.5, 0, 1);
           pol.officers.push(o);
         }
@@ -4052,7 +4057,7 @@ export class CityWorld {
   upsertRemote(id: string, name: string, unit: string, outfit: string[] = [], body?: string) {
     let r = this.remotes.get(id);
     if (!r) {
-      const f = new Fighter(this.remoteIndex++, name, { canBlock: false });
+      const f = new Fighter(this.remoteIndex++, name, { canBlock: false, body: bodySpecFor(body) });
       f.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
       r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, booth: null, pets: [], seenAt: -99999 };
       this.remotes.set(id, r);
@@ -4062,6 +4067,7 @@ export class CityWorld {
     r.unit = unit;
     r.outfit = outfit;
     r.body = body;
+    r.fighter.body = bodySpecFor(body);
   }
 
   /** 친구가 나갔다. 그 친구 집에 놀러 가 있었다면 밖으로 나온다 */
@@ -4172,7 +4178,7 @@ export class CityWorld {
       let v = scene.people.get(n.i);
       const tier = n.tr ? ROBBER_TIERS.find((t) => t.id === n.tr) : undefined;
       if (!v) {
-        const f = new Fighter(n.i, 'npc', { maxHp: n.mh, canBlock: false });
+        const f = new Fighter(n.i, 'npc', { maxHp: n.mh, canBlock: false, body: BODY_SPECS.npc });
         f.reset(n.x, n.z, n.fx, n.fz);
         v = { f, slot: n.sl, where: n.w, kind: n.k === 'r' ? 'robber' : 'visitor', title: n.t, tier, koFrames: -1, showUntil: 0, target: { x: n.x, z: n.z, y: n.y, fx: n.fx, fz: n.fz } };
         scene.people.set(n.i, v);
@@ -4374,7 +4380,7 @@ export class CityWorld {
     this.npcChat = null;
     this.staffTalk = null;
     this.autopilot = null;
-    const att = byNpc ? (this.npcs.find((n) => n.fighter.index === h.n)?.fighter ?? new Fighter(h.n!, 'npc', { canBlock: false })) : r.fighter;
+    const att = byNpc ? (this.npcs.find((n) => n.fighter.index === h.n)?.fighter ?? new Fighter(h.n!, 'npc', { canBlock: false, body: BODY_SPECS.npc })) : r.fighter;
     att.x = h.x;
     att.z = h.z;
     att.fx = h.fx;
@@ -4633,7 +4639,7 @@ export class CityWorld {
       let n = old.get(m.i);
       if (!n) {
         if (m.nm === undefined) continue; // 이름·길을 아직 모른다: 다음 전체 장면에서
-        const f = new Fighter(m.i, 'npc', { runSpeed: m.sp ?? 0.035, maxHp: m.mh ?? 60, canBlock: false, power: 1.1 });
+        const f = new Fighter(m.i, 'npc', { runSpeed: m.sp ?? 0.035, maxHp: m.mh ?? 60, canBlock: false, power: 1.1, body: BODY_SPECS.npc, autoDodge: true });
         f.reset(m.x, m.z, m.fx, m.fz);
         n = { fighter: f, name: m.nm, path: [], next: 0, speed: m.sp ?? 0.035, color: m.co ?? 0x5a5a5a, wallet: m.w ?? 20, pause: 0, flee: 0, hpShowUntil: 0, koFrames: -1, reportAt: -1, brave: !!m.br, fight: 0, atkCd: 30, foe: '', route: m.rt ?? 0 };
       }
@@ -4703,7 +4709,7 @@ export class CityWorld {
       } else pol.car = null;
       while (pol.officers.length < po.o.length) {
         const k = pol.officers.length;
-        const o = new Fighter(900 + k, 'police', { runSpeed: OFFICER_SPEED, maxHp: 99999, canBlock: false });
+        const o = new Fighter(900 + k, 'police', { runSpeed: OFFICER_SPEED, maxHp: 99999, canBlock: false, body: BODY_SPECS.police, autoDodge: true });
         o.reset(po.o[k].x, po.o[k].z, po.o[k].fx, po.o[k].fz);
         pol.officers.push(o);
       }
@@ -4970,6 +4976,8 @@ export class CityWorld {
       maxHp: 40 + Math.floor(this.rng() * 50),
       canBlock: false,
       power: 1.1,
+      body: BODY_SPECS.npc,
+      autoDodge: true,
     });
     // 넷 중 하나쯤은 맞으면 덤빈다 (조깅하는 사람은 더 자주)
     const brave = this.rng() < (jogging ? 0.45 : 0.25);
@@ -5031,6 +5039,7 @@ export class CityWorld {
     this.collideFighter(f, 'city');
     // 상대에게 맞았나
     if (!t || t.hp <= 0) return;
+    if (t === this.player) autoDodge(t, f);
     const h = detectHit(f, t);
     if (!h) return;
     if (n.foe === this.myId) {

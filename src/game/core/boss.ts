@@ -1,5 +1,6 @@
 import { forwardIsRight, separateInRing, updateCameraAxis } from './arena';
-import { applyHit, detectHit, type CombatEvent, type HitInfo, type PendingHit } from './combat';
+import { applyHit, autoDodge, detectHit, type CombatEvent, type HitInfo, type PendingHit } from './combat';
+import { bodySpecFor } from '../data/bodies';
 import { FPS, INTRO_FRAMES, PLAYER_TEMPO } from './constants';
 import { mulberry32, type Controller, type ControllerContext } from './controllers';
 import { Fighter } from './fighter';
@@ -172,8 +173,8 @@ export class BossBattle {
     playerController: Controller,
     seed = 1,
   ) {
-    const player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO });
-    const b = new Fighter(1, boss.name, { maxHp: boss.maxHp, power: boss.power, canBlock: false });
+    const player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
+    const b = new Fighter(1, boss.name, { maxHp: boss.maxHp, power: boss.power, canBlock: false, size: boss.scale });
     player.reset(-1.8, 0, 1, 0);
     b.reset(1.8, 0, -1, 0);
     this.fighters = [player, b];
@@ -271,6 +272,7 @@ export class BossBattle {
 
   private resolveHits() {
     const [a, b] = this.fighters;
+    autoDodge(a, b);
     const hits = [detectHit(a, b), detectHit(b, a)].filter((h): h is PendingHit => !!h);
     let stop = 0;
     for (const h of hits) {

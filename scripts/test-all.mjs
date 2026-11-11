@@ -1,7 +1,7 @@
 // 모든 시뮬 테스트를 차례로 돌리고 요약: npm run test:all
 import { spawnSync } from 'node:child_process';
 
-const TESTS = ['sim', 'cpu', 'touch', 'training', 'field', 'boss', 'city', 'save', 'npc', 'mp', 'fish', 'karaoke', 'weather', 'share', 'park', 'kickfoot'];
+const TESTS = ['sim', 'cpu', 'touch', 'training', 'field', 'boss', 'city', 'save', 'npc', 'mp', 'fish', 'karaoke', 'weather', 'share', 'park', 'kickfoot', 'hit'];
 let failed = 0;
 for (const t of TESTS) {
   const r = spawnSync('npm', ['run', '-s', `test:${t}`], { encoding: 'utf8', shell: true });

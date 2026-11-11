@@ -8,7 +8,8 @@ import {
   ROUND_TIME,
 } from './constants';
 import { forwardIsRight, separateInRing, updateCameraAxis } from './arena';
-import { applyHit, detectHit, type CombatEvent, type HitInfo, type PendingHit } from './combat';
+import { applyHit, autoDodge, detectHit, type CombatEvent, type HitInfo, type PendingHit } from './combat';
+import { bodySpecFor } from '../data/bodies';
 import type { Controller } from './controllers';
 import { Fighter } from './fighter';
 import { NEUTRAL_INPUT } from './input';
@@ -89,7 +90,9 @@ export class Match {
     names: [string, string] = ['P1', 'P2'],
   ) {
     // 대전은 공정하게 양쪽 다 같은 템포
-    this.fighters = [new Fighter(0, names[0], { tempo: PLAYER_TEMPO }), new Fighter(1, names[1], { tempo: PLAYER_TEMPO })];
+    // 몸 치수: 대전 모델(기본 외형). 연습 모드 허수아비가 피해 버리면 연습이 안 되니 자동 회피는 끈다
+    const opts = { tempo: PLAYER_TEMPO, body: bodySpecFor(), autoDodge: mode !== 'training', manual: true };
+    this.fighters = [new Fighter(0, names[0], opts), new Fighter(1, names[1], opts)];
     this.startRound();
   }
 
@@ -220,6 +223,8 @@ export class Match {
   private resolveHits() {
     const [a, b] = this.fighters;
     // 양쪽 판정을 먼저 모두 계산한 뒤 적용 → 상쇄(트레이드)가 가능
+    autoDodge(b, a);
+    autoDodge(a, b);
     const hits = [detectHit(a, b), detectHit(b, a)].filter((h): h is PendingHit => !!h);
     let stop = 0;
     for (const h of hits) {

@@ -759,7 +759,8 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
     const r = job.robber!;
     check('legend robber spawns, scaled by level', !!r && r.f.maxHp === Math.round(450 * 1.48), `(hp ${r?.f.maxHp})`);
     const hp0 = w.player.hp;
-    for (let i = 0; i < 60 * 8; i++) w.step();
+    // 첫 타격이 들어갈 때까지 (강도가 실제로 닿게 때리므로 계속 두면 경비가 쓰러진다)
+    for (let i = 0; i < 60 * 8 && (w.player.hp === hp0 || w.seat !== null); i++) w.step();
     check('robber attacks the guard (guard stands up)', w.player.hp < hp0 && w.seat === null, `(${hp0} → ${w.player.hp})`);
     w.player.hp = w.player.maxHp;
     const f = r.f;
@@ -1600,7 +1601,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   const airborneKick = poseFor(tornado.player, 0);
   tornado.player.frame = MOVES.smallSilverTornadoKick.startup + MOVES.smallSilverTornadoKick.active + 12;
   const landingPose = poseFor(tornado.player, 0);
-  check('small silver girl: tornado kick leaps into a high extended kick', airborneKick.rise > 0.7 && airborneKick.hpR < -2);
+  check('small silver girl: tornado kick leaps into a high extended kick', airborneKick.rise > 0.7 && airborneKick.hpR < -1.5); // 공중에서 상대 얼굴 높이로 뻗는다
   check('small silver girl: tornado kick lands during recovery', landingPose.rise < 0.01);
 
   let backTurnInput: CityInput = { move: null, run: false, interact: false, skill: 'backTurnKick' };
