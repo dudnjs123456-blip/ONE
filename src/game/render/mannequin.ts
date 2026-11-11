@@ -208,20 +208,15 @@ const EXTENDED: Record<
       shR: 0.72, elR: -0.3, arR: 0.32, shL: -1.12, elL: -2.25, arL: -0.32,
     },
   },
-  // 뒤돌려차기: 회전 중 옆으로 몸을 세우고 오른발을 바깥으로 수평에 가깝게 뻗는다
+  // 뒤돌려차기: 실제 동작은 backTurnPose 키프레임 (왼발 고정, 등 쪽으로 돌며 아래→위로 올려 차기).
+  // 여기는 타격 순간 자세만 남겨 둔다
   backTurnKick: {
     base: GUARD,
-    rechamber: true,
-    windup: 0.62,
-    overshoot: 0.2,
-    chamber: {
-      hipYaw: 0.1, twist: -0.38, lean: 0.2, hpR: 0.55, knR: 1.85, abR: 0.08,
-      hpL: -0.22, knL: 0.65, shL: -0.82, elL: -2.1, shR: -0.68, elR: -2.05,
-    },
+    chamber: { hpR: 0.4, knR: 0.75, abR: 0.15, lean: 0.28, twist: -0.55 },
     pose: {
-      hipYaw: 0.12, twist: 0.38, lean: -0.18, roll: 0.24,
-      hpR: -0.15, knR: 0.03, abR: 1.1, hpL: -0.25, knL: 0.55,
-      shL: 0.62, elL: -0.42, arL: 0.22, shR: -0.85, elR: -2.25, arR: -0.32,
+      hipYaw: 0.1, twist: 0.3, lean: -0.12, roll: 0.22,
+      hpR: -0.2, knR: 0.03, abR: 1.35, hpL: -0.14, knL: 0.32, abL: 0.06,
+      shL: 0.6, elL: -0.4, arL: 0.25, shR: -0.9, elR: -2.25, arR: -0.32,
     },
   },
   kneeR: {
@@ -507,6 +502,33 @@ function strikePose(
   return mix(chamber, base, easeInOut((r - 0.3) / 0.7));
 }
 
+/** 디딤발(왼발)은 땅에 붙인 채 살짝 굽혀 버틴다 */
+const PLANT: Partial<Pose> = { hpL: -0.14, knL: 0.32, abL: 0.06 };
+
+/**
+ * 뒤돌려차기 (지상, 점프 없음): 왼발을 축으로 등 쪽으로 돌면서 오른발을 뒤아래에서 들어
+ * 회전과 함께 바깥·위로 휘둘러 올려 머리 높이에서 맞힌다.
+ */
+function backTurnPose(fr: number, m: MoveDef): Pose {
+  const s = m.startup;
+  const e = s + m.active - 1;
+  return keyframes(fr, GUARD, [
+    [0, {}],
+    // 축발에 체중을 싣고 어깨를 감으며 뒤를 돌아본다. 오른발은 뒤아래로 빠진다
+    [s * 0.3, { ...PLANT, twist: -0.55, hipYaw: -0.2, lean: 0.28, hpR: 0.4, knR: 0.75, abR: 0.15, shL: -0.9, elL: -2.2, shR: -0.7, elR: -2.2 }],
+    // 등이 상대를 향함: 다리를 펴며 낮은 곳에서 바깥으로 들어 올리기 시작
+    [s * 0.65, { ...PLANT, twist: -0.1, lean: 0.3, roll: 0.08, hpR: 0.15, knR: 0.45, abR: 0.6, shL: -0.4, elL: -1.6, shR: -0.8, elR: -2.2 }],
+    // 타격: 옆으로 선 채 다리를 쭉 펴 머리 높이까지 올려 찬다
+    [s, { ...PLANT, twist: 0.3, hipYaw: 0.1, lean: -0.12, roll: 0.22, hpR: -0.2, knR: 0.03, abR: 1.35, shL: 0.6, elL: -0.4, arL: 0.25, shR: -0.9, elR: -2.25, arR: -0.32 }],
+    // 회전이 이어지며 발끝이 더 위로 빠져나간다
+    [e + 1, { ...PLANT, twist: 0.35, hipYaw: 0.12, lean: -0.18, roll: 0.26, hpR: -0.28, knR: 0.08, abR: 1.5, shL: 0.5, elL: -0.5, arL: 0.25, shR: -0.9, elR: -2.25, arR: -0.32 }],
+    // 무릎을 접으며 다리를 내린다
+    [e + 9, { ...PLANT, lean: 0.12, roll: 0.06, twist: 0, hpR: -0.5, knR: 1.6, abR: 0.45 }],
+    [e + 20, { hpR: 0.1, knR: 0.6, abR: 0.15 }],
+    [totalFrames(m), {}],
+  ]);
+}
+
 function crouchPose(t: number): Pose {
   const beat = 0.5 + 0.5 * Math.sin(t * 0.11);
   return { ...CROUCH, knL: CROUCH.knL + beat * 0.08, knR: CROUCH.knR + beat * 0.08, lean: CROUCH.lean + beat * 0.03 };
@@ -588,15 +610,15 @@ export function poseFor(f: Fighter, t: number, sub = 0, loco?: Locomotion): Pose
         const r = Math.min(1, (fr - activeEnd) / (totalFrames(m) - activeEnd));
         k = Math.pow(1 - r, 2);
       }
+      if (m.anim === 'backTurnKick') return backTurnPose(fr, m);
       const ext = EXTENDED[m.anim];
       if (ext.chamber) {
         const pose = strikePose(fr, m, ext.base, ext.chamber, ext.pose, ext.windup, ext.overshoot, ext.rechamber);
-        if (m.anim === 'tornadoKick' || m.anim === 'backTurnKick') {
+        if (m.anim === 'tornadoKick') {
           const activeEnd = m.startup + m.active - 1;
           const launch = easeOut((fr - 2) / (m.startup - 2));
-          const landingDelay = m.anim === 'backTurnKick' ? 14 : 12;
-          const landing = 1 - easeInOut((fr - activeEnd - 1) / landingDelay);
-          pose.rise = (m.anim === 'backTurnKick' ? 0.9 : 0.78) * launch * landing;
+          const landing = 1 - easeInOut((fr - activeEnd - 1) / 12);
+          pose.rise = 0.78 * launch * landing;
         }
         return pose;
       }
@@ -628,16 +650,30 @@ export function kicking(f: Fighter) {
   return f.state === 'attack' && !!f.move && KICK_ANIMS.has(f.move.anim);
 }
 
-/** 뒤돌려차기는 옆으로 찰 때 상대를 향하고, 착지 전에 한 바퀴 회전을 마친다. */
+/**
+ * 뒤돌려차기 몸 회전 (라디안, 음수 = 오른쪽 = 등 쪽으로 돈다).
+ * 타격 순간 3/4 바퀴를 돌아 오른쪽 옆구리가 상대를 향하고, 그 뒤 나머지 1/4 을 돌아 정면으로 돌아온다.
+ */
 export function backTurnSpin(f: Fighter, sub = 0): number {
   const move = f.move;
   if (f.state !== 'attack' || move?.anim !== 'backTurnKick') return 0;
   const fr = Math.max(0, f.frame + sub);
   const activeEnd = move.startup + move.active - 1;
   const spinEnd = activeEnd + 14;
-  const impactSpin = Math.PI / 2;
-  if (fr <= move.startup) return impactSpin * easeInOut(fr / move.startup);
-  return impactSpin + (TAU - impactSpin) * easeInOut((fr - move.startup) / (spinEnd - move.startup));
+  const impactSpin = (3 * Math.PI) / 2;
+  // 처음엔 천천히 감다가 타격 직전에 가장 빠르게 돈다
+  if (fr <= move.startup) return -impactSpin * Math.pow(fr / move.startup, 1.8);
+  return -(impactSpin + (TAU - impactSpin) * easeOut((fr - move.startup) / (spinEnd - move.startup)));
+}
+
+/**
+ * 몸이 골반 중심이 아니라 디딤발(왼다리) 을 축으로 돌도록 루트 위치를 보정한다 → 축발이 미끄러지지 않는다.
+ * @param yaw 회전 전 몸 방향  @param hipX 골반 중심 → 왼다리 거리
+ */
+export function backTurnPivot(spin: number, yaw: number, hipX: number): { x: number; z: number } {
+  if (spin === 0) return { x: 0, z: 0 };
+  const b = yaw + spin;
+  return { x: hipX * (Math.cos(yaw) - Math.cos(b)), z: -hipX * (Math.sin(yaw) - Math.sin(b)) };
 }
 
 /** 목표 포즈를 관절별 2차 스프링으로 따라가는 실제 표시 포즈 */
@@ -830,6 +866,8 @@ export class Mannequin implements CharacterView {
   private hairAng = { x: PONYTAIL_BASE, z: 0, vx: 0, vz: 0 };
   private lastHead = new THREE.Vector3();
   private blinkSeed = Math.floor(Math.random() * 200);
+  /** 골반 중심 → 왼다리 거리 (뒤돌려차기 축발 보정용) */
+  private hipX = 0.11;
 
   constructor(look: number | Appearance) {
     const raw: Appearance = typeof look === 'number' ? { kind: 'basic', color: look } : look;
@@ -838,6 +876,7 @@ export class Mannequin implements CharacterView {
       app.kind === 'heroine'
         ? { shX: 0.175, shY: 0.47, upper: 0.26, hipX: 0.085 }
         : { shX: 0.28, shY: 0.54, upper: 0.3, hipX: 0.11 };
+    this.hipX = dims.hipX;
 
     this.root.add(this.body);
     this.body.add(this.torso);
@@ -884,8 +923,10 @@ export class Mannequin implements CharacterView {
     const glow = f.isArmored() ? 0.6 + 0.4 * Math.sin(t * 0.6) : 0;
     this.mainMat.emissive.setRGB(glow, glow * 0.25, 0);
 
-    this.root.position.set(lp.x, lp.y, lp.z);
-    this.root.rotation.y = yaw + backTurnSpin(f, c.sub);
+    const spin = backTurnSpin(f, c.sub);
+    const pivot = backTurnPivot(spin, yaw, this.hipX);
+    this.root.position.set(lp.x + pivot.x, lp.y, lp.z + pivot.z);
+    this.root.rotation.y = yaw + spin;
 
     const standY = Math.max(legHeight(p.hpL, p.knL, p.abL), legHeight(p.hpR, p.knR, p.abR)) + 0.06;
     this.body.position.y = standY * (1 - p.drop) + 0.14 * p.drop + p.rise;

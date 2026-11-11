@@ -1617,10 +1617,21 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   backTurn.player.move = MOVES.smallSilverBackTurnKick;
   backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup;
   const turnedPose = poseFor(backTurn.player, 0);
-  check('small silver girl: back-turn kick faces side-on at impact and extends the leg sideways', Math.abs(backTurnSpin(backTurn.player) - Math.PI / 2) < 0.01 && turnedPose.abR > 1 && turnedPose.knR < 0.1);
+  check('small silver girl: back-turn kick spins backward 3/4 turn and extends the leg sideways at impact', Math.abs(backTurnSpin(backTurn.player) + (3 * Math.PI) / 2) < 0.01 && turnedPose.abR > 1 && turnedPose.knR < 0.1);
+  // 아래에서 위로: 타격 전에는 다리가 낮고, 타격 순간 높다
+  backTurn.player.frame = Math.round(MOVES.smallSilverBackTurnKick.startup * 0.65);
+  const risingPose = poseFor(backTurn.player, 0);
+  check('small silver girl: back-turn kick swings the leg from low to high', risingPose.abR < 0.8 && turnedPose.abR > risingPose.abR + 0.5);
+  let grounded = true;
+  const totalBackTurn = MOVES.smallSilverBackTurnKick.startup + MOVES.smallSilverBackTurnKick.active + MOVES.smallSilverBackTurnKick.recovery;
+  for (let fr = 0; fr < totalBackTurn; fr++) {
+    backTurn.player.frame = fr;
+    const pz = poseFor(backTurn.player, 0);
+    if (pz.rise > 0.001 || pz.knL > 0.7) grounded = false;
+  }
+  check('small silver girl: back-turn kick keeps the support foot planted (no jump)', grounded);
   backTurn.player.frame = MOVES.smallSilverBackTurnKick.startup + MOVES.smallSilverBackTurnKick.active - 1 + 14;
-  const rotatedKick = poseFor(backTurn.player, 0);
-  check('small silver girl: back-turn kick completes one airborne turn before landing', Math.abs(backTurnSpin(backTurn.player) - Math.PI * 2) < 0.01 && rotatedKick.rise < 0.01);
+  check('small silver girl: back-turn kick completes one full turn', Math.abs(backTurnSpin(backTurn.player) + Math.PI * 2) < 0.01);
 
   for (const location of ['city', 'home', 'lobby', 'corridor', 'store', 'park'] as const) {
     const world = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, profile, 34);

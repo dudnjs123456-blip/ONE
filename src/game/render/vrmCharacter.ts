@@ -25,6 +25,7 @@ import {
   Locomotion,
   Mannequin,
   PoseSpring,
+  backTurnPivot,
   backTurnSpin,
   kicking,
   attackBoost,
@@ -454,8 +455,11 @@ export class VrmCharacter implements CharacterView {
     const { yaw, bank } = this.heading.update(Math.atan2(lp.fx, lp.fz), c.dt, f.state === 'attack', speed);
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
 
-    vrm.scene.position.set(lp.x, lp.y, lp.z);
-    vrm.scene.rotation.y = yaw + backTurnSpin(f, c.sub);
+    // 뒤돌려차기: 왼발을 축으로 돌도록 위치 보정
+    const spin = backTurnSpin(f, c.sub);
+    const pivot = backTurnPivot(spin, yaw, this.rig.hipX);
+    vrm.scene.position.set(lp.x + pivot.x, lp.y, lp.z + pivot.z);
+    vrm.scene.rotation.y = yaw + spin;
 
     // 골반 높이: 다리 각도로 발이 바닥에 닿는 높이를 계산 (누우면 바닥 가까이)
     const { thigh, shin, hipsY } = this.rig;
