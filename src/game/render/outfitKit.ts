@@ -27,7 +27,7 @@ const SWIM_HIDE = ['Tops_', 'Bottoms_', 'Onepiece_'];
  * 몸의 어디인지(높이·좌우)를 삼각형 안에서 보간해 정한다 → 경계가 매끈하고 모델마다 몸에 맞는다.
  * 옷에 가려져 있던 몸통 그림은 비어 있거나 얼룩이 있어서, 비키니 밖 몸통은 다리에서 뽑은 피부색으로 먼저 채운다.
  */
-function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture, m: Metrics, color: number): { map: THREE.Texture; shade: THREE.Texture } | null {
+function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture, m: Metrics, color: number, root: THREE.Object3D): { map: THREE.Texture; shade: THREE.Texture } | null {
   const img = src.image as CanvasImageSource & { width: number; height: number };
   const geo = mesh.geometry;
   const uv = geo.attributes.uv;
@@ -47,7 +47,10 @@ function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture
   const spx = new Uint8ClampedArray(px);
   const sf = ((mat as { shadeColorFactor?: THREE.Color }).shadeColorFactor ?? new THREE.Color(1, 1, 1)).clone().convertLinearToSRGB();
   const shadeOf = (c: number[]) => [c[0] * 0.78 / Math.max(0.05, sf.r), c[1] * 0.78 / Math.max(0.05, sf.g), c[2] * 0.82 / Math.max(0.05, sf.b)];
-  mesh.updateMatrixWorld(true);
+  // 몸 치수(m)는 캐릭터를 처음 불러올 때(제자리·정면) 잰 값이라, 정점도 캐릭터 기준 좌표로 바꿔서 비교한다.
+  // (세상 좌표를 쓰면 마을을 걷다가 옷을 바꿀 때 위치·방향이 달라 수영복이 엉뚱한 자리에 그려졌다)
+  root.updateMatrixWorld(true);
+  const toLocal = new THREE.Matrix4().copy(root.matrixWorld).invert().multiply(mesh.matrixWorld);
   const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   const groups = geo.groups.length ? geo.groups : [{ start: 0, count: geo.index ? geo.index.count : pos.count, materialIndex: 0 }];
   const chestY = m.chestPos.y;
@@ -59,7 +62,7 @@ function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture
     for (let k = gr.start; k + 2 < gr.start + gr.count; k += 3) {
       const ids = [0, 1, 2].map((j) => (geo.index ? geo.index.getX(k + j) : k + j));
       tris.push({
-        p: ids.map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld)),
+        p: ids.map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(toLocal)),
         u: ids.flatMap((i) => [uv.getX(i) * W, uv.getY(i) * H]),
       });
     }
@@ -315,7 +318,7 @@ export class OutfitDresser {
         if (k.origShade) k.mat.shadeMultiplyTexture = k.origShade;
         continue;
       }
-      const tex = paintSwimsuit(k.mesh, k.mat, k.origMap, this.m, c.color);
+      const tex = paintSwimsuit(k.mesh, k.mat, k.origMap, this.m, c.color, this.vrm.scene);
       if (!tex) continue;
       this.own.push(tex.map, tex.shade);
       k.mat.map = tex.map;
