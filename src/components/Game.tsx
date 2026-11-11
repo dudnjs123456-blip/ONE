@@ -238,30 +238,34 @@ export default function Game() {
 
   return (
     <main className="tg-sky px-6 py-12">
-      {/* 오른쪽 아래 캐릭터 (배경 없는 그림): 뒤쪽 후광 + 발밑 그림자로 밤하늘 위에 자연스럽게 세운다 */}
-      <div aria-hidden className="pointer-events-none fixed bottom-6 right-16 z-0 hidden h-[44vh] w-[calc(44vh*432/1211)] opacity-60 md:block xl:opacity-100">
-        {/* 후광 */}
-        <div
-          className="absolute left-1/2 top-[38%] h-[85%] w-[260%] -translate-x-1/2 -translate-y-1/2 rounded-full"
-          style={{ background: 'radial-gradient(closest-side, rgba(255, 182, 220, 0.28), rgba(150, 120, 255, 0.16) 55%, transparent 100%)' }}
-        />
-        {/* 발밑 그림자 */}
-        <div
-          className="absolute -bottom-2 left-1/2 h-6 w-[115%] -translate-x-1/2 rounded-full"
-          style={{ background: 'radial-gradient(closest-side, rgba(20, 10, 45, 0.6), transparent)' }}
-        />
-        {/* 캐릭터 */}
-        <div
-          className="relative h-full w-full"
-          style={{
-            backgroundImage: 'url(/images/menu-character.webp?v=2)',
-            backgroundSize: 'contain',
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center bottom',
-            filter: 'drop-shadow(0 0 14px rgba(255, 210, 240, 0.25))',
-          }}
-        />
-      </div>
+      {/*
+        오른쪽 아래 캐릭터 (서울 거리 배경이 있는 그림, 두 겹)
+        1) 같은 그림을 크게 흐리게 번진 복사본 — 그림 속 밤거리 색이 검은 배경 쪽으로 퍼져 나가 경계를 감춘다
+        2) 선명한 원본 — 캐릭터는 또렷하게, 가장자리만 타원형으로 부드럽게 지운다
+      */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed bottom-0 right-0 z-0 hidden h-[74vh] w-[calc(52vh*843/1264*2.1)] opacity-50 md:block xl:opacity-80"
+        style={{
+          backgroundImage: 'url(/images/menu-character-city.webp)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center bottom',
+          filter: 'blur(48px) brightness(0.55) saturate(1.1)',
+          maskImage: 'radial-gradient(ellipse 50% 55% at 62% 78%, black 30%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 50% 55% at 62% 78%, black 30%, transparent 100%)',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none fixed bottom-0 -right-8 z-0 hidden h-[52vh] w-[calc(52vh*843/1264)] opacity-60 md:block xl:opacity-100"
+        style={{
+          backgroundImage: 'url(/images/menu-character-city.webp)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center bottom',
+          maskImage: 'radial-gradient(ellipse 50% 62% at 50% 62%, black 58%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 50% 62% at 50% 62%, black 58%, transparent 100%)',
+        }}
+      />
       {/* 왼쪽 아래 두 번째 캐릭터 (한복): 동그란 수묵화 배경이 달처럼 은은하게 번진다 */}
       <div
         aria-hidden
