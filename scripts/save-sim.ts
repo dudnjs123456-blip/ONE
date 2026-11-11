@@ -73,3 +73,19 @@ const mk = (patch: Partial<PlayerProfile>): PlayerProfile => ({ ...newProfile(),
   check('rank: 5 points = 수련생', rankOf(r(3, 1, 0)).name === '수련생');
   check('rank: top rank has no next', rankOf(r(0, 0, 70)).name === '철권왕' && rankOf(r(0, 0, 70)).next === null);
 }
+
+// 코디 창에서 고른 캐릭터·낚시 기록도 서버에 저장되어, 새로고침(서버 기록과 합치기) 뒤에도 남는다
+{
+  const fishing = { rod: 'pro', bait: { worm: 3 } } as unknown as PlayerProfile['fishing'];
+  const local = mk({ body: 'silver' as PlayerProfile['body'], fishing, savedAt: 7000 });
+  const save = toSave(local);
+  check('toSave includes body & fishing', save.body === 'silver' && JSON.stringify(save.fishing) === JSON.stringify(fishing));
+  // 서버에서 다시 읽은 기록 (pull 과 같은 모양) 과 브라우저 기록을 합친다
+  const remote = mk({ ...(save as Partial<PlayerProfile>), savedAt: 7000 });
+  const m = mergeProfiles(remote, local);
+  check('body survives refresh merge', m.body === 'silver', String(m.body));
+  check('fishing survives refresh merge', JSON.stringify(m.fishing) === JSON.stringify(fishing));
+  // 예전 서버 기록(캐릭터 없음)이 더 최근이어도 브라우저에 남은 캐릭터를 쓴다
+  const old = mergeProfiles(mk({ savedAt: 9000 }), local);
+  check('older browser body fills missing server body', old.body === 'silver', String(old.body));
+}
