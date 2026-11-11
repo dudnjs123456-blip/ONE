@@ -444,3 +444,26 @@ check('A sees B pet', !!pet && pet.sp === 'dog' && pet.x === 1 && pet.z === 2 &&
   B.receiveMood('a', 3);
   check('mood: unknown moods are ignored', B.faces.length === 0);
 }
+
+// 숫자 키 대사 목소리: 내가 말하면 내 목소리, 같은 곳 친구 목소리는 거리만큼, 다른 곳이면 안 들린다
+{
+  const girl = (): PlayerProfile => ({ ...newProfile(), body: 'smallSilverGirl' });
+  const A = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) }, girl(), 31);
+  const B = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) }, newProfile(), 32);
+  B.upsertRemote('a', '친구A', '302', [], 'smallSilverGirl');
+  const heardA: string[] = [];
+  const heardB: { who: string; src: string; v: number }[] = [];
+  A.onVoice = (who, src) => heardA.push(`${who} ${src}`);
+  B.onVoice = (who, src, v) => heardB.push({ who, src, v });
+  A.postMood('웃음');
+  check('voice: I hear my own line', heardA[0] === 'me /voices/smallSilverGirl/smile.mp3', `(${heardA[0]})`);
+  const ra = B.remotes.get('a')!;
+  ra.room = B.roomKey;
+  ra.fighter.x = B.player.x + 3;
+  ra.fighter.z = B.player.z;
+  for (const m of A.moodOut.splice(0)) B.receiveMood('a', m);
+  check('voice: friend nearby hears the same line', heardB.length === 1 && heardB[0].src.endsWith('/smile.mp3') && heardB[0].v > 0.5, `(${JSON.stringify(heardB[0])})`);
+  ra.room = 'somewhere-else';
+  B.receiveMood('a', '울음');
+  check('voice: friend in another place hears nothing', heardB.length === 1);
+}

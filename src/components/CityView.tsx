@@ -46,6 +46,9 @@ import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
 import MoodLinePop from './MoodLinePop';
 import { MOOD_LINES, moodLineKey } from '@/game/data/moodLines';
+import { PLAYER_MOODS } from '@/game/data/npcs';
+import { playerVoice } from '@/game/data/voices';
+import { playVoiceLine, preloadVoices } from '@/game/render/voiceLine';
 import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
 import { tvPlay as tvPlayShared, tvPos, tvReset, tvState, type TvVideo } from '@/game/city/tvState';
 import { PerfProbe } from '@/game/render/perfProbe';
@@ -306,6 +309,9 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __city?: CityWorld }).__city = world;
     worldRef.current = world;
+    // 숫자 키 대사 목소리 (나 · 같은 곳 친구)
+    world.onVoice = playVoiceLine;
+    preloadVoices(PLAYER_MOODS.map((m) => playerVoice(profile.body, m)));
     // 날짜·시각·날씨는 모두가 같이 쓰는 동네 시계를 따른다 (서버 시각에 맞춘 뒤, 1분마다 다시 맞춘다)
     world.attachSharedClock(sharedNow);
     void syncWorldClock();

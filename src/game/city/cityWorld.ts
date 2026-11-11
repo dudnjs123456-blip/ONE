@@ -10,6 +10,7 @@ import { ITEMS, ITEM_IDS } from '../data/items';
 import { SHOPS, type ShopDef } from '../data/shops';
 import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine } from './chat';
 import { PLAYER_MOODS, type PlayerMood } from '../data/npcs';
+import { playerVoice, voiceVolume } from '../data/voices';
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
@@ -775,6 +776,8 @@ export class CityWorld {
   faces: { who: string; mood: PlayerMood }[] = [];
   /** 보낼 표정 (마을 연결이 가져가서 보낸다) */
   moodOut: PlayerMood[] = [];
+  /** 대사 목소리를 낼 때 (화면이 붙여서 재생한다): 누가 · 소리 파일 · 크기(0~1) */
+  onVoice?: (who: string, src: string, volume: number) => void;
   private lastEmoteAt = -Infinity;
   private lastChatAt = -Infinity;
   /** 지금 들어가 있는 집의 주인 (null = 내 집) */
@@ -2206,11 +2209,17 @@ export class CityWorld {
   postMood(mood: PlayerMood) {
     this.faces.push({ who: 'me', mood });
     this.moodOut.push(mood);
+    const src = playerVoice(this.profile.body, mood);
+    if (src) this.onVoice?.('me', src, 1);
   }
 
-  /** 친구가 지은 표정 (목록에 있는 기분만) */
+  /** 친구가 지은 표정 (목록에 있는 기분만). 같은 곳에 있으면 그 친구 목소리도 거리만큼 들린다 */
   receiveMood(id: string, mood: unknown) {
-    if ((PLAYER_MOODS as readonly unknown[]).includes(mood)) this.faces.push({ who: id, mood: mood as PlayerMood });
+    if (!(PLAYER_MOODS as readonly unknown[]).includes(mood)) return;
+    this.faces.push({ who: id, mood: mood as PlayerMood });
+    const r = this.remotes.get(id);
+    const src = r && r.room === this.roomKey ? playerVoice(r.body, mood as PlayerMood) : null;
+    if (r && src) this.onVoice?.(id, src, voiceVolume(Math.hypot(r.fighter.x - this.player.x, r.fighter.z - this.player.z)));
   }
 
   /** 친구의 감정 표현 (목록에 있는 이모지만) */
