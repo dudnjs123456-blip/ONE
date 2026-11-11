@@ -1388,8 +1388,8 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   const w = new CityWorld({ read: () => c });
   const npc = w.npcs[0];
   npc.pause = 600;
-  // 플레이어는 북쪽(-z)을 보고, 행인은 오른쪽(+x) 1.1m
-  w.player.reset(npc.fighter.x - 1.1, npc.fighter.z, 0, -1);
+  // 플레이어는 북쪽(-z)을 보고, 행인은 오른쪽(+x) 0.9m (제자리 발차기가 닿는 거리)
+  w.player.reset(npc.fighter.x - 0.9, npc.fighter.z, 0, -1);
   const A = [false, false, true, false] as [boolean, boolean, boolean, boolean];
   const N = [false, false, false, false] as [boolean, boolean, boolean, boolean];
   c = { move: null, run: false, interact: false, buttons: A };
@@ -1607,7 +1607,8 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   let backTurnInput: CityInput = { move: null, run: false, interact: false, skill: 'backTurnKick' };
   const backTurn = new CityWorld({ read: () => backTurnInput }, profile, 35);
   const backTurnTarget = backTurn.npcs[0];
-  backTurnTarget.fighter.reset(backTurn.player.x + backTurn.player.fx * 0.9, backTurn.player.z + backTurn.player.fz * 0.9, -backTurn.player.fx, -backTurn.player.fz);
+  // 등지고 선 행인 (보고 있으면 느린 뒤돌려차기를 자동으로 피한다)
+  backTurnTarget.fighter.reset(backTurn.player.x + backTurn.player.fx * 0.9, backTurn.player.z + backTurn.player.fz * 0.9, backTurn.player.fx, backTurn.player.fz);
   backTurnTarget.pause = 1200;
   backTurn.step();
   backTurnInput = { move: null, run: false, interact: false };

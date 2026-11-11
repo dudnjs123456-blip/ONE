@@ -106,12 +106,12 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
   midKick: {
     name: '미들 킥', notation: '3', input: { dir: 'n', button: 3 },
     startup: 18, active: 4, recovery: 26, damage: 17, level: 'mid', lunge: 0.02, weighty: true,
-    range: 1.25, tracking: 0.15, onBlock: -7, onHit: 4, pushback: 0.55, anim: 'midKickL',
+    range: 0.75, tracking: 0.15, onBlock: -7, onHit: 4, pushback: 0.55, anim: 'midKickL',
   },
   highKick: {
     name: '하이 킥', notation: '4', input: { dir: 'n', button: 4 },
     startup: 17, active: 4, recovery: 27, damage: 20, level: 'high', lunge: 0.015, weighty: true,
-    range: 1.3, tracking: 0.4, onBlock: -9, onHit: 8, pushback: 0.6, anim: 'highKickR',
+    range: 1.1, tracking: 0.4, onBlock: -9, onHit: 8, pushback: 0.6, anim: 'highKickR',
   },
   dfJab: {
     name: '중단 잽', notation: 'df+1', input: { dir: 'df', button: 1 },
@@ -131,12 +131,12 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
   lowKick: {
     name: '로우 킥', notation: 'd+4', input: { dir: 'd', button: 4 },
     startup: 15, active: 3, recovery: 22, damage: 9, level: 'low', crouching: true, weighty: true,
-    range: 1.05, tracking: 0.1, onBlock: -13, onHit: -2, pushback: 0.2, anim: 'lowKickR',
+    range: 0.88, tracking: 0.1, onBlock: -13, onHit: -2, pushback: 0.2, anim: 'lowKickR',
   },
   sweep: {
     name: '다리 후리기 (다운)', notation: 'db+3', input: { dir: 'db', button: 3 },
     startup: 20, active: 4, recovery: 30, damage: 18, level: 'low', crouching: true,
-    range: 1.3, tracking: 0.5, onBlock: -20, onHit: 0, pushback: 0.2, launch: 0.07, anim: 'sweepL',
+    range: 0.68, tracking: 0.5, onBlock: -20, onHit: 0, pushback: 0.2, launch: 0.07, anim: 'sweepL',
   },
 
   // ───── 대시 중에만 나가는 기술 (input: null, Fighter.tryAttack 이 대시 상태에서 고른다) ─────
@@ -209,7 +209,7 @@ export const MOVES: Record<string, MoveDef> = defineMoves({
     name: '은빛 뒤돌려차기', notation: '캐릭터 스킬', input: null, characterOnly: true,
     // 크게 돌며 머리 위까지 올려 차는 만큼 느리다 (발생 24F)
     startup: 24, active: 5, recovery: 38, damage: 26, level: 'mid', weighty: true,
-    range: 1.5, tracking: 0.65, onBlock: -16, onHit: 3, pushback: 0.75, launch: 0.12, anim: 'backTurnKick',
+    range: 0.8, tracking: 0.65, onBlock: -16, onHit: 3, pushback: 0.75, launch: 0.12, anim: 'backTurnKick',
   },
 
   // ───── 보스 전용 (input: null → 플레이어는 못 씀, AI 가 직접 발동) ─────

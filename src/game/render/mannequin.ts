@@ -522,8 +522,8 @@ function backTurnPose(fr: number, m: MoveDef): Pose {
     // 몸을 왼쪽으로 기울이는 만큼(roll) 디딤다리는 반대로 벌려(abL) 땅에 수직으로 세운다
     // 몸을 왼쪽으로 눕히며 다리가 어깨 높이를 지나 계속 올라간다
     [s * 0.85, { ...PLANT, abL: 0.44, twist: 0.15, hipYaw: 0.05, lean: 0.05, roll: -0.38, hpR: -0.05, knR: 0.12, abR: 1.5, shL: 0.3, elL: -0.8, arL: 0.2, shR: -0.85, elR: -2.2 }],
-    // 타격: 옆으로 누운 몸에서 다리를 쭉 펴 머리 위까지 올려 찬다
-    [s, { ...PLANT, abL: 0.66, twist: 0.3, hipYaw: 0.1, lean: -0.1, roll: -0.6, hpR: -0.2, knR: 0.03, abR: 2.2, shL: 0.6, elL: -0.4, arL: 0.45, shR: -0.9, elR: -2.25, arR: -0.32 }],
+    // 타격: 옆으로 누운 몸에서 다리를 쭉 펴 머리 높이에서 맞히고, 맞히는 동안 머리 위까지 계속 올려 찬다
+    [s, { ...PLANT, abL: 0.5, twist: 0.3, hipYaw: 0.1, lean: -0.1, roll: -0.45, hpR: -0.2, knR: 0.03, abR: 1.75, shL: 0.6, elL: -0.4, arL: 0.45, shR: -0.9, elR: -2.25, arR: -0.32 }],
     // 회전이 이어지며 발끝이 위로 빠져나간다
     [e + 1, { ...PLANT, abL: 0.68, twist: 0.35, hipYaw: 0.12, lean: -0.12, roll: -0.62, hpR: -0.28, knR: 0.06, abR: 2.3, shL: 0.5, elL: -0.5, arL: 0.45, shR: -0.9, elR: -2.25, arR: -0.32 }],
     // 무릎을 접으며 다리를 천천히 내리고 몸을 세운다

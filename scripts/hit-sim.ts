@@ -98,7 +98,7 @@ function duel(mv: MoveDef, dist: number, opts: { defSpec?: BodySpec; attSpec?: B
 // 3) 자동 회피: 보고 있고, 반응할 시간이 있고, 거리가 되면 피한다
 {
   const slow = MOVES.smallSilverBackTurnKick;
-  const dodge = duel(slow, 1.3);
+  const dodge = duel(slow, 1.0);
   check('느린 발차기를 보고 있으면 자동으로 뒤로 피한다 (모션)', dodge.dodged);
   check('거리가 되면 피해서 안 맞는다 (같은 거리에서 등지고 있으면 맞는다)', dodge.hitFrame < 0);
 
@@ -108,21 +108,21 @@ function duel(mv: MoveDef, dist: number, opts: { defSpec?: BodySpec; attSpec?: B
   const jab = duel(MOVES.jab, 0.9);
   check('반응보다 빠른 잽은 피하지 못하고 맞는다', !jab.dodged && jab.hitFrame > 0);
 
-  const back = duel(slow, 1.3, { watching: false });
+  const back = duel(slow, 1.0, { watching: false });
   check('등지고 있으면(보고 있지 않으면) 피하지 않고 맞는다', !back.dodged && back.hitFrame > 0);
 
   // 반응이 빠른 캐릭터는 같은 거리에서 피하고, 느린 캐릭터는 맞는다
-  const fast = duel(slow, 1.15, { defSpec: BODY_SPECS.smallSilverGirl });
-  const sluggish = duel(slow, 1.15, { defSpec: { ...BODY_SPECS.npc, reaction: 30 } });
+  const fast = duel(slow, 0.75, { defSpec: BODY_SPECS.smallSilverGirl });
+  const sluggish = duel(slow, 0.75, { defSpec: { ...BODY_SPECS.npc, reaction: 30 } });
   check('반응이 빠르면 피하고, 느리면 같은 거리에서도 맞는다', fast.hitFrame < 0 && sluggish.hitFrame > 0, `(빠름 F${fast.hitFrame}, 느림 F${sluggish.hitFrame})`);
 }
 
 // 4) 내 캐릭터: 손을 놓고 있으면 자동으로 피하고, 조작 중이면 안 피한다
 {
   const slow = MOVES.smallSilverBackTurnKick;
-  const idle = duel(slow, 1.3, { defManual: true });
+  const idle = duel(slow, 1.0, { defManual: true });
   check('내 캐릭터도 조작하지 않을 땐 자동으로 피한다', idle.dodged);
-  const holding = duel(slow, 1.3, { defManual: true, defInput: { dir: 6, buttons: [false, false, false, false] } });
+  const holding = duel(slow, 1.0, { defManual: true, defInput: { dir: 6, buttons: [false, false, false, false] } });
   check('방향키를 누르고 있으면(조작 중) 자동 회피가 꺼진다', !holding.dodged);
   check('손을 놓은 내 캐릭터는 피해서 안 맞는다', idle.hitFrame < 0);
 }

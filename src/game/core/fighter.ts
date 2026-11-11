@@ -29,7 +29,7 @@ import { NEUTRAL_INPUT, isBack, isDown, isForward, isUp, type RelInput } from '.
 import type { Button, Dir } from './types';
 import { DASH_MOVES, JUMP_MOVES, MOVES, findMove, hasComboWith, totalFrames, type MoveDef } from '../data/moves';
 import type { BodySpec } from '../data/bodies';
-import { stepDistance } from './reach';
+import { isPlantedKick, stepDistance } from './reach';
 
 export type FighterState =
   | 'idle'
@@ -724,7 +724,7 @@ export class Fighter {
         : 0;
     this.buffered = null;
     this.startMove(mv);
-    this.carry = carry;
+    this.carry = isPlantedKick(mv) && !fromJump ? 0 : carry; // 디딤발 발차기는 미끄러지지 않는다
     // 단일 기술이면 짝 버튼이 곧 들어올 수 있다 (동시 입력으로 바꿀 수 있게 기억)
     this.startedFrom = !specialId && !b.pair && hasComboWith(b.button) ? { button: b.button, dir: b.dir, at: this.feedCount } : null;
     if (fromJump) this.airAttackUsed = true;
@@ -874,7 +874,7 @@ export class Fighter {
         lat = SIDESTEP_SPEED * this.tempo * this.sidestepSign * (this.frame < SIDESTEP_FRAMES - 4 ? 1 : 0.4);
         break;
       case 'attack':
-        if (this.move?.lunge && this.frame <= this.move.startup) fwd = this.move.lunge;
+        if (this.move?.lunge && this.frame <= this.move.startup && !isPlantedKick(this.move)) fwd = this.move.lunge;
         if (this.move && this.frame <= this.move.startup) fwd += this.stepPerFrame;
         fwd += this.carry;
         this.carry *= this.move?.aerial ? 0.985 : 0.9; // 공중에선 기세가 거의 안 줄어든다

@@ -244,12 +244,18 @@ export function moveReach(att: Fighter, spec: BodySpec): number | null {
     const seg = strikeSegment(probe, spec);
     if (seg) best = Math.max(best, seg.a.z, seg.b.z);
   }
-  const reach = best + (m.lunge ?? 0) * m.startup + stepDistance(m) + LIMB_RADIUS;
+  const reach = best + (isPlantedKick(m) ? 0 : (m.lunge ?? 0) * m.startup) + stepDistance(m) + LIMB_RADIUS;
   byMove.set(key, reach);
   return reach;
 }
 
 // ───────────────────────── 파고드는 스텝 ─────────────────────────
+
+/** 디딤발을 땅에 박고 차는 발차기: 몸이 앞으로 미끄러지면 디딤발도 끌려가므로 스텝·돌진 없이 제자리에서 찬다 */
+const PLANTED_KICKS = new Set<string>(['midKickL', 'highKickR', 'lowKickR', 'sweepL', 'backTurnKick']);
+export function isPlantedKick(mv: MoveDef): boolean {
+  return PLANTED_KICKS.has(mv.anim);
+}
 
 /** 스텝 계산 기준 몸 (기본 외형). 팔다리가 더 긴 캐릭터는 그만큼 더 멀리 닿는다 */
 let refSpec: BodySpec | null = null;
@@ -279,11 +285,11 @@ function standingContactMax(mv: MoveDef, spec: BodySpec): number {
  */
 export function stepDistance(mv: MoveDef): number {
   const m = STRIKER[mv.anim];
-  if (!m) return 0;
+  if (!m || isPlantedKick(mv)) return 0;
   const cached = stepCache.get(mv.id);
   if (cached !== undefined) return cached;
   refSpec ??= BODY_SPECS.female;
-  const lunge = (mv.lunge ?? 0) * mv.startup;
+  const lunge = (mv.lunge ?? 0) * mv.startup; // 디딤발 발차기는 위에서 이미 0
   const reach = standingContactMax(mv, refSpec) + lunge;
   const step = Math.min(MAX_STEP, Math.max(0, mv.range + FIGHTER_RADIUS - reach));
   stepCache.set(mv.id, step);

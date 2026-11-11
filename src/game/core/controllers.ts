@@ -1,11 +1,11 @@
 import type { Fighter } from './fighter';
 import { Keyboard, NEUTRAL_INPUT, mergeRaw, readGamepad, toRelative, type KeyMap, type RelInput } from './input';
 import type { Buttons, Dir } from './types';
-import { MOVES, PUNISH_FRAMES, playerStartup, totalFrames } from '../data/moves';
+import { MOVES, PUNISH_FRAMES, findMove, playerStartup, totalFrames } from '../data/moves';
 
 /** 반격 기술들의 실제(템포 보정) 발생 프레임 */
 const PUNISH = { jab: PUNISH_FRAMES, dfJab: playerStartup(MOVES.dfJab), uppercut: playerStartup(MOVES.uppercut) };
-import { STAGE_RADIUS } from './constants';
+import { FIGHTER_RADIUS, STAGE_RADIUS } from './constants';
 
 export interface ControllerContext {
   self: Fighter;
@@ -199,7 +199,13 @@ export class CpuController implements Controller {
       this.queue.push({ dir: 6, buttons: [true, false, true, false] }, press(5));
       this.hold(5, 20);
     } else if (r < a) {
-      this.attack(CPU_ATTACKS[Math.floor(this.rng() * CPU_ATTACKS.length)]);
+      // 지금 거리에서 실제로 닿는 기술만 고른다 (닿는 게 없으면 다가간다)
+      const inReach = CPU_ATTACKS.filter(([dir, button]) => {
+        const mv = findMove(button, dir);
+        return !!mv && dist <= mv.range + FIGHTER_RADIUS + (mv.lunge ?? 0) * mv.startup;
+      });
+      if (inReach.length) this.attack(inReach[Math.floor(this.rng() * inReach.length)]);
+      else this.hold(6, 6);
     } else if (r < a + 0.15) {
       this.hold(4, 10 + Math.floor(this.rng() * 15));
     } else if (r < a + 0.25) {
