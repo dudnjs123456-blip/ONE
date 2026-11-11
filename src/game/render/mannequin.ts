@@ -670,10 +670,72 @@ export function backTurnSpin(f: Fighter, sub = 0): number {
  * 몸이 골반 중심이 아니라 디딤발(왼다리) 을 축으로 돌도록 루트 위치를 보정한다 → 축발이 미끄러지지 않는다.
  * @param yaw 회전 전 몸 방향  @param hipX 골반 중심 → 왼다리 거리
  */
-export function backTurnPivot(spin: number, yaw: number, hipX: number): { x: number; z: number } {
+export function backTurnPivot(spin: number, yaw: number, px: number, pz = 0): { x: number; z: number } {
   if (spin === 0) return { x: 0, z: 0 };
-  const b = yaw + spin;
-  return { x: hipX * (Math.cos(yaw) - Math.cos(b)), z: -hipX * (Math.sin(yaw) - Math.sin(b)) };
+  // y축 회전 θ: (x, z) → (x cosθ + z sinθ, −x sinθ + z cosθ)
+  const rot = (th: number) => ({ x: px * Math.cos(th) + pz * Math.sin(th), z: -px * Math.sin(th) + pz * Math.cos(th) });
+  const a = rot(yaw);
+  const b = rot(yaw + spin);
+  return { x: a.x - b.x, z: a.z - b.z };
+}
+
+// ───────────────────────── 발차기 디딤발 고정 ─────────────────────────
+
+/** 땅에서 차는 발차기 → 디딤발 쪽. (날아차기·회오리·슬라이딩처럼 뜨거나 미끄러지는 기술은 제외) */
+const SUPPORT_SIDE: Partial<Record<MoveAnim, 'L' | 'R'>> = {
+  midKickL: 'R',
+  sweepL: 'R',
+  highKickR: 'L',
+  lowKickR: 'L',
+  backTurnKick: 'L',
+  kneeR: 'L',
+};
+
+export interface LegDims {
+  hipX: number;
+  /** 골반 중심 → 고관절 높이 차 (아래가 −) */
+  hipY: number;
+  thigh: number;
+  shin: number;
+}
+
+const _foot = new THREE.Vector3();
+const _knee = new THREE.Vector3();
+const _eHip = new THREE.Euler();
+const _eBody = new THREE.Euler();
+const _eKnee = new THREE.Euler();
+
+/** 몸(골반) 원점 기준 발 위치 (x, z). 화면의 관절 회전과 같은 순서로 계산 */
+function footXZ(p: Pose, side: 'L' | 'R', bank: number, d: LegDims): { x: number; z: number } {
+  const hp = side === 'L' ? p.hpL : p.hpR;
+  const kn = side === 'L' ? p.knL : p.knR;
+  const ab = side === 'L' ? p.abL : -p.abR;
+  _foot.set(0, -d.shin, 0).applyEuler(_eKnee.set(kn, 0, 0));
+  _knee.set(0, -d.thigh, 0).add(_foot).applyEuler(_eHip.set(hp, 0, ab));
+  _knee.x += side === 'L' ? d.hipX : -d.hipX;
+  _knee.y += d.hipY;
+  _knee.applyEuler(_eBody.set(p.tilt, p.hipYaw, p.roll + bank));
+  return { x: _knee.x, z: _knee.z };
+}
+
+/** 뒤돌려차기 회전 축 = 기본 자세의 디딤발 위치 */
+export function backTurnPivotPoint(d: LegDims): { x: number; z: number } {
+  return footXZ(GUARD, 'L', 0, d);
+}
+
+/**
+ * 발차기 중 몸을 비틀고(골반 회전)·기울여도(roll) 디딤발이 기본 자세 자리에 그대로 붙어 있도록
+ * 몸 전체를 옮길 양 (x, z). 기술 시작 3프레임에 걸쳐 서서히 적용한다.
+ */
+export function supportFootAnchor(f: Fighter, p: Pose, bank: number, d: LegDims, sub = 0): { x: number; z: number } {
+  const m = f.move;
+  if (f.state !== 'attack' || !m) return { x: 0, z: 0 };
+  const side = SUPPORT_SIDE[m.anim];
+  if (!side || p.rise > 0.02 || p.drop > 0.05) return { x: 0, z: 0 };
+  const w = clamp01((f.frame + sub) / 3);
+  const ref = footXZ(EXTENDED[m.anim].base, side, 0, d);
+  const now = footXZ(p, side, bank, d);
+  return { x: (ref.x - now.x) * w, z: (ref.z - now.z) * w };
 }
 
 /** 목표 포즈를 관절별 2차 스프링으로 따라가는 실제 표시 포즈 */
@@ -923,12 +985,17 @@ export class Mannequin implements CharacterView {
     const glow = f.isArmored() ? 0.6 + 0.4 * Math.sin(t * 0.6) : 0;
     this.mainMat.emissive.setRGB(glow, glow * 0.25, 0);
 
+    const legs: LegDims = { hipX: this.hipX, hipY: -0.04, thigh: THIGH, shin: SHIN };
     const spin = backTurnSpin(f, c.sub);
-    const pivot = backTurnPivot(spin, yaw, this.hipX);
+    const axis = backTurnPivotPoint(legs);
+    const pivot = backTurnPivot(spin, yaw, axis.x, axis.z);
     this.root.position.set(lp.x + pivot.x, lp.y, lp.z + pivot.z);
     this.root.rotation.y = yaw + spin;
 
     const standY = Math.max(legHeight(p.hpL, p.knL, p.abL), legHeight(p.hpR, p.knR, p.abR)) + 0.06;
+    const anchor = supportFootAnchor(f, p, bank, legs, c.sub);
+    this.body.position.x = anchor.x;
+    this.body.position.z = anchor.z;
     this.body.position.y = standY * (1 - p.drop) + 0.14 * p.drop + p.rise;
     this.body.rotation.set(p.tilt, p.hipYaw, p.roll + bank);
     this.torso.rotation.set(p.lean, p.twist - p.hipYaw, 0);

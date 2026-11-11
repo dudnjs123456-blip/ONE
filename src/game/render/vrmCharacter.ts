@@ -26,7 +26,10 @@ import {
   Mannequin,
   PoseSpring,
   backTurnPivot,
+  backTurnPivotPoint,
   backTurnSpin,
+  supportFootAnchor,
+  type LegDims,
   kicking,
   attackBoost,
   poseFor,
@@ -456,8 +459,10 @@ export class VrmCharacter implements CharacterView {
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
 
     // 뒤돌려차기: 왼발을 축으로 돌도록 위치 보정
+    const legs: LegDims = { hipX: this.rig.hipX, hipY: -0.05, thigh: this.rig.thigh, shin: this.rig.shin };
     const spin = backTurnSpin(f, c.sub);
-    const pivot = backTurnPivot(spin, yaw, this.rig.hipX);
+    const axis = backTurnPivotPoint(legs);
+    const pivot = backTurnPivot(spin, yaw, axis.x, axis.z);
     vrm.scene.position.set(lp.x + pivot.x, lp.y, lp.z + pivot.z);
     vrm.scene.rotation.y = yaw + spin;
 
@@ -503,6 +508,10 @@ export class VrmCharacter implements CharacterView {
 
     this.applyClip(f, c, vrm);
     bone('hips')!.position.y += p.rise;
+    // 발차기 중 디딤발이 옆으로 끌리지 않게 골반 위치를 보정
+    const anchor = supportFootAnchor(f, p, bank, legs, c.sub);
+    bone('hips')!.position.x += anchor.x;
+    bone('hips')!.position.z += anchor.z;
     vrm.scene.rotation.order = 'YXZ';
     vrm.scene.rotation.x = 0;
     vrm.scene.rotation.z = 0;

@@ -15,6 +15,7 @@
     "test:field": "tsx scripts/field-sim.ts",
     "test:boss": "tsx scripts/boss-sim.ts",
     "test:city": "tsx scripts/city-sim.ts",
+    "test:kickfoot": "tsx scripts/kick-foot-sim.ts",
     "test:save": "tsx scripts/save-sim.ts",
     "textures": "node scripts/process-textures.mjs",
     "facades": "node scripts/process-facades.mjs",
