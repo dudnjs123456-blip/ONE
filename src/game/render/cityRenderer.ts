@@ -865,6 +865,9 @@ export class CityRenderer {
       ps.scene.background = this.city.background;
       ps.scene.fog = this.city.fog;
       ps.update(world.parkClock(), this.fxNight);
+      // 직원·손님 (공유 시각으로 자리가 정해진다)과 머리 위 말풍선
+      ps.updatePeople(world.parkClock(), clock, eye);
+      for (const s of world.drainSpeech()) ps.speech(s.text, s.x, s.z, s.color ?? '#ffe08a');
     }
     const ridePose = riding ? seatPose(world.ride!.id, world.ride!.seat, world.parkClock(), this._seat) : null;
     this.rideAudio.update(riding ? world.ride!.id : null, ridePose, performance.now() / 1000);

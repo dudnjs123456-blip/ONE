@@ -36,6 +36,7 @@ import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID
 import { weatherAt, type WeatherState } from './weather';
 import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt, sharedNow } from './worldClock';
 import { PARK, RIDES, RIDE_IDS, RIDE_NODE, WHEEL, WHEEL_RIDE_MS, parkPathTo, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
+import { STAFF_NAMES, queueAhead, queueSpot, staffSpot, visitorSeats } from './parkPeople';
 
 export type CityLocation = 'city' | 'home' | 'lobby' | 'corridor' | 'store' | 'park';
 
@@ -955,7 +956,7 @@ export class CityWorld {
     const looking = this.lookingOut;
     if (looking) this.stepLookOut();
     const rawInput = this.input.read(this);
-    const blocked = this.dialog || this.npcChat || this.elevatorOpen || looking || sleeping;
+    const blocked = this.dialog || this.npcChat || this.staffTalk || this.elevatorOpen || looking || sleeping;
     const inp: CityInput = blocked ? { move: null, run: false, interact: false } : { ...rawInput };
     if (this.firstPerson && !looking && !sleeping && !this.ride) this.fpInput(inp);
     if (this.fishing) this.stepFishing(inp);
@@ -1158,6 +1159,7 @@ export class CityWorld {
 
   /** 놀이공원 역에서 다시 동네(한강공원역)로 */
   private leavePark() {
+    this.staffTalk = null;
     const st = this.map.pois.find((q) => q.kind === 'subway');
     const back = this.parkReturn ?? (st ? { x: st.x, z: st.z + 1.5 } : { x: this.map.home.x, z: this.map.home.z + 1 });
     this.moveTo('city', back.x, back.z, 0, 1);
@@ -1177,6 +1179,8 @@ export class CityWorld {
   private freeSeat(id: RideId, now: number): number | null {
     const taken = new Set<number>();
     for (const r of this.remotes.values()) if (r.room === this.roomKey && r.ride?.id === id) taken.add(r.ride.seat);
+    // 놀이공원 손님이 앉은 자리 (공유 시각으로 정해져서 모두에게 같다)
+    for (const s of visitorSeats(id, now)) taken.add(s);
     if (id === 'wheel') {
       const { cabin } = wheelCabinAtBottom(now);
       for (let j = 0; j < 4; j++) if (!taken.has(cabin * 4 + j)) return cabin * 4 + j;
@@ -1191,12 +1195,90 @@ export class CityWorld {
   private joinRide(id: RideId) {
     if (this.ride) return;
     const now = this.parkClock();
-    if (this.canBoard(id, now)) {
+    const ahead = queueAhead(id, now);
+    if (this.canBoard(id, now) && ahead === 0) {
       this.board(id, now);
       return;
     }
     this.rideQueue = id;
-    this.say(`${RIDES[id].icon} 줄을 섰어요 — 다음 탑승까지 약 ${this.waitSeconds(id, now)}초 (멀리 가면 줄에서 빠져요)`, 3.5);
+    // 줄 맨 뒤에 선다 (입구를 본다)
+    const q = queueSpot(id, ahead);
+    this.autopilot = null;
+    this.placePlayer(q.x, q.z, q.fx, q.fz);
+    if (this.canBoard(id, now)) this.say(`${RIDES[id].icon} 앞 손님 ${ahead}명이 타는 중 — 바로 이어서 탑승해요`, 3);
+    else this.say(`${RIDES[id].icon} 줄을 섰어요 — 다음 탑승까지 약 ${this.waitSeconds(id, now)}초 (멀리 가면 줄에서 빠져요)`, 3.5);
+  }
+
+  /** 놀이기구 직원과 이야기 중 (대본 대화창): 직원 대사 · 내 대사를 차례로 */
+  staffTalk: { ride: RideId; name: string; lines: { who: 'staff' | 'me'; text: string }[]; i: number } | null = null;
+
+  /** 입구에서 E: 직원이 자유이용권을 확인하고, 바로 태우거나 줄을 세운다 */
+  private talkToStaff(id: RideId) {
+    if (this.ride) return;
+    const now = this.parkClock();
+    if (this.rideQueue === id) {
+      this.staffSay(id, '조금만 기다려 주세요~');
+      this.say(`${RIDES[id].icon} 줄 서는 중 — 탑승까지 약 ${this.waitSeconds(id, now)}초`, 2.5);
+      return;
+    }
+    const R = RIDES[id];
+    this.autopilot = null;
+    this.rideQueue = null;
+    const first = `어서 오세요! ${R.icon} ${R.name.split(' (')[0]}입니다. 자유이용권 확인 도와드릴게요~`;
+    this.staffTalk = { ride: id, name: STAFF_NAMES[id], i: 0, lines: [{ who: 'staff', text: first }, { who: 'me', text: '🎫 (자유이용권을 내민다)' }] };
+    this.staffSay(id, '어서 오세요!');
+  }
+
+  /** 대화 넘기기 (누르거나 Enter). 마지막 대사 다음이면 탑승하거나 줄을 선다 */
+  staffTalkNext() {
+    const t = this.staffTalk;
+    if (!t) return;
+    // 이용권을 내밀면 그때 상황을 보고 직원이 답한다
+    if (t.i === 1 && t.lines.length === 2) {
+      const v = this.staffVerdict(t.ride);
+      t.lines.push({ who: 'staff', text: v.text });
+      t.i = 2;
+      this.staffSay(t.ride, v.bubble);
+      return;
+    }
+    if (t.i < t.lines.length - 1) {
+      t.i++;
+      return;
+    }
+    this.staffTalk = null;
+    this.joinRide(t.ride);
+  }
+
+  /** 대화 그만두기 (Esc · 닫기) */
+  staffTalkCancel() {
+    if (!this.staffTalk) return;
+    this.staffSay(this.staffTalk.ride, '또 오세요~');
+    this.staffTalk = null;
+  }
+
+  /** 직원의 답: 지금 탈 수 있는지, 앞에 몇 명이 기다리는지 */
+  private staffVerdict(id: RideId): { text: string; bubble: string } {
+    const now = this.parkClock();
+    const wait = this.waitSeconds(id, now);
+    if (id === 'wheel') {
+      return this.canBoard(id, now)
+        ? { text: '네, 확인됐습니다! 마침 빈 칸이 내려왔어요. 바로 탑승하실게요~ 🎡', bubble: '바로 탑승하실게요~' }
+        : { text: `네, 확인됐습니다! 다음 칸이 내려올 때까지 ${wait}초만 기다려 주세요.`, bubble: '조금만 기다려 주세요~' };
+    }
+    const ahead = queueAhead(id, now);
+    const running = rideClock(id, now).phase === 'running';
+    if (this.canBoard(id, now) && ahead === 0) return { text: '네, 확인됐습니다! 바로 탑승하실게요. 안전바 꼭 잡으세요~', bubble: '바로 탑승하실게요~' };
+    if (this.canBoard(id, now)) return { text: `네, 확인됐습니다! 앞에 ${ahead}분 먼저 타시고, 바로 이어서 탑승하실게요.`, bubble: '바로 이어서 탑승하실게요~' };
+    const why = running ? '지금 운행 중이라 ' : '';
+    return ahead > 0
+      ? { text: `네, 확인됐습니다! 앞에 ${ahead}분이 기다리고 계세요. ${why}다음 탑승까지 약 ${wait}초, 줄 서서 조금만 더 기다려 주세요~`, bubble: '조금만 더 기다려 주세요~' }
+      : { text: `네, 확인됐습니다! ${why}다음 탑승까지 약 ${wait}초예요. 맨 앞에서 조금만 기다려 주세요~`, bubble: '조금만 기다려 주세요~' };
+  }
+
+  /** 직원 머리 위 말풍선 */
+  private staffSay(id: RideId, text: string) {
+    const s = staffSpot(id);
+    this.pushSpeech({ x: s.x, z: s.z, text, color: '#bfe9ff' });
   }
 
   /** 다음 탑승까지 남은 초 */
@@ -1259,7 +1341,11 @@ export class CityWorld {
       if (Math.hypot(this.player.x - g.x, this.player.z - g.z) > 6) {
         this.rideQueue = null;
         this.say('줄에서 빠졌어요', 2);
-      } else if (this.canBoard(q, now)) this.board(q, now);
+      } else if (this.canBoard(q, now) && queueAhead(q, now) === 0) {
+        // 앞 손님이 다 타면 내 차례
+        this.staffSay(q, '기다려 주셔서 감사합니다~');
+        this.board(q, now);
+      }
       return;
     }
     const r = this.ride!;
@@ -1323,12 +1409,19 @@ export class CityWorld {
       const ck = rideClock(this.ride.id, now);
       return ck.phase === 'boarding' ? `${R.icon} 출발까지 ${Math.ceil(ck.left)}초 · E: 내리기 · 방향키: 고개 돌리기` : `${R.icon} 운행 중! 방향키: 고개 돌리기`;
     }
-    if (this.rideQueue) return `${RIDES[this.rideQueue].icon} 줄 서는 중 — 탑승까지 약 ${this.waitSeconds(this.rideQueue, now)}초`;
+    if (this.rideQueue) {
+      const q = this.rideQueue;
+      // 탑승 시간인데 앞 손님이 아직 타는 중이면 곧 내 차례
+      if (this.canBoard(q, now)) return `${RIDES[q].icon} 앞 손님 ${queueAhead(q, now)}명 탑승 중 — 곧 내 차례예요`;
+      return `${RIDES[q].icon} 줄 서는 중 — 탑승까지 약 ${this.waitSeconds(q, now)}초`;
+    }
     return null;
   }
 
   /** HUD 안내: 근무 중 출입 확인이 먼저, 아니면 근처 장소 */
   get promptLabel(): string | null {
+    // 직원과 이야기하는 동안은 대사창만
+    if (this.staffTalk) return null;
     return this.job?.prompt ?? this.ridePrompt() ?? this.nearby?.label ?? null;
   }
 
@@ -3049,7 +3142,7 @@ export class CityWorld {
       return;
     }
     if (poi.id.startsWith('ride-')) {
-      this.joinRide(poi.id.slice(5) as RideId);
+      this.talkToStaff(poi.id.slice(5) as RideId);
       return;
     }
     if (poi.kind === 'bus') {
@@ -4282,6 +4375,7 @@ export class CityWorld {
     this.seat = null;
     this.dialog = null;
     this.npcChat = null;
+    this.staffTalk = null;
     this.autopilot = null;
     const att = byNpc ? (this.npcs.find((n) => n.fighter.index === h.n)?.fighter ?? new Fighter(h.n!, 'npc', { canBlock: false })) : r.fighter;
     att.x = h.x;

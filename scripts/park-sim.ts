@@ -4,6 +4,7 @@
  */
 import { CityWorld, type CityInput } from '../src/game/city/cityWorld';
 import { newProfile } from '../src/game/core/profile';
+import { parkPeople, queueAhead, queueSpot, visitorSeats } from '../src/game/city/parkPeople';
 import { COASTER_TRACK, COASTER_LEN, COASTER_RUN, coasterAt, trackAt, RIDES, RIDE_IDS, rideClock, dropAt, DROP, vikingAt, PARK, parkSolids, wheelCabinAtBottom, GYRO, GYRO_RUN, gyroAt, gyroPose, SKY, SKY_RUN, skyAt, skyPose, RIDE_NODE, parkPathTo } from '../src/game/city/themePark';
 
 let fails = 0;
@@ -154,7 +155,8 @@ for (const id of RIDE_IDS) {
   b.joinRide('coaster');
   check('queue: waits while the train is running', A.ride === null && A.rideQueue === 'coaster');
   // 다음 탑승 시간 → 자동 탑승. 친구 자리와 겹치지 않게
-  now = Math.ceil(now / P) * P + 2000;
+  // 줄 선 손님들이 먼저 타고 (한 명에 약 1초) 그다음 우리 차례
+  now = Math.ceil(now / P) * P + 7000;
   for (let i = 0; i < 3; i++) {
     A.step();
     B.applyRemoteState('a', A.netState());
@@ -224,6 +226,136 @@ for (const id of RIDE_IDS) {
   const C = new CityWorld({ read: () => idle }, newProfile(), 3);
   C.restorePlace(snap);
   check('restore: reload inside the park puts you at the station', C.location === 'park' && Math.hypot(C.player.x - PARK.spawn.x, C.player.z - PARK.spawn.z) < 0.5);
+}
+
+// ───── 놀이공원 사람들: 직원 · 단골 손님 · 산책 (공유 시각으로만 정해진다) ─────
+{
+  const t0 = Date.UTC(2026, 10, 11, 5, 0, 0);
+  const a = JSON.stringify(parkPeople(t0 + 12_345));
+  const b = JSON.stringify(parkPeople(t0 + 12_345));
+  check('people: same time → same people (everyone sees the same park)', a === b);
+  const solids = parkSolids();
+  const B = PARK.bounds;
+  let outside = 0;
+  let inSolid = 0;
+  let walkers = 0;
+  let riders = 0;
+  let queued = 0;
+  for (let t = 0; t < 600_000; t += 1_700) {
+    for (const p of parkPeople(t0 + t)) {
+      if (p.state === 'ride') {
+        riders++;
+        continue;
+      }
+      if (p.state === 'walk') walkers++;
+      if (p.state === 'queue') queued++;
+      if (p.x < B.x0 || p.x > B.x1 || p.z < B.z0 || p.z > B.z1) outside++;
+      if (solids.some((r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1)) inSolid++;
+    }
+  }
+  check('people: nobody stands outside the park', outside === 0, `(${outside})`);
+  check('people: nobody stands inside a ride', inSolid === 0, `(${inSolid})`);
+  check('people: some walk, some queue, some ride', walkers > 0 && queued > 0 && riders > 0, `(walk ${walkers}, queue ${queued}, ride ${riders})`);
+  const staff = parkPeople(t0).filter((p) => p.state === 'staff');
+  check('people: one staff member at every ride gate', staff.length === RIDE_IDS.length && RIDE_IDS.every((id) => staff.some((p) => p.ride === id && Math.hypot(p.x - RIDES[id].gate.x, p.z - RIDES[id].gate.z) < 2)));
+  // 손님은 뒷자리부터, 한 자리에 두 사람이 앉지 않는다
+  let clash = 0;
+  for (let t = 0; t < 600_000; t += 2_300) {
+    const seen = new Set<string>();
+    for (const p of parkPeople(t0 + t))
+      if (p.state === 'ride') {
+        const k = `${p.ride}:${p.seat}`;
+        if (seen.has(k) || !visitorSeats(p.ride!, t0 + t).has(p.seat!)) clash++;
+        seen.add(k);
+      }
+  }
+  check('people: riders sit in their own (back) seats', clash === 0, `(${clash})`);
+  // 운행 중엔 다음 운행을 기다리는 줄이 생길 때가 있다
+  let lineWhileRunning = 0;
+  for (let t = 0; t < 900_000; t += 1_000) {
+    const now = t0 + t;
+    if (rideClock('coaster', now).phase === 'running' && queueAhead('coaster', now) > 0) lineWhileRunning++;
+  }
+  check('people: a line forms while the coaster is running', lineWhileRunning > 0);
+}
+
+// ───── 직원 대화: 이용권 확인 → 바로 탑승 / 줄 서서 기다리기 ─────
+{
+  type S = { goToPark(): void; talkToStaff(id: string): void; placePlayer(x: number, z: number, fx: number, fz: number): void; freeSeat(id: string, now: number): number | null };
+  const idle: CityInput = { move: null, run: false, interact: false };
+  const W = new CityWorld({ read: () => idle }, newProfile(), 7);
+  W.npcs = [];
+  const w = W as unknown as S;
+  let now = 0;
+  W.parkClock = () => now;
+  w.goToPark();
+  const P = RIDES.viking.period * 1000;
+  // 손님 줄이 없고 탑승 중인 운행을 찾는다 → "바로 탑승"
+  const base = Math.floor(Date.UTC(2026, 10, 11, 6) / P) * P;
+  let free = -1;
+  let busy = -1;
+  for (let c = 0; c < 200 && (free < 0 || busy < 0); c++) {
+    const start = base + c * P;
+    // 탑승 시간 막바지 (손님은 다 탔다)
+    const late = start + (RIDES.viking.board - 4) * 1000;
+    if (free < 0 && queueAhead('viking', late) === 0) free = late;
+    // 운행 중인데 다음 운행 줄이 있다
+    const mid = start + (RIDES.viking.board + 20) * 1000;
+    if (busy < 0 && queueAhead('viking', mid) > 0) busy = mid;
+  }
+  check('staff: found a free moment and a busy moment to test', free > 0 && busy > 0);
+
+  now = free;
+  const g = RIDES.viking.gate;
+  w.placePlayer(g.x, g.z, 0, -1);
+  w.talkToStaff('viking');
+  check('staff: E at the gate opens the staff talk', W.staffTalk?.ride === 'viking' && W.staffTalk.lines[0].who === 'staff');
+  check('staff: cannot walk away while talking', (() => {
+    const x0 = W.player.x;
+    W.step();
+    return Math.abs(W.player.x - x0) < 1e-6;
+  })());
+  W.staffTalkNext(); // 이용권 내밀기
+  W.staffTalkNext(); // 직원 답
+  check('staff: free → "바로 탑승하실게요"', (W.staffTalk?.lines[2]?.text ?? '').includes('바로 탑승하실게요'), `(${W.staffTalk?.lines[2]?.text})`);
+  W.staffTalkNext(); // 닫기 → 탑승
+  check('staff: closing the talk boards right away', W.ride?.id === 'viking' && !W.staffTalk);
+  const mySeat = W.ride?.seat ?? -1;
+  check('staff: my seat is not a visitor seat', !visitorSeats('viking', now).has(mySeat), `(seat ${mySeat})`);
+
+  // 운행 중 + 줄 → "기다려 주세요", 줄 맨 뒤에 서고, 앞 손님이 다 탄 뒤에 탄다
+  const V = new CityWorld({ read: () => idle }, newProfile(), 8);
+  V.npcs = [];
+  const v = V as unknown as S;
+  now = busy;
+  V.parkClock = () => now;
+  v.goToPark();
+  v.placePlayer(g.x, g.z, 0, -1);
+  const ahead = queueAhead('viking', now);
+  v.talkToStaff('viking');
+  V.staffTalkNext();
+  V.staffTalkNext();
+  const said = V.staffTalk?.lines[2]?.text ?? '';
+  check('staff: busy → tells me how many are ahead and to wait', said.includes(`앞에 ${ahead}분`) && said.includes('기다려'), `(${said})`);
+  V.staffTalkNext();
+  check('staff: then I join the end of the line', V.rideQueue === 'viking' && !V.ride);
+  const end = queueSpot('viking', ahead);
+  check('staff: standing behind the visitors', Math.hypot(V.player.x - end.x, V.player.z - end.z) < 0.2);
+  let boardedWithLine = false;
+  for (let k = 0; k < 400 && !V.ride; k++) {
+    now += 250;
+    V.step();
+    if (V.ride && queueAhead('viking', now) > 0) boardedWithLine = true;
+  }
+  check('staff: I board only after the visitors ahead have boarded', !!V.ride && !boardedWithLine);
+  // Esc: 그만두기
+  const X = new CityWorld({ read: () => idle }, newProfile(), 9);
+  X.npcs = [];
+  X.parkClock = () => now;
+  (X as unknown as S).goToPark();
+  (X as unknown as S).talkToStaff('gyro');
+  X.staffTalkCancel();
+  check('staff: Esc ends the talk without queuing', !X.staffTalk && !X.rideQueue && !X.ride);
 }
 
 console.log(fails ? `\n${fails} FAIL` : '\nALL PASS');

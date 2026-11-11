@@ -18,6 +18,7 @@ import { LifeBars } from './LifeBar';
 import CityMapOverlay from './CityMapOverlay';
 import ParkMapOverlay from './ParkMapOverlay';
 import ParkGuide from './ParkGuide';
+import RideStaffTalk from './RideStaffTalk';
 import { drawParkBase, drawParkPlayer } from './parkMapDraw';
 import JobPanel from './JobPanel';
 import CalendarPanel from './CalendarPanel';
@@ -729,6 +730,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
 
           <Minimap worldRef={worldRef} />
           {worldRef.current && <ParkGuide world={worldRef.current} touch={touch} onMap={() => setBigMap(true)} />}
+          {worldRef.current && <RideStaffTalk world={worldRef.current} />}
 
           {/* 상호작용 안내 */}
           {hud.prompt && (

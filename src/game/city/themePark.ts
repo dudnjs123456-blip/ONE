@@ -653,7 +653,7 @@ export function rideClock(id: RideId, nowMs: number): { cycle: number; phase: 'b
 
 /** 놀이공원 안 상호작용 지점 */
 export function parkPois(): Poi[] {
-  const out: Poi[] = RIDE_IDS.map((id) => ({ id: `ride-${id}`, kind: 'park' as const, label: `${RIDES[id].icon} ${RIDES[id].name}`, x: RIDES[id].gate.x, z: RIDES[id].gate.z, radius: 2.6 }));
+  const out: Poi[] = RIDE_IDS.map((id) => ({ id: `ride-${id}`, kind: 'park' as const, label: `${RIDES[id].icon} ${RIDES[id].name} — 직원에게 자유이용권 보여 주기`, x: RIDES[id].gate.x, z: RIDES[id].gate.z, radius: 2.6 }));
   out.push({ id: 'park-station', kind: 'subway', label: '🚇 한강공원역 (동네로 돌아가기)', x: PARK.station.x, z: PARK.station.z - 2.2, radius: 2.4 });
   return out;
 }

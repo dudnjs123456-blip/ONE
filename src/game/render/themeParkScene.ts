@@ -28,11 +28,49 @@ import {
   skyAt,
   nearestOnPaths,
   signposts,
+  seatPose,
   type RideId,
   type SeatPose,
   type TrackPoint,
 } from '../city/themePark';
 import { mergeByMaterial } from './merge';
+import { Fighter } from '../core/fighter';
+import { PersonView } from './personView';
+import { FloatingTexts } from './effects';
+import type { FrameClock } from './clock';
+import { STAFF_NAMES, parkPeople } from '../city/parkPeople';
+
+/** 놀이공원 사람 하나: 움직임용 Fighter + 모델 + (좌석에 앉을 때 쓰는) 받침 */
+interface ParkPersonView {
+  f: Fighter;
+  view: PersonView;
+  lift: THREE.Group;
+  label: THREE.Sprite | null;
+}
+
+/** 직원 제복 색 */
+const STAFF_TINT = 0xff8a5c;
+
+/** 머리 위 이름표 (체력바 없이 글자만) */
+function labelSprite(text: string, color: string): THREE.Sprite {
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 64;
+  const g = cv.getContext('2d')!;
+  g.font = 'bold 26px sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineWidth = 5;
+  g.strokeStyle = 'rgba(0,0,0,0.8)';
+  g.strokeText(text, 128, 32);
+  g.fillStyle = color;
+  g.fillText(text, 128, 32);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+  sp.scale.set(1.6, 0.4, 1);
+  return sp;
+}
 
 /**
  * 한강 놀이공원 장면. 놀이기구 움직임은 themePark.ts 의 공유 시각 계산을 그대로 그린다
@@ -1418,6 +1456,77 @@ export class ThemeParkScene {
     this.skyRig.rotation.y = -sk.spin;
     for (const sw of this.skySwings) sw.rotation.x = -sk.tilt;
     this.drawBoards(nowMs);
+  }
+
+  // ───────────── 놀이공원 사람들 (직원 · 손님) ─────────────
+
+  private people = new Map<number, ParkPersonView>();
+  private _pose: SeatPose = { x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 1, ux: 0, uy: 1, uz: 0, speed: 0 };
+  private _pm = new THREE.Matrix4();
+  /** 머리 위 말풍선 (직원 대사 등) */
+  private texts: FloatingTexts | null = null;
+
+  /** 말풍선 띄우기 (cityRenderer 가 world.drainSpeech() 를 넘긴다) */
+  speech(text: string, x: number, z: number, color: string) {
+    (this.texts ??= new FloatingTexts(this.scene)).spawn(text, x, 2.4, z, color, 1.1);
+  }
+
+  /**
+   * 직원·손님을 그린다. 자리는 공유 시각만으로 정해진다 (parkPeople).
+   * @param eye 카메라가 보는 곳 — 멀리 있는 사람은 자세 계산을 줄이고, 아주 멀면 감춘다
+   */
+  updatePeople(nowMs: number, clock: FrameClock, eye: { x: number; z: number }) {
+    for (const p of parkPeople(nowMs)) {
+      let v = this.people.get(p.id);
+      if (!v) {
+        const staff = p.state === 'staff';
+        const view = new PersonView(p.id, staff ? { skin: 'humanMaleA', tint: STAFF_TINT } : {});
+        view.root.scale.setScalar(0.92 + (p.id % 5) * 0.03);
+        const lift = new THREE.Group();
+        lift.matrixAutoUpdate = false;
+        lift.add(view.root);
+        this.scene.add(lift);
+        const f = new Fighter(p.id, 'npc', { canBlock: false });
+        f.reset(p.x, p.z, p.fx, p.fz);
+        let label: THREE.Sprite | null = null;
+        if (staff && p.ride) {
+          label = labelSprite(`🎫 ${STAFF_NAMES[p.ride]}`, '#bfe9ff');
+          label.position.set(p.x, 2.15, p.z);
+          this.scene.add(label);
+        }
+        v = { f, view, lift, label };
+        this.people.set(p.id, v);
+      }
+      const riding = p.state === 'ride' && p.ride && p.seat !== undefined;
+      const d = riding ? 0 : Math.hypot(p.x - eye.x, p.z - eye.z);
+      v.lift.visible = riding || d < 80;
+      if (!v.lift.visible) continue;
+      const f = v.f;
+      if (riding) {
+        // 좌석 자세 그대로 (기울기·뒤집힘 포함), 모델은 받침 안에서 원점에 앉는다
+        const pose = seatPose(p.ride!, p.seat!, nowMs, this._pose);
+        this.seatMatrix(pose, this._pm);
+        v.lift.matrix.copy(this._pm);
+        f.x = 0;
+        f.z = 0;
+        f.fx = 0;
+        f.fz = 1;
+        v.view.sit = 1;
+      } else {
+        v.lift.matrix.identity();
+        f.x = p.x;
+        f.z = p.z;
+        f.fx = p.fx;
+        f.fz = p.fz;
+        v.view.sit = 0;
+      }
+      v.lift.matrixWorldNeedsUpdate = true;
+      // 보간 없이 지금 자리 그대로 (걸음 속도는 모델이 위치 변화로 잰다)
+      f.snapshot();
+      v.view.setDistance(d);
+      v.view.update(f, clock, d > 25);
+    }
+    this.texts?.update(clock.dt);
   }
 
   // ───────────── 1인칭 탑승 카메라 ─────────────

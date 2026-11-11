@@ -5,6 +5,7 @@
 import { CityWorld, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
 import type { PlayerProfile } from '../src/game/core/profile';
 import { gameTimeAt } from '../src/game/city/worldClock';
+import { parkPeople, visitorSeats } from '../src/game/city/parkPeople';
 import { tvApplyRemote, tvNet, tvPlay, tvPos, tvReset, tvSetPaused, tvState } from '../src/game/city/tvState';
 
 function check(name: string, ok: boolean, detail = '') {
@@ -417,4 +418,14 @@ check('A sees B pet', !!pet && pet.sp === 'dog' && pet.x === 1 && pet.z === 2 &&
   check('attack lands on a walking pedestrian', t.fighter.hp < hp0, `(${hp0} → ${t.fighter.hp})`);
   check('hit freeze happened', frozenFrames > 0, `(${frozenFrames}프레임)`);
   check('no jitter during hit freeze', shaky === 0, `(떨린 사람·프레임 ${shaky})`);
+}
+
+// 놀이공원 손님·직원: 같은 시각이면 두 사람 화면에서 같은 자리 · 같은 좌석 (따로 주고받지 않는다)
+{
+  const t = Date.UTC(2026, 10, 11, 7, 3, 21);
+  const A = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) }, newProfile(), 11);
+  const B = new CityWorld({ read: () => ({ move: null, run: false, interact: false }) }, newProfile(), 12);
+  A.parkClock = B.parkClock = () => t;
+  check('park people: both players see the same visitors', JSON.stringify(parkPeople(A.parkClock())) === JSON.stringify(parkPeople(B.parkClock())));
+  check('park people: same visitor seats on the coaster', [...visitorSeats('coaster', A.parkClock())].join() === [...visitorSeats('coaster', B.parkClock())].join());
 }
