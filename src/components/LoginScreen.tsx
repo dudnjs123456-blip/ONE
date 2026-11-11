@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { signIn, signUp, type Account } from '@/game/net/auth';
+import CloudTitle from './CloudTitle';
 
 /** 접속하면 처음 보는 화면: 아이디·비밀번호로 로그인 (또는 가입) */
 export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => void }) {
@@ -27,8 +28,10 @@ export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => vo
   return (
     <main className="tg-sky flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
-        <h1 className="tg-title text-center text-7xl">Together</h1>
-        <p className="tg-subtitle mt-4 text-center text-sm">로그인하면 내 캐릭터와 기록을 그대로 이어서 할 수 있어요</p>
+        <h1 className="-mx-24">
+          <CloudTitle />
+        </h1>
+        <p className="tg-subtitle mt-1 text-center text-sm">로그인하면 내 캐릭터와 기록을 그대로 이어서 할 수 있어요</p>
 
         <div className="tg-card mt-8 p-6">
           <div className="tg-tabs mb-5">

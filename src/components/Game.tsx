@@ -6,6 +6,7 @@ import type { MatchMode } from '@/game/core/match';
 import { loadLegacyProfile, loadProfile, loadStoredProfile, newProfile, saveProfile, setProfileAccount, type PlayerProfile } from '@/game/core/profile';
 import { currentAccount, signOut, type Account } from '@/game/net/auth';
 import LoginScreen from './LoginScreen';
+import CloudTitle from './CloudTitle';
 import KeySettings from './KeySettings';
 import TouchGuide from './TouchGuide';
 import { notationArrows } from '@/game/data/notation';
@@ -240,21 +241,24 @@ export default function Game() {
       {/* 오른쪽 아래 캐릭터 일러스트: 캐릭터는 선명하게 두고, 좌우·위쪽 배경만 그라데이션 마스크로 지워 밤하늘 배경에 녹인다 */}
       <div
         aria-hidden
-        className="pointer-events-none fixed bottom-0 right-4 z-0 hidden h-[70vh] w-[calc(70vh*843/1264)] opacity-60 md:block xl:opacity-100"
+        className="pointer-events-none fixed bottom-0 right-4 z-0 hidden h-[58vh] w-[calc(58vh*843/1264)] opacity-60 md:block xl:opacity-100"
         style={{
           backgroundImage: 'url(/images/menu-character.webp)',
           backgroundSize: 'cover',
           backgroundPosition: 'center bottom',
-          maskImage: 'linear-gradient(to right, transparent 0%, black 28%, black 72%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 22%)',
+          filter: 'brightness(0.88) saturate(0.95)',
+          maskImage: 'linear-gradient(to right, transparent 0%, black 34%, black 66%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 38%)',
           maskComposite: 'intersect',
-          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 28%, black 72%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 22%)',
+          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 34%, black 66%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 38%)',
           WebkitMaskComposite: 'source-in',
         }}
       />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
       <div className="relative z-10 mx-auto max-w-4xl">
-        <h1 className="tg-title text-center text-7xl sm:text-8xl">Together</h1>
-        <p className="tg-subtitle mt-4 text-center">✨ 같이 살고, 같이 싸우는 서울 이야기 ✨</p>
+        <h1>
+          <CloudTitle />
+        </h1>
+        <p className="tg-subtitle mt-1 text-center">✨ 같이 살고, 같이 싸우는 서울 이야기 ✨</p>
 
         {/* 내 캐릭터 */}
         <div className="tg-card mx-auto mt-8 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
