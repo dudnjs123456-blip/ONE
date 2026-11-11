@@ -445,7 +445,10 @@ export class CityRenderer {
     // 처음 접속이면 그래픽카드 이름으로 사양을 가늠해서 시작 단계를 정한다
     const gpu = detectGpu(this.renderer.getContext());
     const saved = loadQuality();
-    this.applyMode(getGfxMode(), saved ?? TIER_START[gpu.tier]);
+    // 로딩 렉 등으로 한 번 크게 떨어진 단계가 저장돼 계속 흐릿하게 시작하지 않게:
+    // 사양에 맞는 시작 단계보다 한 단계 넘게 낮은 저장값은 믿지 않는다 (진짜 느리면 자동 화질이 다시 내린다)
+    const start = TIER_START[gpu.tier];
+    this.applyMode(getGfxMode(), Math.min(saved ?? start, start + 1));
     this.offMode = onGfxMode((m) => this.applyMode(m, this.quality));
   }
 
