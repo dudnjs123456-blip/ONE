@@ -28,8 +28,10 @@ function emoteTexture(e: string): THREE.CanvasTexture {
   return tex;
 }
 
-/** 캔버스 글자 크기 → 월드 높이 (작을수록 말풍선이 작다). 0.0058 은 캐릭터에 비해 커서 약 28% 줄임 */
-const WORLD_PER_PX = 0.0042;
+/** 캔버스 픽셀 → 월드 크기. 글자가 이름표 글자와 비슷한 크기가 되게 (고해상도로 그리고 작게 줄여 또렷하게) */
+const WORLD_PER_PX = 0.0019;
+/** 이름·체력바 바로 위 (말풍선 꼬리 끝 높이) */
+export const BUBBLE_Y = 2.0;
 
 function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   g.beginPath();
@@ -42,65 +44,57 @@ function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number,
 }
 
 /**
- * 말풍선 그림: 위에 말한 사람 이름표, 흰 둥근 상자 + 아래 꼬리, 은은한 그림자.
- * 내 말은 주황 테두리, 다른 사람 말은 하늘색 테두리.
+ * 말풍선 그림: 흰 둥근 상자 + 작은 꼬리, 은은한 그림자. 이름은 바로 아래 이름표에 있으니 넣지 않는다.
+ * 내 말은 왼쪽에 주황 점, 다른 사람 말은 하늘색 점으로만 구분한다.
  */
-function bubbleTexture(name: string, text: string, mine: boolean): { tex: THREE.CanvasTexture; w: number; h: number } {
-  const lines = wrapChat(text, 16);
-  const font = '600 30px "Pretendard", "Noto Sans KR", sans-serif';
-  const nameFont = '800 22px "Pretendard", "Noto Sans KR", sans-serif';
+function bubbleTexture(text: string, mine: boolean): { tex: THREE.CanvasTexture; w: number; h: number } {
+  const lines = wrapChat(text, 14);
+  const font = '600 44px "Pretendard", "Malgun Gothic", "Noto Sans KR", sans-serif';
   const probe = document.createElement('canvas').getContext('2d')!;
   probe.font = font;
   const textW = Math.max(...lines.map((l) => probe.measureText(l).width));
-  probe.font = nameFont;
-  const nameW = probe.measureText(name).width;
-  const pad = 22;
-  const lineH = 38;
-  const nameH = 30;
-  const boxW = Math.ceil(Math.min(600, Math.max(110, textW + pad * 2, nameW + pad * 2)));
-  const boxH = nameH + lines.length * lineH + 18;
-  const tail = 16;
-  const margin = 10; // 그림자 자리
+  const padX = 30;
+  const padY = 18;
+  const lineH = 56;
+  const dot = 22;
+  const boxW = Math.ceil(Math.max(120, textW + padX * 2 + dot));
+  const boxH = lines.length * lineH + padY * 2;
+  const tail = 14;
+  const margin = 14; // 그림자 자리
   const W = boxW + margin * 2;
   const H = boxH + tail + margin * 2;
   const cv = document.createElement('canvas');
   cv.width = W;
   cv.height = H;
   const g = cv.getContext('2d')!;
-  const accent = mine ? '#f59e0b' : '#38bdf8';
   const x0 = margin;
   const y0 = margin;
-  // 그림자 + 상자 + 꼬리
+  const r = Math.min(boxH / 2, 34);
   g.save();
-  g.shadowColor = 'rgba(0,0,0,0.35)';
-  g.shadowBlur = 10;
+  g.shadowColor = 'rgba(0,0,0,0.28)';
+  g.shadowBlur = 12;
   g.shadowOffsetY = 3;
-  g.fillStyle = 'rgba(255,255,255,0.96)';
-  roundRect(g, x0, y0, boxW, boxH, 18);
+  g.fillStyle = '#ffffff';
+  roundRect(g, x0, y0, boxW, boxH, r);
   g.fill();
   g.beginPath();
-  g.moveTo(W / 2 - 12, y0 + boxH - 1);
-  g.lineTo(W / 2, y0 + boxH + tail);
-  g.lineTo(W / 2 + 12, y0 + boxH - 1);
+  g.moveTo(W / 2 - 11, y0 + boxH - 1);
+  g.quadraticCurveTo(W / 2, y0 + boxH + 4, W / 2, y0 + boxH + tail);
+  g.quadraticCurveTo(W / 2 + 3, y0 + boxH + 4, W / 2 + 11, y0 + boxH - 1);
   g.closePath();
   g.fill();
   g.restore();
-  // 테두리
-  g.strokeStyle = accent;
-  g.lineWidth = 3;
-  roundRect(g, x0 + 1.5, y0 + 1.5, boxW - 3, boxH - 3, 17);
-  g.stroke();
-  // 이름표
-  g.textAlign = 'left';
-  g.textBaseline = 'middle';
-  g.font = nameFont;
-  g.fillStyle = accent;
-  g.fillText(name, x0 + pad, y0 + 8 + nameH / 2);
-  // 말
+  // 누가 한 말인지: 작은 색 점
+  g.fillStyle = mine ? '#f59e0b' : '#38bdf8';
+  g.beginPath();
+  g.arc(x0 + padX + 5, y0 + padY + lineH / 2, 7, 0, Math.PI * 2);
+  g.fill();
   g.font = font;
-  g.fillStyle = '#1c1c22';
+  g.fillStyle = '#1f2128';
   g.textAlign = 'center';
-  lines.forEach((l, i) => g.fillText(l, W / 2, y0 + nameH + 6 + lineH * i + lineH / 2));
+  g.textBaseline = 'middle';
+  const cx = x0 + dot / 2 + boxW / 2;
+  lines.forEach((l, i) => g.fillText(l, cx, y0 + padY + lineH * i + lineH / 2 + 2));
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -125,9 +119,9 @@ export class ChatBubbles {
     this.items.push({ who, sprite, until: now + EMOTE_MS, tex, emote: true });
   }
 
-  add(who: string, name: string, text: string, now: number) {
+  add(who: string, _name: string, text: string, now: number) {
     this.remove((b) => b.who === who && !b.emote);
-    const { tex, w, h } = bubbleTexture(name, text, who === 'me');
+    const { tex, w, h } = bubbleTexture(text, who === 'me');
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
     sprite.scale.set(w * WORLD_PER_PX, h * WORLD_PER_PX, 1);
     sprite.renderOrder = 10;
@@ -149,10 +143,10 @@ export class ChatBubbles {
         // 떠오르면서 톡 커졌다가, 끝에 흐려진다 (말풍선이 있으면 그 옆으로)
         const age = now - (b.sprite.userData.born as number);
         const t = Math.min(1, age / 220);
-        const size = 0.75 * (0.6 + 0.4 * (1 - Math.pow(1 - t, 3)) + (t >= 1 ? 0.04 * Math.sin(age / 90) : 0));
+        const size = 0.5 * (0.6 + 0.4 * (1 - Math.pow(1 - t, 3)) + (t >= 1 ? 0.04 * Math.sin(age / 90) : 0));
         b.sprite.scale.set(size, size, 1);
-        const beside = this.items.some((o) => o.who === b.who && !o.emote);
-        b.sprite.position.set(p.x + (beside ? 0.9 : 0), 2.45 + Math.min(0.5, age / 2000), p.z);
+        const beside = this.items.find((o) => o.who === b.who && !o.emote);
+        b.sprite.position.set(p.x + (beside ? beside.sprite.scale.x / 2 + 0.3 : 0), BUBBLE_Y + 0.25 + Math.min(0.5, age / 2000), p.z);
         (b.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, (b.until - now) / 400);
         continue;
       }
@@ -160,7 +154,7 @@ export class ChatBubbles {
       const t = Math.min(1, (now - (b.sprite.userData.born as number)) / 180);
       const pop = 0.85 + 0.15 * (1 - Math.pow(1 - t, 3));
       b.sprite.scale.set(base.x * pop, base.y * pop, 1);
-      b.sprite.position.set(p.x, 2.5 + b.sprite.scale.y / 2, p.z);
+      b.sprite.position.set(p.x, BUBBLE_Y + b.sprite.scale.y / 2, p.z);
       // 사라지기 0.5초 전부터 흐려진다
       (b.sprite.material as THREE.SpriteMaterial).opacity = Math.min(1, (b.until - now) / 500);
     }

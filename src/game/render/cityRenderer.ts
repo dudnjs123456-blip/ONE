@@ -772,7 +772,7 @@ export class CityRenderer {
       this.myPlate.draw(`Lv.${world.profile.level} ${world.netName ?? '나'}${down ? ' (기절)' : ''}`, Math.max(0, p.hp), p.maxHp);
       const lift = world.stairLift(lp.x, lp.z);
       this.playerLift.position.y = lift;
-      this.myPlate.sprite.position.set(lp.x, lift + lp.y + (down ? 0.9 : 2.1), lp.z);
+      this.myPlate.sprite.position.set(lp.x, lift + lp.y + (down ? 0.9 : PLATE_Y), lp.z);
     }
     {
       // 이불: 내가 자거나, 같은 집(친구 집)에서 친구가 자고 있으면
@@ -802,7 +802,7 @@ export class CityRenderer {
         if (plate.sprite.visible) {
           const lp = n.fighter.lerped(clock.alpha);
           plate.draw(n.koFrames >= 0 ? `${n.name} (기절)` : n.fight > 0 ? `😠 ${n.name}` : n.name, Math.max(0, n.fighter.hp), n.fighter.maxHp);
-          plate.sprite.position.set(lp.x, lp.y + (n.koFrames >= 0 ? 0.9 : 2.1), lp.z);
+          plate.sprite.position.set(lp.x, lp.y + (n.koFrames >= 0 ? 0.9 : PLATE_Y), lp.z);
         }
       });
       this.syncPolice(world, clock);
@@ -1066,7 +1066,7 @@ export class CityRenderer {
       if (r.sleep && r.sleep.rest > 0) v.plate.sprite.visible = false;
       const down = f.hp <= 0;
       v.plate.draw(`Lv.${r.level} ${r.name}${down ? ' (기절)' : ''}`, Math.max(0, f.hp), f.maxHp);
-      v.plate.sprite.position.set(lp.x, v.lift.position.y + lp.y + (down ? 0.9 : 2.1), lp.z);
+      v.plate.sprite.position.set(lp.x, v.lift.position.y + lp.y + (down ? 0.9 : PLATE_Y), lp.z);
     }
     for (const [id, v] of this.remoteViews) {
       if (world.remotes.has(id)) continue;
@@ -1136,7 +1136,7 @@ export class CityRenderer {
     const sp = world.senior.lerped(clock.alpha);
     const label = world.npcChat?.npc === 'senior' ? '💬 박 반장' : ai.patrolling ? '🔦 박 반장 (순찰 중)' : '👴 박 반장';
     this.seniorPlate.draw(label, 1, 1);
-    this.seniorPlate.sprite.position.set(sp.x, sp.y + (ai.sit > 0.5 ? 1.7 : 2.05), sp.z);
+    this.seniorPlate.sprite.position.set(sp.x, sp.y + (ai.sit > 0.5 ? 1.5 : PLATE_Y), sp.z);
   }
 
   /** 엄마: 집 주방 앞에 서 있다 (친구 집에선 그 집 엄마로 보인다) */
@@ -1148,7 +1148,7 @@ export class CityRenderer {
     this.momView.update(world.mom, clock);
     const mp = world.mom.lerped(clock.alpha);
     this.momPlate.draw(world.npcChat?.npc === 'mom' ? '💬 엄마' : '👩 엄마', 1, 1);
-    this.momPlate.sprite.position.set(mp.x, mp.y + 2.05, mp.z);
+    this.momPlate.sprite.position.set(mp.x, mp.y + PLATE_Y, mp.z);
   }
 
   private sceneOf(loc: CityLocation) {
@@ -1298,7 +1298,7 @@ export class CityRenderer {
                   ? `✋ ${person.title}`
                   : person.title;
         plate.draw(label, Math.max(0, person.f.hp), person.f.maxHp);
-        plate.sprite.position.set(lp.x, lp.y + (person.koFrames >= 0 ? 0.9 : 2.1 * scale), lp.z);
+        plate.sprite.position.set(lp.x, lp.y + (person.koFrames >= 0 ? 0.9 : PLATE_Y * scale), lp.z);
         plate.sprite.visible = true;
       }
     });
@@ -2713,6 +2713,9 @@ function saveQuality(q: number) {
     // 저장소를 못 쓰면 다음에도 최고 화질부터 시작할 뿐
   }
 }
+
+/** 이름·체력바 높이 (발 기준): 키 1.68m 캐릭터 머리 바로 위에 붙게 */
+const PLATE_Y = 1.86;
 
 /**
  * 1인칭용 실내 껍데기: 남쪽(3인칭 카메라 쪽) 벽 위쪽과 천장. 처음엔 감춰 두고 1인칭일 때만 보인다.

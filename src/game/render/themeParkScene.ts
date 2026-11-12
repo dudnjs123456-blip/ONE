@@ -1470,7 +1470,7 @@ export class ThemeParkScene {
 
   /** 말풍선 띄우기 (cityRenderer 가 world.drainSpeech() 를 넘긴다) */
   speech(text: string, x: number, z: number, color: string) {
-    (this.texts ??= new FloatingTexts(this.scene)).spawn(text, x, 2.4, z, color, 1.1);
+    (this.texts ??= new FloatingTexts(this.scene)).spawn(text, x, 2.15, z, color, 1.1);
   }
 
   /**
@@ -1493,7 +1493,7 @@ export class ThemeParkScene {
         let label: THREE.Sprite | null = null;
         if (staff && p.ride) {
           label = labelSprite(`🎫 ${STAFF_NAMES[p.ride]}`, '#bfe9ff');
-          label.position.set(p.x, 2.15, p.z);
+          label.position.set(p.x, 1.9, p.z);
           this.scene.add(label);
         }
         v = { f, view, lift, label };
