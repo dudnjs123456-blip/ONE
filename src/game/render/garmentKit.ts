@@ -66,6 +66,12 @@ export class Garment {
       parent.add(e);
       this.moved.push(e);
     }
+    // 따라가기 설정 (소매·바짓가랑이 뼈가 팔·다리를 바라본다): 바라보는 대상을 캐릭터의 같은 이름 뼈로.
+    // 쉬는 자세 값은 옷 파일을 불러올 때(같은 쉬는 자세) 이미 재 두었으니 대상만 바꾼다
+    for (const c of src.nodeConstraintManager?.constraints ?? []) {
+      const t = at(c.source);
+      if (t) c.source = t;
+    }
     // 흔들림 충돌체 (팔·다리 뼈에 붙어 있다) → 캐릭터의 같은 뼈로
     for (const c of src.springBoneManager?.colliders ?? []) {
       const parent = at(c.parent);
@@ -106,6 +112,7 @@ export class Garment {
 
   /** 매 프레임 (캐릭터 vrm.update 다음에) */
   update(dt: number) {
+    this.src.nodeConstraintManager?.update();
     this.src.springBoneManager?.update(dt);
   }
 

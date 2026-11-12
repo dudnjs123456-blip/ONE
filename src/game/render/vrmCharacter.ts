@@ -8,7 +8,7 @@ import { track } from './loadTracker';
 import { OutfitDresser, keepFieldOutline } from './outfitKit';
 import { FACE_KEYS, MOOD_FACE, eyesBusy, type FaceKey } from './moodFace';
 import { Garment } from './garmentKit';
-import { garmentFor } from '../data/fashion';
+import { garmentPieces } from '../data/fashion';
 import { BODY_TYPES } from './looks';
 import type { PlayerMood } from '../data/npcs';
 import {
@@ -412,8 +412,8 @@ export class VrmCharacter implements CharacterView {
   /** 코디 (모델을 불러오기 전에 정해지면 기다렸다 입힌다) */
   private dresser: OutfitDresser | null = null;
   private outfit: string[] = [];
-  /** 갈아입은 옷 (옷 파일) · 그 주소 ('' = 기본 옷) · 이 캐릭터의 몸 id */
-  private garment: Garment | null = null;
+  /** 입은 진짜 옷들 (옷 파일: 티셔츠·반바지·신발 …) · 그 목록 열쇠 ('' = 기본 옷) · 이 캐릭터의 몸 id */
+  private garments: Garment[] = [];
   private garmentUrl = '';
   private readonly bodyId: string;
   /** 몸 재질의 림 라이트 (갈아입은 옷의 것은 따로 더한다) */
@@ -597,12 +597,12 @@ export class VrmCharacter implements CharacterView {
       this.flipV0(vrm);
     }
     vrm.update(Math.min(c.dt, 1 / 20));
-    this.garment?.update(Math.min(c.dt, 1 / 20));
+    for (const g of this.garments) g.update(Math.min(c.dt, 1 / 20));
     // 다음 프레임 계산은 다시 1.0 기준 값에서 이어간다
     if (this.v0) this.flipV0(vrm);
     if (moved > 1) {
       vrm.springBoneManager?.reset();
-      this.garment?.reset();
+      for (const g of this.garments) g.reset();
     }
   }
 
@@ -856,31 +856,39 @@ export class VrmCharacter implements CharacterView {
 
   /** 입은 코디에 갈아입는 옷이 있으면 그 옷 파일을 불러와 입힌다 (못 불러오면 기본 옷 그대로) */
   private syncGarment() {
-    const want = garmentFor(this.outfit, this.bodyId) ?? '';
+    const pieces = garmentPieces(this.outfit, this.bodyId);
+    const want = pieces.map((p) => `${p.url}#${p.cosmetic?.id ?? ''}`).join(',');
     if (want === this.garmentUrl) return;
-    this.garment?.dispose();
-    this.garment = null;
-    this.rims = this.baseRims;
-    this.dresser?.setGarment(false);
     this.garmentUrl = want;
     const vrm = this.vrm;
-    if (!want || !vrm) return;
-    Garment.load(want, vrm)
-      .then((g) => {
-        if (this.disposed || this.vrm !== vrm || this.garmentUrl !== want) return g.dispose();
-        this.garment = g;
-        this.rims = [...this.baseRims, ...setupMToonRim(g.root)];
-        this.dresser?.setGarment(true);
+    if (!vrm) return;
+    const wear = (list: Garment[]) => {
+      for (const g of this.garments) g.dispose();
+      this.garments = list;
+      this.rims = [...this.baseRims, ...list.flatMap((g) => setupMToonRim(g.root))];
+      const body = pieces.some((p) => p.slot !== 'shoes');
+      const shoes = pieces.some((p) => p.slot === 'shoes');
+      this.dresser?.setGarment(body, shoes, pieces.find((p) => p.legs !== undefined)?.legs ?? null);
+    };
+    if (!pieces.length) return wear([]);
+    Promise.all(pieces.map((p) => Garment.load(p.url, vrm)))
+      .then((list) => {
+        if (this.disposed || this.vrm !== vrm || this.garmentUrl !== want) return list.forEach((g) => g.dispose());
+        list.forEach((g, i) => this.dresser?.dyeGarment(g.root, pieces[i].cosmetic, pieces[i].url));
+        wear(list);
       })
       .catch((e) => {
         console.warn('옷 불러오기 실패, 기본 옷 그대로:', e);
-        if (this.garmentUrl === want) this.garmentUrl = '';
+        if (this.garmentUrl === want) {
+          this.garmentUrl = '';
+          wear([]);
+        }
       });
   }
 
   dispose() {
     this.disposed = true;
-    this.garment?.dispose();
+    for (const g of this.garments) g.dispose();
     this.dresser?.dispose();
     if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
   }

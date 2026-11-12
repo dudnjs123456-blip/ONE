@@ -149,6 +149,12 @@ const src = loadGlb(FROM);
 const dst = loadGlb(TO);
 const S = skeleton(src);
 const D = skeleton(dst);
+// 옷만 뽑을 때(--garment) 치마 흔들림 뼈는 입는 몸에 같은 이름 뼈가 있어도(같은 VRoid 옷을 입은 몸) 옷 전용 뼈로 새로 만든다.
+// 안 그러면 새 옷 치마가 원래 옷의 (짧은) 치마 뼈를 따라가 걸을 때 찢어진다
+const FRESH = (name) => GARMENT && /Skirt/.test(name);
+const freshMade = new Set();
+/** 새 몸에 쓸 수 있는 같은 이름 뼈가 있나 */
+const dstHas = (name) => D.byName.has(name) && (!FRESH(name) || freshMade.has(name));
 const matName = (g, i) => g.json.materials[i].name.replace(/ \(Instance\)/g, '').replace(/^[A-Z]\d{2}_\d{3}_(\d{2}_)?/, '');
 
 const srcBodyMesh = src.json.meshes.find((m) => /^Body/.test(m.name));
@@ -159,7 +165,9 @@ const dstSkinIdx = dst.json.nodes.find((n) => n.mesh === dstBodyIdx).skin;
 const dstSkin = dst.json.skins[dstSkinIdx];
 
 // 옷 조각
-const clothPrims = srcBodyMesh.primitives.filter((p) => PREFIXES.some((pf) => matName(src, p.material).startsWith(pf)));
+// 재질 앞부분: 표준 이름(Tops_) 또는 VRoid 원래 이름(N00_007_01_Tops_) — 같은 종류 옷이 여러 벌인 모델에서 한 벌만 고를 때
+const rawName = (g, i) => g.json.materials[i].name.replace(/ \(Instance\)/g, '');
+const clothPrims = srcBodyMesh.primitives.filter((p) => PREFIXES.some((pf) => matName(src, p.material).startsWith(pf) || rawName(src, p.material).startsWith(pf)));
 if (!clothPrims.length) throw new Error('옮길 옷 조각이 없다: ' + PREFIXES.join(','));
 console.log('옮길 옷:', clothPrims.map((p) => matName(src, p.material)).join(', '));
 
@@ -266,7 +274,7 @@ const newWorldOf = new Map();
 function newWorld(name) {
   if (newWorldOf.has(name)) return newWorldOf.get(name);
   let r;
-  if (D.byName.has(name)) r = D.wm(D.byName.get(name));
+  if (dstHas(name)) r = D.wm(D.byName.get(name));
   else {
     const si = S.byName.get(name);
     r = m4mul(newWorld(S.nodes[S.parent.get(si)].name), trs(S.nodes[si]));
@@ -493,11 +501,11 @@ const neededNames = new Set();
 for (let k = 0; k < V; k++) for (let c = 0; c < 4; c++) if (SW[used[k] * 4 + c]) neededNames.add(srcJointNames[SJ[used[k] * 4 + c]]);
 // 흔들림 뼈 사슬 전체 (옷에 쓰인 뼈가 들어 있는 사슬)
 const springs = src.json.extensions?.VRMC_springBone?.springs ?? [];
-const takeSprings = springs.filter((s) => s.joints.some((j) => neededNames.has(S.nodes[j.node].name)) && s.joints.some((j) => !D.byName.has(S.nodes[j.node].name)));
+const takeSprings = springs.filter((s) => s.joints.some((j) => neededNames.has(S.nodes[j.node].name)) && s.joints.some((j) => !dstHas(S.nodes[j.node].name)));
 for (const s of takeSprings) for (const j of s.joints) neededNames.add(S.nodes[j.node].name);
 const added = [];
 function ensureNode(name) {
-  if (D.byName.has(name)) return D.byName.get(name);
+  if (dstHas(name)) return D.byName.get(name);
   const si = S.byName.get(name);
   const pname = S.nodes[S.parent.get(si)].name;
   const pi = ensureNode(pname);
@@ -507,12 +515,29 @@ function ensureNode(name) {
   const ni = dst.json.nodes.length - 1;
   (dst.json.nodes[pi].children ||= []).push(ni);
   D.byName.set(name, ni);
+  if (FRESH(name)) freshMade.add(name);
   D.parent.set(ni, pi);
   added.push(name);
   return ni;
 }
 for (const name of neededNames) ensureNode(name);
-console.log('새로 붙인 뼈', added.length);
+// 새로 붙인 뼈의 따라가기 설정 (VRMC_node_constraint): 소매·바짓가랑이 뼈(J_Aim_…)가 팔·다리 쪽을 바라보게.
+// 이게 빠지면 팔을 내려도 소매가 T자세 그대로 옆으로 뻗어 있다
+let constraints = 0;
+for (const name of [...added]) {
+  const ext = S.nodes[S.byName.get(name)].extensions?.VRMC_node_constraint;
+  if (!ext) continue;
+  const c = JSON.parse(JSON.stringify(ext));
+  for (const def of Object.values(c.constraint)) def.source = ensureNode(S.nodes[def.source].name);
+  const node = dst.json.nodes[D.byName.get(name)];
+  node.extensions = { ...node.extensions, VRMC_node_constraint: c };
+  constraints++;
+}
+if (constraints) {
+  const used = (dst.json.extensionsUsed ||= []);
+  if (!used.includes('VRMC_node_constraint')) used.push('VRMC_node_constraint');
+}
+console.log('새로 붙인 뼈', added.length, '· 따라가기 설정', constraints);
 
 // 스킨 관절 목록에 추가 + 묶음 행렬
 const ibmOld = readAcc(dst, dstSkin.inverseBindMatrices).v;
@@ -520,7 +545,7 @@ const joints = [...dstSkin.joints];
 const jointIndex = new Map(joints.map((j, k) => [dst.json.nodes[j].name, k]));
 const ibm = Array.from(ibmOld);
 for (const name of neededNames) {
-  if (jointIndex.has(name)) continue;
+  if (jointIndex.has(name) && !freshMade.has(name)) continue;
   const ni = D.byName.get(name);
   joints.push(ni);
   jointIndex.set(name, joints.length - 1);

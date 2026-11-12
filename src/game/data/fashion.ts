@@ -42,6 +42,8 @@ export interface CosmeticDef {
    * 옷은 그 캐릭터의 기본 몸에 맞춰 만든 것이라 목록에 있는 몸만 입을 수 있다 (scripts/outfit-transplant.mjs --garment)
    */
   garment?: Partial<Record<string, string>>;
+  /** 진짜 옷 모양 (정하지 않으면 이름·칸으로 정한다, cutOf) */
+  cut?: GarmentCut;
   desc: string;
 }
 
@@ -60,6 +62,10 @@ export const COSMETICS: CosmeticDef[] = [
   // 비키니 (상의 칸): 입으면 원래 상의·하의·원피스를 감추고 몸에 수영복을 그린다. 하의 칸 코디는 무시. 여자 캐릭터만
   C({ id: 'set-sporty-white', name: '화이트 스포티 셋업', icon: '🎽', slot: 'top', price: 650, color: 0xf2f2f4, garment: { smallSilverGirl: '/garments/a3/silver-set.vrm' }, desc: '민소매 집업 + 반바지. 가볍게 뛰기 좋은 옷. (작은은발소녀 전용)' }),
   C({ id: 'set-denim-dress', name: '데님 재킷 원피스', icon: '👗', slot: 'top', price: 900, color: 0x9ab8d8, garment: { smallSilverGirl: '/garments/a3/pinky-denim.vrm' }, desc: '크림색 롱 원피스에 짧은 청재킷. 치마가 걸을 때 살랑인다. (작은은발소녀 전용)' }),
+  // 진짜 옷 (옷 파일이 있는 몸): 원피스는 상의 칸이지만 하의까지 덮는다
+  C({ id: 'dress-cream', name: '크림 롱 원피스', icon: '👗', slot: 'top', price: 520, color: 0xf3ead8, cut: 'dress', desc: '허리가 잘록한 민소매 원피스. 걸을 때 치마가 살랑인다.' }),
+  C({ id: 'dress-black', name: '블랙 롱 원피스', icon: '👗', slot: 'top', price: 560, color: 0x26252b, cut: 'dress', desc: '어디 가든 단정한 검은 원피스.' }),
+  C({ id: 'sandal-white', name: '화이트 스트랩 샌들', icon: '👡', slot: 'shoes', price: 170, color: 0xf6f3ee, cut: 'sandals', desc: '발목 끈이 달린 여름 샌들.' }),
   C({ id: 'bikini-white', name: '화이트 비키니', icon: '👙', slot: 'top', price: 380, color: 0xf7f6f2, style: 'bikini', femaleOnly: true, desc: '여름 한강 수영장 갈 때. (여자 캐릭터만)' }),
   C({ id: 'tail-white', name: '화이트 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xfbf8f4, style: 'bunnyTail', desc: '엉덩이에 달린 몽실몽실 솜뭉치.' }),
   C({ id: 'tail-pink', name: '핑크 토끼 꼬리', icon: '🐇', slot: 'tail', price: 200, color: 0xf7c3d4, style: 'bunnyTail', desc: '머리띠랑 맞춰 달면 더 귀엽다.' }),
@@ -235,6 +241,8 @@ const NO_BODY_UNDER_CLOTHES: readonly string[] = ['pink'];
 /** 이 캐릭터가 못 입는 이유 (입을 수 있으면 null). 비키니는 여자 캐릭터만, 옷 속 몸이 있는 모델만 */
 export function wearBlock(p: PlayerProfile, c: CosmeticDef): string | null {
   if (c.garment && !c.garment[p.body ?? 'female']) return '아직 이 캐릭터에 맞는 옷이 없어요';
+  // 원피스·샌들처럼 진짜 옷으로만 있는 코디는 옷 파일이 있는 몸만
+  if (c.cut && !GARMENT_KITS[p.body ?? 'female']?.[c.cut]) return '아직 이 캐릭터에 맞는 옷이 없어요';
   if (!c.femaleOnly) return null;
   const body = p.body ?? 'female';
   if (MALE_BODIES.includes(body)) return '여자 캐릭터만 입을 수 있어요';
@@ -289,4 +297,77 @@ export function garmentFor(ids: readonly string[], body: string): string | null 
     if (url) return url;
   }
   return null;
+}
+
+/* ───────── 진짜 옷 (옷 파일을 입는다) ─────────
+ * 옷 파일이 마련된 몸은 상의·하의·신발 코디를 색만 칠하지 않고 진짜 옷(티셔츠·반바지·운동화 …)을 입고,
+ * 그 옷에 코디 색·무늬를 입힌다. 옷 파일은 그 몸에 맞춰 만든 것 (scripts/outfit-transplant.mjs --garment)
+ */
+export type GarmentCut = 'tee' | 'shorts' | 'half' | 'long' | 'dress' | 'sneakers' | 'sandals';
+
+/** 몸 → 옷 모양별 옷 파일. 여기 없는 몸은 예전처럼 기본 옷에 색만 칠한다 */
+export const GARMENT_KITS: Partial<Record<string, Partial<Record<GarmentCut, string>>>> = {
+  smallSilverGirl: {
+    tee: '/garments/a3/tee.vrm',
+    shorts: '/garments/a3/shorts.vrm',
+    half: '/garments/a3/half-pants.vrm',
+    // 긴바지: 반바지 + 다리를 바지 색으로 칠한다 (허리·엉덩이는 진짜 옷, 다리는 몸에 붙는 바지)
+    long: '/garments/a3/shorts.vrm',
+    dress: '/garments/a3/dress.vrm',
+    sneakers: '/garments/a3/sneakers.vrm',
+    sandals: '/garments/a3/sandals.vrm',
+  },
+};
+
+/** 코디가 입는 옷 모양 (진짜 옷이 아닌 것 = null: 비키니·갈아입는 옷 세트·소품) */
+export function cutOf(c: CosmeticDef): GarmentCut | null {
+  if (c.cut) return c.cut;
+  if (c.garment || c.style === 'bikini') return null;
+  if (c.slot === 'top') return 'tee';
+  if (c.slot === 'bottom') return /쇼츠|반바지|스커트/.test(c.name) ? 'shorts' : /와이드/.test(c.name) ? 'half' : 'long';
+  if (c.slot === 'shoes') return /샌들/.test(c.name) ? 'sandals' : 'sneakers';
+  return null;
+}
+
+export interface GarmentPiece {
+  slot: 'top' | 'bottom' | 'shoes';
+  url: string;
+  cut: GarmentCut | null;
+  /** 이 옷에 입힐 코디 색·무늬 (null = 옷 파일 원래 색: 기본 흰 티 · 검은 반바지) */
+  cosmetic: CosmeticDef | null;
+  /** 다리를 바지 색으로 칠한다 (긴바지) */
+  legs?: number;
+}
+
+/**
+ * 이 몸이 입을 옷 파일 목록. 빈 목록 = 기본 옷 그대로. 상의나 하의 하나만 입으면 나머지는 기본 흰 티·검은 반바지.
+ * 갈아입는 옷 세트(garment)는 상의·하의를 통째로 차지하고, 비키니면 신발만.
+ */
+export function garmentPieces(ids: readonly string[], body: string): GarmentPiece[] {
+  const worn = new Map<CosmeticSlot, CosmeticDef>();
+  for (const id of ids) {
+    const c = COSMETIC_BY_ID[id];
+    if (c) worn.set(c.slot, c);
+  }
+  const kit = GARMENT_KITS[body];
+  const out: GarmentPiece[] = [];
+  const top = worn.get('top');
+  const bottom = worn.get('bottom');
+  const shoes = worn.get('shoes');
+  const set = top?.garment?.[body];
+  if (set) out.push({ slot: 'top', url: set, cut: null, cosmetic: null });
+  if (!kit) return out;
+  const piece = (slot: GarmentPiece['slot'], c: CosmeticDef | null, fallback: GarmentCut) => {
+    const cut = (c && cutOf(c)) || fallback;
+    const url = kit[cut];
+    if (url) out.push({ slot, url, cut, cosmetic: c, ...(cut === 'long' && c ? { legs: c.color } : {}) });
+  };
+  const swim = top?.style === 'bikini';
+  if (!set && !swim && (top || bottom)) {
+    const dress = top && cutOf(top) === 'dress';
+    piece('top', top ?? null, 'tee');
+    if (!dress) piece('bottom', bottom ?? null, 'shorts');
+  }
+  if (shoes && cutOf(shoes)) piece('shoes', shoes, 'sneakers');
+  return out;
 }
