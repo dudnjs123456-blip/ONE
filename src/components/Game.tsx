@@ -240,47 +240,6 @@ export default function Game() {
   return (
     <main className="tg-sky px-6 py-12">
       <SkyClouds />
-      {/*
-        오른쪽 아래 캐릭터 (서울 거리 배경이 있는 그림, 두 겹)
-        1) 같은 그림을 크게 흐리게 번진 복사본 — 그림 속 밤거리 색이 검은 배경 쪽으로 퍼져 나가 경계를 감춘다
-        2) 선명한 원본 — 캐릭터는 또렷하게, 가장자리만 타원형으로 부드럽게 지운다
-      */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed bottom-0 right-0 z-0 hidden h-[74vh] w-[calc(52vh*843/1264*2.1)] opacity-60 md:block xl:opacity-90"
-        style={{
-          backgroundImage: 'url(/images/menu-character-city.webp)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center bottom',
-          filter: 'blur(48px) brightness(0.55) saturate(1.1)',
-          maskImage: 'radial-gradient(ellipse 50% 55% at 62% 78%, black 30%, transparent 100%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 50% 55% at 62% 78%, black 30%, transparent 100%)',
-        }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none fixed bottom-0 -right-8 z-0 hidden h-[52vh] w-[calc(52vh*843/1264)] opacity-75 md:block xl:opacity-100"
-        style={{
-          backgroundImage: 'url(/images/menu-character-city.webp)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center bottom',
-          filter: 'saturate(1.08) contrast(1.05) drop-shadow(0 0 22px rgba(255, 220, 240, 0.18))',
-          maskImage: 'radial-gradient(ellipse 52% 70% at 50% 64%, black 64%, transparent 100%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 52% 70% at 50% 64%, black 64%, transparent 100%)',
-        }}
-      />
-      {/* 왼쪽 아래 두 번째 캐릭터 (한복): 동그란 수묵화 배경, 주인공보다 한발 물러나 은은하게 */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed bottom-0 left-6 z-0 hidden h-[34vh] w-[calc(34vh*821/1228)] opacity-35 md:block xl:opacity-50"
-        style={{
-          backgroundImage: 'url(/images/menu-character-2.webp)',
-          backgroundSize: 'contain',
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: 'center bottom',
-          filter: 'brightness(0.85) saturate(0.8) blur(0.5px)',
-        }}
-      />
       {keys && <KeySettings onClose={() => setKeys(false)} />}
       <div className="relative z-10 mx-auto max-w-4xl">
         <h1>
