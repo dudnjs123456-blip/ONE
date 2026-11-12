@@ -1,0 +1,6 @@
+{
+  "asphalt": { "aspect": 1 },
+  "sidewalk": { "aspect": 1 },
+  "path": { "aspect": 1 },
+  "grass": { "aspect": 1 }
+}

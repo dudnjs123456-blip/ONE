@@ -1,0 +1,7 @@
+실사 하늘 사진 (Poly Haven, CC0 1.0 — 출처 표시 의무 없음, 상업적 사용 가능)
+
+sky-day.jpg      — "kloofendal_48d_partly_cloudy_puresky"  https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky
+sky-dusk.jpg     — "belfast_sunset_puresky"                https://polyhaven.com/a/belfast_sunset_puresky
+sky-overcast.jpg — "overcast_soil_puresky"                 https://polyhaven.com/a/overcast_soil_puresky
+
+톤 매핑된 JPG 를 4096×2048 로 줄인 뒤 위쪽 반구(4096×1024)만 남긴 것.

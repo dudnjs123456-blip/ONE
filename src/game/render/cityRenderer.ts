@@ -5,7 +5,7 @@ import { CORRIDOR, HOME, LOBBY, type CityLocation, type CityWorld } from '../cit
 import { buildLobbyScene } from './lobbyScene';
 import { glassMaterial, initGlassEnv } from './glassKit';
 import { UnitWindow, coverPlate } from './unitWindows';
-import { LookFx, SkyDome, toonify } from './lookFx';
+import { LookFx, REALISTIC_WORLD, SkyDome, toonify } from './lookFx';
 import { PersonView, ROBBER_SKIN } from './personView';
 import { makeKitBuilding } from './cityKit';
 import { allLoaded } from './loadTracker';
@@ -171,6 +171,9 @@ const CAM_HOME = new THREE.Vector3(0, 6.2, 7.4);
 /** 낚시할 때: 뒤(북쪽)에서 어깨 너머로 강을 본다 (보는 곳은 플레이어보다 3.2m 앞) */
 const FISH_CAM = new THREE.Vector3(-3.2, 4.0, -5.6);
 const SKY_DAY = new THREE.Color(0x9cc9ec);
+/** 실사풍 조명 세기: 하늘 주변광(환경 지도) · 하늘빛(반구 조명)에 곱하는 값 */
+const ENV_REAL = 0.7;
+const HEMI_REAL = 0.6;
 
 interface BuildingView {
   b: Building;
@@ -451,6 +454,10 @@ export class CityRenderer {
    */
   private quality = 0;
   private shadowTick = 0;
+  /** 실사풍: 하늘을 주변광(환경 지도)으로 구운 것. 하늘이 눈에 띄게 바뀔 때만 다시 굽는다 */
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envRT: THREE.WebGLRenderTarget | null = null;
+  private envKey = '';
   private slowFrames = 0;
   private frameEma = 1 / 60;
   private size = { w: 1, h: 1 };
@@ -813,6 +820,8 @@ export class CityRenderer {
       const ps = this.parkScene();
       ps.scene.background = this.city.background;
       ps.scene.fog = this.city.fog;
+      ps.scene.environment = this.city.environment;
+      ps.scene.environmentIntensity = this.city.environmentIntensity;
       ps.update(world.parkClock(), this.fxNight);
     }
     const ridePose = riding ? seatPose(world.ride!.id, world.ride!.seat, world.parkClock(), this._seat) : null;
@@ -1234,6 +1243,8 @@ export class CityRenderer {
   dispose() {
     this.chatBubbles.dispose();
     this.fx.dispose();
+    this.envRT?.dispose();
+    this.pmrem?.dispose();
     this.weatherFx.dispose();
     this.groundKit.dispose();
     this.facadeKit.dispose();
@@ -1429,7 +1440,8 @@ export class CityRenderer {
     this.sun.intensity = (0.45 * moon + daylight * 2.2) * shade;
     this.sun.color.set(0xffffff).lerp(new THREE.Color(0xffa060), this.fxDusk).lerp(new THREE.Color(0x9fb4ff), moon);
     // 밤에도 나무·건물이 새까만 덩어리로 보이지 않게 하늘빛을 넉넉히
-    this.hemi.intensity = 0.95 + daylight * 0.25 - w.cloud * daylight * 0.1 + flash * 2.2;
+    // 실사풍은 하늘 주변광(환경 지도)이 그만큼 채워 주니 하늘빛 조명은 줄인다
+    this.hemi.intensity = (0.95 + daylight * 0.25 - w.cloud * daylight * 0.1 + flash * 2.2) * (REALISTIC_WORLD ? HEMI_REAL : 1);
     this.hemi.color.set(0xdff1ff).lerp(new THREE.Color(0x6f7fb8), moon).lerp(new THREE.Color(0xc9ced6), w.cloud * daylight * 0.6);
     const night = 1 - daylight;
     // 툰 재질은 발광이 그대로 더해져서 예전보다 낮게
@@ -1441,6 +1453,20 @@ export class CityRenderer {
     this.treeKit.setNight(night);
     for (const m of this.nightGlow) (m as THREE.MeshBasicMaterial).opacity = night;
     this.lampGlow.visible = night > 0.05;
+    if (REALISTIC_WORLD) this.bakeSkyEnv(daylight, Math.min(1, dusk), w.cloud);
+  }
+
+  /** 지금 하늘을 주변광으로 굽는다 (건물·땅이 하늘색을 받고, 그늘도 새까맣지 않게). 바뀐 게 없으면 그대로 */
+  private bakeSkyEnv(daylight: number, dusk: number, cloud: number) {
+    const key = `${this.sky.photosReady ? 1 : 0}|${Math.round(daylight * 40)}|${Math.round(dusk * 20)}|${Math.round(cloud * 20)}|${Math.round(this.sunAngle * 20)}`;
+    if (key === this.envKey) return;
+    this.envKey = key;
+    this.pmrem ??= new THREE.PMREMGenerator(this.renderer);
+    const rt = this.pmrem.fromScene(this.sky.envScene, 0, 1, 1000);
+    this.envRT?.dispose();
+    this.envRT = rt;
+    this.city.environment = rt.texture;
+    this.city.environmentIntensity = ENV_REAL;
   }
 
   private updateHomeLight(daylight: number, minutes: number) {
@@ -1823,9 +1849,14 @@ export class CityRenderer {
     // 한강 강둑 석축 · 낚시 데크
     buildFishDecks(s, m);
     // 강변북로 방음벽
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(1600, 1.2, 0.3), new THREE.MeshStandardMaterial({ color: 0x9fb7a8 }));
-    wall.position.set(0, 0.6, EXPRESSWAY_Z + 7.3);
-    s.add(wall);
+    if (REALISTIC_WORLD) {
+      // 실사풍: 콘크리트 질감 방음벽 (산책로와 같은 콘크리트)
+      s.add(this.groundKit.box('path', 1600, 1.2, 0.3, 0, 0.6, EXPRESSWAY_Z + 7.3));
+    } else {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(1600, 1.2, 0.3), new THREE.MeshStandardMaterial({ color: 0x9fb7a8 }));
+      wall.position.set(0, 0.6, EXPRESSWAY_Z + 7.3);
+      s.add(wall);
+    }
 
     this.buildLandmarks();
     for (const t of m.trails) this.buildTrailPark(t);

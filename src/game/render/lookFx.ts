@@ -223,6 +223,12 @@ export class LookFx {
   }
 }
 
+/**
+ * 화풍 스위치: true = 배경(건물·땅·소품)은 실사풍 조명 + 사진 하늘, 캐릭터는 그대로 애니메이션 툰.
+ * false 로 바꾸면 예전처럼 전부 툰 + 그라데이션 하늘
+ */
+export const REALISTIC_WORLD = true;
+
 /** 툰 명암: 3단계 (그림자 / 중간 / 밝음) */
 let gradient: THREE.DataTexture | null = null;
 export function toonGradient() {
@@ -248,6 +254,15 @@ export function toonify(root: THREE.Object3D, swapped = new Map<THREE.Material, 
       // 반짝이는 유리·금속은 툰으로 바꾸면 밋밋해져서 둔다
       // (matte: 금속값이 빠져 기본값 1 로 읽힌 에셋도 무광으로 보고 바꾼다)
       if ((!opts.matte && m.metalness > 0.45) || (m.transparent && m.opacity < 0.6) || m.userData.glass) return m;
+      if (REALISTIC_WORLD) {
+        // 실사풍: 툰 대신 빛·하늘 반사를 그대로 받는 재질 (재질은 따로 복사해서 돌려준다 — 부르는 쪽이 색을 바꾼다)
+        const s = m.clone();
+        if (opts.matte) s.metalness = 0;
+        s.roughness = Math.max(s.roughness, 0.55);
+        t = s;
+        swapped.set(m, t);
+        return t;
+      }
       t = new THREE.MeshToonMaterial({
         color: m.color,
         map: m.map,
@@ -281,11 +296,42 @@ export function toonify(root: THREE.Object3D, swapped = new Map<THREE.Material, 
 const _c = new THREE.Color();
 const _g = new THREE.Color();
 
+/**
+ * 실사 하늘 사진 (Poly Haven CC0 "pure sky", 위쪽 반구만 4096×1024):
+ * sunU = 사진 속 해의 가로 위치 (0~1) — 게임 속 해 방향과 맞춰 돌린다. horizon = 사진 지평선 평균 색 (안개 색)
+ */
+const SKY_PHOTOS = [
+  { url: '/textures/sky/sky-day.jpg', sunU: 0.62, horizon: 0x9ba1b2 },
+  { url: '/textures/sky/sky-dusk.jpg', sunU: 0.66, horizon: 0x978b89 },
+  { url: '/textures/sky/sky-overcast.jpg', sunU: 0.5, horizon: 0x807d79 },
+] as const;
+/** 사진 하늘 밝기 (사진은 이미 톤 매핑된 색이라, 마지막 톤 매핑에서 어두워지는 만큼 미리 올려 둔다) */
+const PHOTO_GAIN = 1.25;
+const _h = new THREE.Color();
+
 export class SkyDome {
   readonly mesh: THREE.Mesh;
   private mat: THREE.ShaderMaterial;
+  private loaded = 0;
+  /** 주변광(환경 지도)을 다시 구울 때 쓰는 장면 (같은 하늘 재질을 원점에 둔다) */
+  readonly envScene = new THREE.Scene();
 
   constructor() {
+    const photos = REALISTIC_WORLD
+      ? SKY_PHOTOS.map((p) => {
+          const t = new THREE.TextureLoader().load(p.url, () => {
+            this.loaded++;
+            this.mat.uniforms.ready.value = this.loaded === SKY_PHOTOS.length ? 1 : 0;
+          });
+          t.colorSpace = THREE.SRGBColorSpace;
+          t.wrapS = THREE.RepeatWrapping;
+          t.wrapT = THREE.ClampToEdgeWrapping;
+          // 밉맵을 쓰면 사진 이음매(경도 0°)에 세로 줄이 생긴다 — 하늘은 늘 멀어서 밉맵 없이도 깨지지 않는다
+          t.generateMipmaps = false;
+          t.minFilter = THREE.LinearFilter;
+          return t;
+        })
+      : [null, null, null];
     this.mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -296,6 +342,18 @@ export class SkyDome {
         sunDir: { value: new THREE.Vector3(0, 1, 0) },
         sunColor: { value: new THREE.Color(0xffe2b0) },
         sunGlow: { value: 0.6 },
+        dayMap: { value: photos[0] },
+        duskMap: { value: photos[1] },
+        overMap: { value: photos[2] },
+        sunU: { value: new THREE.Vector3(SKY_PHOTOS[0].sunU, SKY_PHOTOS[1].sunU, SKY_PHOTOS[2].sunU) },
+        sunAz: { value: 0 },
+        /** 사진 섞는 비율: 맑음 · 노을 · 흐림 (합 1) */
+        photoW: { value: new THREE.Vector3(1, 0, 0) },
+        /** 사진 하늘 비중 (0 = 그라데이션만, 밤) · 밝기 */
+        photoAmt: { value: 0 },
+        photoBright: { value: 1 },
+        flash: { value: 0 },
+        ready: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -307,12 +365,30 @@ export class SkyDome {
       `,
       fragmentShader: /* glsl */ `
         uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; uniform float sunGlow;
+        uniform sampler2D dayMap; uniform sampler2D duskMap; uniform sampler2D overMap;
+        uniform vec3 sunU; uniform float sunAz; uniform vec3 photoW;
+        uniform float photoAmt; uniform float photoBright; uniform float flash; uniform float ready;
         varying vec3 vDir;
         void main() {
-          float h = clamp(vDir.y, 0.0, 1.0);
+          vec3 d = normalize(vDir);
+          float h = clamp(d.y, 0.0, 1.0);
           vec3 c = mix(horizon, top, pow(h, 0.55));
-          float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
-          c += sunColor * (pow(s, 64.0) * 1.6 + pow(s, 6.0) * 0.35) * sunGlow;
+          float s = max(dot(d, normalize(sunDir)), 0.0);
+          float amt = photoAmt * ready;
+          // 사진에도 해가 있으니 사진이 보일 땐 그린 해는 은은한 빛무리만
+          c += sunColor * (pow(s, 64.0) * 1.6 * (1.0 - amt) + pow(s, 6.0) * 0.35) * sunGlow;
+          if (amt > 0.0) {
+            // 방향 → 사진 좌표 (가로: 해 방향이 사진 속 해 위치에 오게 돌림, 세로: 지평선 0 → 꼭대기 1)
+            float az = atan(d.z, d.x) / 6.2831853 - sunAz;
+            float v = asin(clamp(d.y, 0.003, 1.0)) / 1.5707963;
+            vec3 p = texture2D(dayMap, vec2(fract(az + sunU.x), v)).rgb * photoW.x
+                   + texture2D(duskMap, vec2(fract(az + sunU.y), v)).rgb * photoW.y
+                   + texture2D(overMap, vec2(fract(az + sunU.z), v)).rgb * photoW.z;
+            // 노을: 지평선 쪽이 사방으로 따뜻하게 물든다
+            p += sunColor * photoW.y * 0.22 * pow(1.0 - v, 3.0);
+            p = p * photoBright + vec3(0.85, 0.88, 1.0) * flash;
+            c = mix(c, p, amt);
+          }
           gl_FragColor = vec4(c, 1.0);
         }
       `,
@@ -321,6 +397,9 @@ export class SkyDome {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -1;
     this.mesh.userData.noAO = true;
+    const envDome = new THREE.Mesh(this.mesh.geometry, this.mat);
+    envDome.frustumCulled = false;
+    this.envScene.add(envDome);
   }
 
   /** @returns 지평선 색 (안개 색으로 쓴다) */
@@ -344,7 +423,33 @@ export class SkyDome {
     (u.sunColor.value as THREE.Color).setHex(0xfff0c8).lerp(_c.setHex(0xff7a3a), Math.min(1, dusk));
     u.sunDir.value.copy(sunDir);
     u.sunGlow.value = Math.max(0, daylight + dusk * 0.6) * (1 - cloud * 0.9);
+
+    if (REALISTIC_WORLD) {
+      // 노을 사진은 일찍·확실히 넘어가게 (반반 섞이면 구름이 겹쳐 보인다)
+      const k = THREE.MathUtils.smoothstep(dusk, 0.05, 0.5);
+      // 맑음·노을·흐림 비율 (합이 1)
+      const w = u.photoW.value as THREE.Vector3;
+      w.set((1 - k) * (1 - cloud), k * (1 - cloud), cloud);
+      u.sunAz.value = Math.atan2(sunDir.z, sunDir.x) / (Math.PI * 2);
+      // 낮엔 사진 하늘, 해가 지면서 어두워지다가 밤엔 원래 그라데이션(남색) 하늘로
+      const amt = THREE.MathUtils.smoothstep(daylight + k * 0.4, 0.05, 0.55);
+      const bright = PHOTO_GAIN * (0.2 + 0.8 * Math.min(1, daylight + k * 0.3));
+      u.photoAmt.value = amt;
+      u.photoBright.value = bright;
+      u.flash.value = flash * 0.8;
+      if (u.ready.value > 0) {
+        // 안개 색도 사진 지평선 색에 맞춘다 (먼 건물이 하늘에 자연스럽게 묻히게)
+        _h.setRGB(0, 0, 0);
+        SKY_PHOTOS.forEach((p, i) => _h.add(_c.setHex(p.horizon).multiplyScalar(w.getComponent(i))));
+        hor.lerp(_h.multiplyScalar(bright), amt);
+      }
+    }
     return hor;
+  }
+
+  /** 하늘 사진이 다 불러와졌나 (주변광을 사진 기준으로 다시 구울 때) */
+  get photosReady() {
+    return this.mat.uniforms.ready.value > 0;
   }
 
   /** 카메라를 따라다닌다 (하늘이 멀리 있는 것처럼) */

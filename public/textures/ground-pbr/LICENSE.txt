@@ -1,0 +1,8 @@
+실사 바닥 텍스처 (모두 CC0 1.0 — 출처 표시 의무 없음, 상업적 사용 가능)
+
+asphalt   — Poly Haven "asphalt_pit_lane"   https://polyhaven.com/a/asphalt_pit_lane    (실제 크기 2m)
+sidewalk  — Poly Haven "pavement_03"        https://polyhaven.com/a/pavement_03         (실제 크기 2m)
+path      — Poly Haven "gravel_concrete_03" https://polyhaven.com/a/gravel_concrete_03  (실제 크기 2.1m)
+grass     — ambientCG "Grass006"            https://ambientcg.com/a/Grass006
+
+<이름>.jpg = 색, <이름>_n.jpg = 노멀맵 (OpenGL 방식). 1K 를 1024×1024 JPG 로 다시 압축한 것.
