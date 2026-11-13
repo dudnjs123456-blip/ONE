@@ -8,6 +8,7 @@ import type { PlayerProfile } from '../src/game/core/profile';
 import { gameTimeAt } from '../src/game/city/worldClock';
 import { parkPeople, visitorSeats } from '../src/game/city/parkPeople';
 import { tvApplyRemote, tvNet, tvPlay, tvPos, tvReset, tvSetPaused, tvState } from '../src/game/city/tvState';
+import { SIDE_ROLL, SLEEP_SEGMENT, sleepBreath, sleepMotion, sleepPoseAt, hashSeed } from '../src/game/render/sleepMotion';
 
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`);
@@ -475,4 +476,33 @@ check('A sees B pet', !!pet && pet.sp === 'dog' && pet.x === 1 && pet.z === 2 &&
   check('garment: plain clothes have no garment file', garmentFor(['tee-pink', 'pants-denim'], 'smallSilverGirl') === null);
   check('garment: other bodies cannot wear it', !!wearBlock({ body: 'silver' } as never, COSMETIC_BY_ID['set-sporty-white']));
   check('garment: the fitted body can wear it', wearBlock({ body: 'smallSilverGirl' } as never, COSMETIC_BY_ID['set-sporty-white']) === null);
+}
+
+// 잠자는 모습: 뒤척임은 공유 시각 + 그 사람 아이디로만 정해서 내 화면·친구 화면이 같다
+{
+  const t0 = Date.UTC(2026, 10, 12, 15, 0, 0);
+  const a = sleepMotion('user-a', t0);
+  check('sleep: same person + same time → same pose everywhere', JSON.stringify(a) === JSON.stringify(sleepMotion('user-a', t0)));
+  // 한 시간 동안 1초마다: 갑자기 튀지 않고, 세 자세가 모두 나오며, 각도는 범위 안
+  let maxJump = 0;
+  let prev = a.roll;
+  const seen = new Set<string>();
+  const seed = hashSeed('user-a');
+  for (let n = 0; n < 3600 / SLEEP_SEGMENT; n++) seen.add(sleepPoseAt(seed, n));
+  let inRange = true;
+  for (let s = 1; s <= 3600 * 10; s++) {
+    const m = sleepMotion('user-a', t0 + s * 100);
+    maxJump = Math.max(maxJump, Math.abs(m.roll - prev));
+    prev = m.roll;
+    if (Math.abs(m.roll) > SIDE_ROLL + 1e-9 || m.side < 0 || m.side > 1 || m.smile < 0 || m.smile > 1) inRange = false;
+  }
+  check('sleep: turning over is smooth (no snapping)', maxJump < 0.08, `(최대 ${maxJump.toFixed(3)} rad / 0.1초)`);
+  check('sleep: back, left and right poses all appear within an hour', seen.size === 3, `(${[...seen].join(',')})`);
+  check('sleep: angles stay in range', inRange);
+  // 두 사람이 같이 자도 똑같이 움직이지 않는다
+  let same = 0;
+  for (let s = 0; s < 3600; s += 5) if (Math.abs(sleepMotion('user-a', t0 + s * 1000).roll - sleepMotion('user-b', t0 + s * 1000).roll) < 1e-6) same++;
+  check('sleep: two sleepers toss differently', same < 3600 / 5 * 0.8, `(같은 순간 ${same}/${3600 / 5})`);
+  // 숨: 4.6초에 한 번, 0~1
+  check('sleep: breath is slow and bounded', Math.abs(sleepBreath(0) - sleepBreath(4.6)) < 1e-9 && sleepBreath(1.84) > 0.99 && sleepBreath(0) < 0.01);
 }

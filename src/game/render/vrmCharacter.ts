@@ -7,6 +7,8 @@ import { smooth, type FrameClock } from './clock';
 import { track } from './loadTracker';
 import { OutfitDresser, keepFieldOutline } from './outfitKit';
 import { FACE_KEYS, MOOD_FACE, eyesBusy, type FaceKey } from './moodFace';
+import { sleepBreath, sleepMotion } from './sleepMotion';
+import { sharedNow } from '../city/worldClock';
 import { Garment } from './garmentKit';
 import { garmentPieces } from '../data/fashion';
 import { BODY_TYPES } from './looks';
@@ -111,6 +113,9 @@ const _q = new THREE.Quaternion();
 const _axL = new THREE.Vector3();
 const _lockV = new THREE.Vector3();
 const _axR = new THREE.Vector3();
+const _qRoll = new THREE.Quaternion();
+const _up = new THREE.Vector3(0, 1, 0);
+const _fwd = new THREE.Vector3(0, 0, 1);
 
 /** 절차적 포즈가 직접 움직이지 않는 뼈. 매 프레임 기본 자세로 돌려서 클립이 끝난 뒤 자세가 남지 않게 */
 const UNDRIVEN: VRMHumanBoneName[] = ['upperChest', 'neck', 'leftShoulder', 'rightShoulder', 'leftHand', 'rightHand', 'leftToes', 'rightToes'];
@@ -547,6 +552,8 @@ export class VrmCharacter implements CharacterView {
     vrm.scene.rotation.x = 0;
     vrm.scene.rotation.z = 0;
     this.sofaFace = null;
+    this.sleepFace = null;
+    this.sleepSide = 0;
     if (this.micMesh) this.micMesh.visible = false;
     if (this.rest && this.rest.t > 0) {
       if (this.rest.sofa) this.applySofa(vrm, this.rest, lp, yaw);
@@ -566,13 +573,14 @@ export class VrmCharacter implements CharacterView {
       const fm = this.faceMood;
       if (fm && performance.now() > fm.until) this.faceMood = null;
       const mood = this.faceMood && !hurt && !down && !asleep && !sf && f.state !== 'attack' ? MOOD_FACE[this.faceMood.mood] : null;
+      const slf = asleep && !sf && !hurt && !down ? (this.sleepFace as VrmCharacter['sleepFace']) : null;
       const want: Partial<Record<FaceKey, number>> = mood
         ? { ...mood, blink: Math.max(mood.blink ?? 0, blink && !eyesBusy(mood) ? 1 : 0) }
         : {
             blink: hurt || down || blink || asleep ? 1 : 0,
             angry: f.state === 'attack' ? 0.7 : 0,
-            aa: f.state === 'attack' && f.isInActiveFrames() ? 0.6 : hurt ? 0.5 : (sf?.aa ?? 0),
-            happy: sf?.happy ?? 0,
+            aa: f.state === 'attack' && f.isInActiveFrames() ? 0.6 : hurt ? 0.5 : (sf?.aa ?? slf?.aa ?? 0),
+            happy: sf?.happy ?? slf?.happy ?? 0,
           };
       // 깜빡임은 바로, 나머지 표정은 몇 프레임에 걸쳐 바뀐다
       for (const k of FACE_KEYS) {
@@ -672,7 +680,7 @@ export class VrmCharacter implements CharacterView {
    * 침대에 눕기: 침대 옆에 서서 → 걸터앉고 → 다리를 올리며 뒤로 눕는다.
    * 몸 전체(장면 루트)의 위치·방향·뒤로 젖힘과 골반 높이·다리 굽힘을 열쇠 자세 사이로 보간한다.
    */
-  private applyRest(vrm: VRM, r: RestPose, lp: { x: number; y: number; z: number }, yaw: number, t: number) {
+  private applyRest(vrm: VRM, r: RestPose, lp: { x: number; y: number; z: number }, yaw: number, _t: number) {
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
     const ease = (u: number) => u * u * (3 - 2 * u);
     const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
@@ -718,10 +726,8 @@ export class VrmCharacter implements CharacterView {
     set('leftFoot', 0.8 * (1 - sit));
     set('rightFoot', 0.8 * (1 - sit));
     set('spine', 0.08 * sit);
-    // 잠든 숨결: 가슴이 천천히 오르내린다
     const lying = Math.max(0, (r.t - 0.85) / 0.15);
-    set('chest', Math.sin(t * 0.07) * 0.035 * lying);
-    set('head', -0.15 * lying);
+    this.applySleep(vrm, r, ease(lying), w);
 
     // 앉아서: 사람이 없으면 휴대폰을 보고, 사람이 오면 고개를 들어 그쪽을 본다
     const seated = r.t <= 0.36 ? sit * w : 0;
@@ -752,6 +758,76 @@ export class VrmCharacter implements CharacterView {
       bone('head')?.quaternion.slerp(q.setFromEuler(e.set(0.05, this.lookYaw * 0.75, 0)), this.lookW);
       bone('chest')?.quaternion.slerp(q.setFromEuler(e.set(0, this.lookYaw * 0.25, 0)), this.lookW);
     }
+  }
+
+  /** 옆으로 돌아누운 정도 0~1 (이불을 그만큼 들어 올린다) */
+  sleepSide = 0;
+  /** 자는 표정 (applySleep 이 정한다) */
+  private sleepFace: { aa: number; happy: number } | null = null;
+
+  /**
+   * 잠든 모습: 몇십 초마다 바로 눕기 ↔ 왼쪽·오른쪽으로 돌아눕기 (공유 시각으로 정해서 친구 화면도 같다),
+   * 느리고 깊은 숨, 살짝 벌어진 입과 가끔 잠꼬대 미소.
+   * @param L 누운 정도 0~1 (다 누운 뒤에만 뒤척인다) · w 처음 몇 프레임 섞는 비율
+   */
+  private applySleep(vrm: VRM, r: RestPose, L: number, w: number) {
+    this.sleepSide = 0;
+    if (L <= 0) return;
+    const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
+    const e = _e;
+    const q = _q;
+    const rot = (n: VRMHumanBoneName, x: number, y: number, z: number, k: number) => {
+      if (k > 0.001) bone(n)?.quaternion.slerp(q.setFromEuler(e.set(x, y, z)), k);
+    };
+    const sm = sleepMotion(r.sleepSeed ?? 'me', sharedNow());
+    const b = sleepBreath(performance.now() / 1000 + this.blinkSeed);
+    const side = sm.side * L;
+    this.sleepSide = side;
+
+    // 몸통 길이 방향 축으로 돌아눕는다. 옆으로 누우면 어깨 폭만큼 몸 가운데가 높아진다
+    vrm.scene.quaternion.multiply(_qRoll.setFromAxisAngle(_up, sm.roll * L));
+    vrm.scene.position.y += 0.07 * side;
+
+    // 숨결: 가슴과 배가 천천히 부풀었다 가라앉는다 · 돌아눕는 순간엔 몸을 살짝 웅크린다
+    const curl = sm.turning * L;
+    rot('spine', 0.18 * curl - 0.015 * b * L, 0, 0, w);
+    rot('chest', -0.035 * b * L + 0.1 * side, 0, 0, w);
+    // 고개: 바로 누우면 베개에 편히, 옆으로 누우면 턱을 당기고 베개 쪽으로 기운다
+    const dir = Math.sign(sm.roll) || 1;
+    rot('head', -0.12 * L + 0.3 * side, 0, -0.18 * dir * side, w);
+
+    // 다리: 옆으로 누우면 무릎을 굽힌다 (위쪽 다리를 조금 더 앞으로)
+    const topLeft = dir > 0;
+    const legs = (n: 'left' | 'right', top: boolean) => {
+      const hip = (top ? 0.8 : 0.45) * side + 0.25 * curl;
+      const knee = (top ? 1.05 : 0.75) * side + 0.3 * curl;
+      rot(n === 'left' ? 'leftUpperLeg' : 'rightUpperLeg', -hip, 0, n === 'left' ? 0.04 : -0.04, w);
+      rot(n === 'left' ? 'leftLowerLeg' : 'rightLowerLeg', knee, 0, 0, w);
+    };
+    legs('left', topLeft);
+    legs('right', !topLeft);
+
+    // 팔: 바로 누우면 오른손을 배 위에, 옆으로 누우면 한 팔은 앞으로 뻗고 다른 팔은 허리 위에 얹는다
+    const arm = (s: 'left' | 'right', sh: number, el: number, ar: number, k: number) => {
+      if (k <= 0.001) return;
+      const hang = ARM_HANG - ar;
+      bone(s === 'left' ? 'leftUpperArm' : 'rightUpperArm')?.quaternion.slerp(q.setFromEuler(e.set(sh, 0, s === 'left' ? -hang : hang, 'XYZ')), k);
+      const ax = s === 'left' ? _axL.set(Math.cos(hang), Math.sin(hang), 0) : _axR.set(Math.cos(hang), -Math.sin(hang), 0);
+      bone(s === 'left' ? 'leftLowerArm' : 'rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(ax, el), k);
+    };
+    const belly = sm.belly * L * w;
+    // 배 위의 손: 아래팔을 몸 앞(앞뒤 축)으로 굽혀서 배를 가로지르게 둔다
+    if (belly > 0.001) {
+      bone('rightUpperArm')?.quaternion.slerp(q.setFromEuler(e.set(-0.7, 0, ARM_HANG - 0.25, 'XYZ')), belly);
+      bone('rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(_fwd, 1.9), belly);
+    }
+    const sk = side * w;
+    // 한 팔은 앞으로 뻗어 매트리스에 내려놓고, 다른 팔은 굽혀서 얼굴·가슴 앞에 둔다 (양쪽이 좌우 대칭)
+    arm(topLeft ? 'left' : 'right', -1.0, -1.2, 0.1, sk);
+    arm(topLeft ? 'right' : 'left', -0.35, -0.25, -0.12, sk);
+
+    // 표정: 입은 숨 따라 살짝 벌어지고, 가끔 웃는다
+    this.sleepFace = L > 0.5 ? { aa: (0.05 + 0.07 * b) * L, happy: 0.45 * sm.smile * L } : null;
   }
 
   /** 낚싯대 쥐기: 오른손은 손잡이 앞, 왼손은 그 아래 끝을 받친다. 대를 들수록 팔도 올라간다 */
@@ -854,7 +930,10 @@ export class VrmCharacter implements CharacterView {
     this.syncGarment();
   }
 
-  /** 입은 코디에 갈아입는 옷이 있으면 그 옷 파일을 불러와 입힌다 (못 불러오면 기본 옷 그대로) */
+  /**
+   * 입은 코디에 맞는 진짜 옷 파일들(상의·하의·신발 또는 갈아입는 옷 세트)을 불러와 입히고 코디 색을 입힌다.
+   * 다 불러온 뒤에 한꺼번에 바꿔 입는다 (그 사이엔 지금 옷 그대로). 못 불러오면 기본 옷.
+   */
   private syncGarment() {
     const pieces = garmentPieces(this.outfit, this.bodyId);
     const want = pieces.map((p) => `${p.url}#${p.cosmetic?.id ?? ''}`).join(',');

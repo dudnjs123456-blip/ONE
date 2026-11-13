@@ -718,7 +718,7 @@ export class CityRenderer {
     const seat = world.seatAmount;
     this.player.rest =
       sv && sv.rest > 0
-        ? { t: sv.rest, sit: HOME.bed.sit, lie: HOME.bed.lie }
+        ? { t: sv.rest, sit: HOME.bed.sit, lie: HOME.bed.lie, sleepSeed: world.netId ?? 'me' }
         : seat > 0 && world.seat?.spot === 'sofa' && world.boothSpots(world.seatBooth)
           ? { t: seat, ...world.boothSpots(world.seatBooth)!, lie: HOME.sofa.lie, seatY: 0.47, sofa: world.sofaView }
         : seat > 0 && world.seat?.spot === 'sofa'
@@ -1034,7 +1034,7 @@ export class CityRenderer {
       // 친구가 경비 데스크에 앉아 있거나 소파에 누워 있으면 그 자세로
       const sv = world.remoteSeatView(r);
       v.view.rest = r.sleep
-        ? { t: r.sleep.rest, sit: HOME.bed.sit, lie: HOME.bed.lie }
+        ? { t: r.sleep.rest, sit: HOME.bed.sit, lie: HOME.bed.lie, sleepSeed: r.id }
         : !sv
         ? null
         : sv.spot === 'sofa' && world.store?.kind === 'karaoke' && world.boothSpots(r.booth)
@@ -1593,6 +1593,11 @@ export class CityRenderer {
     const D = 1.8;
     this.duvet.scale.z = Math.max(0.01, b);
     this.duvet.position.z = -0.95 - (D * b) / 2;
+    // 옆으로 돌아누우면 몸이 높아지는 만큼 이불도 부풀어 오른다 (침대에 누운 사람 중 가장 많이 돌아누운 쪽)
+    let side = (this.player as { sleepSide?: number }).sleepSide ?? 0;
+    for (const v of this.remoteViews.values()) side = Math.max(side, (v.view as { sleepSide?: number }).sleepSide ?? 0);
+    this.duvet.position.y = 0.86 + 0.06 * side;
+    this.duvet.scale.y = 1 + 0.35 * side;
     this.bedLamp.color.setRGB(1, 0.88 * (0.55 + 0.45 * (1 - this.sleepDark * 0.5)), 0.66);
   }
 

@@ -912,6 +912,8 @@ export interface RestPose {
   sofa?: { act: string; prev: string; k: number; at: number; pt: number } | null;
   /** 서서 하는 동작(노래방 서서 부르기 등)을 할 자리. 없으면 sit 자리에서 */
   stand?: { x: number; z: number; yaw: number };
+  /** 침대에서 잘 때 뒤척이는 순서를 정하는 그 사람의 아이디 (내 화면·친구 화면이 같게) */
+  sleepSeed?: string;
 }
 
 export interface CharacterView {
