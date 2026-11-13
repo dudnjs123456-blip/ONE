@@ -88,11 +88,11 @@ function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture
   const suitRgb = [sc.r * 255, sc.g * 255, sc.b * 255];
   // 테두리: 수영복 색을 조금 어둡게 (흰 비키니도 속옷이 아니라 수영복으로 보이게)
   const trimRgb = suitRgb.map((v) => v * 0.84);
-  // 긴바지 (다리를 바지 색으로): 허벅지 위(반바지 속)부터 발목 조금 위까지, 밑단은 살짝 어둡게
+  // 긴바지 (몸에 붙는 스키니 바지): 허리부터 발목 조금 위까지, 허리 밴드와 밑단은 살짝 어둡게
   const pc = new THREE.Color(legs ?? 0).convertLinearToSRGB();
   const pantsRgb = [pc.r * 255, pc.g * 255, pc.b * 255];
   const hemRgb = pantsRgb.map((v) => v * 0.78);
-  const pantsTop = m.legY + 0.04;
+  const pantsTop = hipY + 0.07;
   const pantsBot = m.ankleY + 0.045;
   // 가슴 가운데 (가슴 뼈가 없는 모델은 가슴 높이에서 어림)
   const bust = m.bust ?? { x: 0.05, y: chestY, z: m.chestPos.z + 0.12 };
@@ -111,7 +111,7 @@ function paintSwimsuit(mesh: THREE.Mesh, mat: THREE.Material, src: THREE.Texture
   const zone = (q: THREE.Vector3) => {
     const dx = Math.abs(q.x - m.cx);
     const y = q.y;
-    if (legs !== null && y < pantsTop && y > pantsBot && dx < 0.22) return y < pantsBot + 0.012 ? 5 : 4;
+    if (legs !== null && y < pantsTop && y > pantsBot && dx < 0.22) return y < pantsBot + 0.012 || y > pantsTop - 0.014 ? 5 : 4;
     // 수영복 없이 피부만 (갈아입는 옷 밑): 원래 속옷 자리만 피부로
     if (color === null) return y > hipY - 0.3 && y < torsoTop && dx < 0.22 ? 1 : 0;
     const front = q.z > frontZ;

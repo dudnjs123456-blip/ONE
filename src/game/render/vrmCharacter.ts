@@ -931,7 +931,7 @@ export class VrmCharacter implements CharacterView {
   }
 
   /**
-   * 입은 코디에 맞는 진짜 옷 파일들(상의·하의·신발 또는 갈아입는 옷 세트)을 불러와 입히고 코디 색을 입힌다.
+   * 입은 코디에 맞는 진짜 옷 파일들(상의·하의 또는 갈아입는 옷 세트)을 불러와 입히고 코디 색을 입힌다.
    * 다 불러온 뒤에 한꺼번에 바꿔 입는다 (그 사이엔 지금 옷 그대로). 못 불러오면 기본 옷.
    */
   private syncGarment() {
@@ -945,15 +945,15 @@ export class VrmCharacter implements CharacterView {
       for (const g of this.garments) g.dispose();
       this.garments = list;
       this.rims = [...this.baseRims, ...list.flatMap((g) => setupMToonRim(g.root))];
-      const body = pieces.some((p) => p.slot !== 'shoes');
-      const shoes = pieces.some((p) => p.slot === 'shoes');
-      this.dresser?.setGarment(body, shoes, pieces.find((p) => p.legs !== undefined)?.legs ?? null);
+      this.dresser?.setGarment(pieces.length > 0, false, pieces.find((p) => p.legs !== undefined)?.legs ?? null);
     };
     if (!pieces.length) return wear([]);
-    Promise.all(pieces.map((p) => Garment.load(p.url, vrm)))
+    // 옷 파일이 없는 조각(긴바지)은 몸에 칠하기만 한다
+    const files = pieces.filter((p) => p.url);
+    Promise.all(files.map((p) => Garment.load(p.url, vrm)))
       .then((list) => {
         if (this.disposed || this.vrm !== vrm || this.garmentUrl !== want) return list.forEach((g) => g.dispose());
-        list.forEach((g, i) => this.dresser?.dyeGarment(g.root, pieces[i].cosmetic, pieces[i].url));
+        list.forEach((g, i) => this.dresser?.dyeGarment(g.root, files[i].cosmetic, files[i].url));
         wear(list);
       })
       .catch((e) => {
