@@ -1008,8 +1008,7 @@ export class CityWorld {
       this.downedAt === null &&
       this.caughtAt === null;
     if (requestedSkill && canUseSkill) {
-      p.queueMove(requestedSkill);
-      this.say(`✨ ${requestedSkill.name}!`, 1.2);
+      p.queueMove(requestedSkill); // 기술 이름은 말풍선으로 띄우지 않는다
     } else if (inp.skill && this.profile.body !== 'smallSilverGirl') {
       this.say('작은은발소녀 전용 스킬이에요', 1.5);
     }
