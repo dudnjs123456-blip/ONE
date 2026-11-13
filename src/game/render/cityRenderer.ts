@@ -11,7 +11,7 @@ import { PersonView, ROBBER_SKIN } from './personView';
 import { makeKitBuilding } from './cityKit';
 import { allLoaded } from './loadTracker';
 import { buildSofa } from './sofaModel';
-import { furnishHome, sleepDuvet } from './homeFurniture';
+import { furnishHome, homePhoto, sleepDuvet } from './homeFurniture';
 import { apartmentSigns, buildVillaEntrance, decorateFacade, swingDoors, type DoorControl } from './signage';
 import { instanceProp } from './propsKit';
 import { CarKit, type CarView } from './carKit';
@@ -2567,29 +2567,31 @@ export class CityRenderer {
       }
       return tex(c, [W / 2.5, D / 2.5]);
     })();
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 }));
+    floorTex.dispose(); // 사진 원목 바닥을 쓴다
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ map: homePhoto('floor-oak', W / 2.2, D / 2.2), roughness: 0.6 }));
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     s.add(floor);
 
     // 벽: 북·서·동. 남쪽(카메라 쪽)은 허리 높이만 남겨 안이 들여다보이게
-    const wall = std(0xf1ebe1, 0.95);
+    // 벽지(분홍 줄무늬 데이지)는 벽 크기마다 반복 수를 맞춰 줄 간격이 같게 (약 1.3m 마다 한 장)
+    const wallpaper = (w: number, h: number) => new THREE.MeshStandardMaterial({ map: homePhoto('wall-pink-stripe', w / 1.3, h / 1.3), roughness: 0.95 });
     const winX0 = HOME_WIN.x0;
     const winX1 = HOME_WIN.x1;
-    box(winX0 - x0, H, 0.15, wall, (x0 + winX0) / 2, H / 2, z0); // 북쪽 왼편
-    box(x1 - winX1, H, 0.15, wall, (winX1 + x1) / 2, H / 2, z0); // 북쪽 오른편
+    box(winX0 - x0, H, 0.15, wallpaper(winX0 - x0, H), (x0 + winX0) / 2, H / 2, z0); // 북쪽 왼편
+    box(x1 - winX1, H, 0.15, wallpaper(x1 - winX1, H), (winX1 + x1) / 2, H / 2, z0); // 북쪽 오른편
     const winY0 = HOME_WIN.y0;
     const winY1 = HOME_WIN.y1;
     const winH = winY1 - winY0;
-    box(winX1 - winX0, winY0, 0.15, wall, (winX0 + winX1) / 2, winY0 / 2, z0); // 창 아래
-    box(winX1 - winX0, H - winY1, 0.15, wall, (winX0 + winX1) / 2, (H + winY1) / 2, z0); // 창 위
-    box(0.15, H, 2 - z0, wall, x0, H / 2, (z0 + 2) / 2); // 서쪽 (현관 위쪽)
-    box(0.15, H, z1 - 3, wall, x0, H / 2, (3 + z1) / 2); // 서쪽 (현관 아래쪽)
-    box(0.15, 0.6, 1, wall, x0, H - 0.3, 2.5); // 현관 위
-    box(0.15, H, D, wall, x1, H / 2, 0); // 동쪽
-    box(W, 0.5, 0.15, wall, 0, 0.25, z1); // 남쪽 허리벽
+    box(winX1 - winX0, winY0, 0.15, wallpaper(winX1 - winX0, winY0), (winX0 + winX1) / 2, winY0 / 2, z0); // 창 아래
+    box(winX1 - winX0, H - winY1, 0.15, wallpaper(winX1 - winX0, H - winY1), (winX0 + winX1) / 2, (H + winY1) / 2, z0); // 창 위
+    box(0.15, H, 2 - z0, wallpaper(2 - z0, H), x0, H / 2, (z0 + 2) / 2); // 서쪽 (현관 위쪽)
+    box(0.15, H, z1 - 3, wallpaper(z1 - 3, H), x0, H / 2, (3 + z1) / 2); // 서쪽 (현관 아래쪽)
+    box(0.15, 0.6, 1, wallpaper(1, 0.6), x0, H - 0.3, 2.5); // 현관 위
+    box(0.15, H, D, wallpaper(D, H), x1, H / 2, 0); // 동쪽
+    box(W, 0.5, 0.15, wallpaper(W, 0.5), 0, 0.25, z1); // 남쪽 허리벽
     // 걸레받이
-    box(W, 0.08, 0.02, std(0x8a6a4a), 0, 0.04, z0 + 0.08);
+    box(W, 0.08, 0.02, std(0xf7f2ee), 0, 0.04, z0 + 0.08);
 
     // 창문 + 창밖 풍경 (시간대에 따라 다시 그림)
     const { c: winC, g: winG } = canvas(512, 256);

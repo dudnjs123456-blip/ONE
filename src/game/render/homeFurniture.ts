@@ -43,6 +43,28 @@ const ball = (r: number, n = 14) => new THREE.SphereGeometry(r, n, Math.max(6, M
 const std = (color: number, roughness = 0.8, map?: THREE.Texture) => new THREE.MeshStandardMaterial({ color, roughness, map: map ?? null });
 const glow = (color: number) => new THREE.MeshBasicMaterial({ color });
 
+// ───────────── 사진 재질 (Firefly 로 만든 소녀방 재질 → scripts/process-home-textures.mjs) ─────────────
+
+const photoTex = new Map<string, THREE.Texture>();
+/**
+ * public/textures/home/<name>.jpg 를 반복(rx × ry)해서 까는 재질 그림.
+ * 같은 사진은 한 번만 받고, 반복 수가 다른 곳은 그림을 같이 쓰는 복사본을 쓴다.
+ * (방은 게임을 시작할 때 미리 만들어 두므로 집에 들어갈 즈음엔 이미 받아져 있다)
+ */
+export function homePhoto(name: string, rx = 1, ry = 1): THREE.Texture {
+  let base = photoTex.get(name);
+  if (!base) {
+    base = new THREE.TextureLoader().load(`/textures/home/${name}.jpg?v=2`);
+    base.colorSpace = THREE.SRGBColorSpace;
+    base.wrapS = base.wrapT = THREE.RepeatWrapping;
+    base.anisotropy = 8;
+    photoTex.set(name, base);
+  }
+  const t = base.clone();
+  t.repeat.set(rx, ry);
+  return t;
+}
+
 // ───────────── 무늬 (캔버스로 그린다) ─────────────
 
 function ctex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat?: [number, number]) {
@@ -103,34 +125,6 @@ function fabricTex(base: string, speck: string, rep = 3) {
       g.globalAlpha = 1;
     },
     [rep, rep],
-  );
-}
-
-/** 누빔 이불 (마름모 박음질) */
-function quiltTex(base: string, line: string) {
-  return ctex(
-    128,
-    128,
-    (g) => {
-      g.fillStyle = base;
-      g.fillRect(0, 0, 128, 128);
-      g.strokeStyle = line;
-      g.lineWidth = 2;
-      g.setLineDash([5, 3]);
-      g.beginPath();
-      g.moveTo(0, 0);
-      g.lineTo(128, 128);
-      g.moveTo(128, 0);
-      g.lineTo(0, 128);
-      g.stroke();
-      g.setLineDash([]);
-      const grd = g.createRadialGradient(64, 64, 4, 64, 64, 70);
-      grd.addColorStop(0, 'rgba(255,255,255,0.18)');
-      grd.addColorStop(1, 'rgba(0,0,0,0.06)');
-      g.fillStyle = grd;
-      g.fillRect(0, 0, 128, 128);
-    },
-    [4, 4],
   );
 }
 
@@ -303,48 +297,6 @@ function keyTex() {
   });
 }
 
-/** 거실 러그 (테두리 + 마름모 + 술 장식) */
-function rugTex() {
-  return ctex(512, 352, (g) => {
-    g.fillStyle = '#efe7da';
-    g.fillRect(0, 0, 512, 352);
-    // 술 (짧은 변 양쪽)
-    g.strokeStyle = '#e4d8c4';
-    g.lineWidth = 2;
-    for (let y = 0; y < 352; y += 5) {
-      g.beginPath();
-      g.moveTo(0, y);
-      g.lineTo(16, y);
-      g.moveTo(496, y);
-      g.lineTo(512, y);
-      g.stroke();
-    }
-    g.fillStyle = '#b9a5cf';
-    g.fillRect(24, 10, 464, 332);
-    g.fillStyle = '#efe7da';
-    g.fillRect(36, 22, 440, 308);
-    g.strokeStyle = '#9d86b8';
-    g.lineWidth = 3;
-    g.strokeRect(50, 36, 412, 280);
-    // 가운데 마름모 무늬
-    g.strokeStyle = '#c7b6db';
-    g.lineWidth = 2.5;
-    for (let x = 80; x < 460; x += 48) {
-      for (let y = 66; y < 300; y += 48) {
-        g.beginPath();
-        g.moveTo(x, y - 18);
-        g.lineTo(x + 18, y);
-        g.lineTo(x, y + 18);
-        g.lineTo(x - 18, y);
-        g.closePath();
-        g.stroke();
-      }
-    }
-    g.fillStyle = 'rgba(0,0,0,0.04)';
-    for (let i = 0; i < 1500; i++) g.fillRect(rnd() * 512, rnd() * 352, 1.5, 1.5);
-  });
-}
-
 /** 액자 그림 (해 + 겹친 언덕) */
 function artTex() {
   return ctex(300, 180, (g) => {
@@ -429,12 +381,12 @@ function monsteraTex() {
 /** 더블 침대 (머리 = 북쪽). 매트리스 윗면 0.62, 걸터앉는 서쪽 가장자리 x=2.3 */
 function bed(s: THREE.Object3D) {
   const [, put] = place(s, 3.6, -2.4);
-  const frame = std(0xffffff, 0.95, fabricTex('#bdb2a3', '#7f7466'));
-  const wood = std(0x5b3b27, 0.6);
-  const sheet = std(0xffffff, 0.95, fabricTex('#f8f5ef', '#d2cabb'));
-  const duvet = std(0xffffff, 0.95, quiltTex('#9fbde0', '#7d9cc4'));
-  const pillow = std(0xffffff, 0.95, fabricTex('#fbfaf6', '#d6d0c4'));
-  const knit = std(0xffffff, 1, knitTex('#c9b48a'));
+  const frame = std(0xffffff, 0.95, fabricTex('#f2dce2', '#d8b7c1'));
+  const wood = std(0xe9dccf, 0.6);
+  const sheet = std(0xffffff, 0.95, fabricTex('#fffafb', '#efdde2'));
+  const duvet = std(0xffffff, 0.95, homePhoto('quilt-pink', 3, 2.4));
+  const pillow = std(0xffffff, 0.95, fabricTex('#fffafc', '#f0d6de'));
+  const knit = std(0xffffff, 1, knitTex('#f6e6d8'));
 
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(cyl(0.035, 0.028, 0.08, 10), wood, sx * 1.18, 0.04, 0.05 + sz * 1.32);
   put(rb(2.6, 0.3, 2.9, 0.05), frame, 0, 0.23, 0.05);
@@ -447,7 +399,7 @@ function bed(s: THREE.Object3D) {
   put(rb(2.46, 0.26, 2.78, 0.07, 3), sheet, 0, 0.49, 0.07);
   // 베개 2개 (헤드보드에 살짝 기댐) + 포인트 쿠션
   for (const sx of [-1, 1]) put(rb(0.86, 0.16, 0.5, 0.075, 3), pillow, sx * 0.56, 0.71, -1.04, -0.15);
-  put(rb(0.42, 0.3, 0.1, 0.045, 3), std(0xc8714c, 0.9), 0.62, 0.8, -0.74, -0.3, -0.12);
+  put(rb(0.42, 0.3, 0.1, 0.045, 3), std(0xf3a9c0, 0.9), 0.62, 0.8, -0.74, -0.3, -0.12);
   // 낮에 덮어 둔 이불: 윗면 + 양옆·발끝으로 늘어진 자락 + 접힌 이불깃
   put(rb(2.56, 0.08, 1.95, 0.038, 3), duvet, 0, 0.66, 0.5);
   for (const sx of [-1, 1]) put(rb(0.05, 0.32, 1.95, 0.02), duvet, sx * 1.265, 0.53, 0.5);
@@ -556,7 +508,7 @@ function desk(s: THREE.Object3D) {
 /** 사무용 의자 (책상 쪽 = 북쪽을 본다) */
 function chair(s: THREE.Object3D) {
   const [, put] = place(s, -0.9, -2.8);
-  const fab = std(0xffffff, 0.95, fabricTex('#3a3d44', '#1f2125'));
+  const fab = std(0xffffff, 0.95, fabricTex('#f4c7d4', '#dba3b4'));
   const mesh = std(0xffffff, 0.9, ctex(64, 64, (g) => {
     g.fillStyle = '#2c2e33';
     g.fillRect(0, 0, 64, 64);
@@ -937,13 +889,13 @@ export function furnishHome(s: THREE.Object3D, o: HomeLayout): THREE.Group {
   plant(root);
 
   // 러그
-  const rug = new THREE.Mesh(rb(3.2, 0.015, 2.2, 0.006), std(0xffffff, 1, rugTex()));
+  const rug = new THREE.Mesh(rb(2.6, 0.015, 2.2, 0.006), std(0xffffff, 1, homePhoto('rug-heart', 1, 1)));
   rug.position.set(0.3, 0.0075, 1.2);
   rug.receiveShadow = true;
   root.add(rug);
 
   // 커튼 (주름) + 커튼봉
-  const linen = std(0xffffff, 1, fabricTex('#a9bfd3', '#7f97ad', 2));
+  const linen = std(0xffffff, 1, homePhoto('curtain-lace', 1, 2.2));
   linen.side = THREE.DoubleSide;
   const ch = o.H - 0.2;
   for (const cx of [o.win.x0 - 0.3, o.win.x1 + 0.3]) {
@@ -966,9 +918,9 @@ export function furnishHome(s: THREE.Object3D, o: HomeLayout): THREE.Group {
   // 동쪽 벽 액자 (원목 틀 + 흰 여백 + 그림)
   {
     const [g, put] = place(root, o.eastX - 0.03, 2.0, -Math.PI / 2);
-    put(rb(1.26, 0.86, 0.04, 0.008), std(0xffffff, 0.6, woodTex('#c9a27a', '#8f6a45')), 0, 1.7, 0);
+    put(rb(1.26, 0.86, 0.04, 0.008), std(0xffffff, 0.6, woodTex('#f3e6d6', '#d9c3a8')), 0, 1.7, 0);
     put(bx(1.16, 0.76, 0.01), std(0xfbfaf6, 0.9), 0, 1.7, 0.018);
-    const art = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.58), std(0xffffff, 0.9, artTex()));
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.58), std(0xffffff, 0.9, homePhoto('art-bunny', 1, 1)));
     art.position.set(0, 1.7, 0.025);
     g.add(art);
   }
@@ -979,7 +931,7 @@ export function furnishHome(s: THREE.Object3D, o: HomeLayout): THREE.Group {
 
 /** 잠잘 때 덮는 두툼한 누빔 이불 */
 export function sleepDuvet(): THREE.Mesh {
-  const m = new THREE.Mesh(rb(2.3, 0.2, 1.8, 0.08, 3), std(0xffffff, 0.95, quiltTex('#9fbde0', '#7d9cc4')));
+  const m = new THREE.Mesh(rb(2.3, 0.2, 1.8, 0.08, 3), std(0xffffff, 0.95, homePhoto('quilt-pink', 3, 2.4)));
   m.castShadow = m.receiveShadow = true;
   return m;
 }
