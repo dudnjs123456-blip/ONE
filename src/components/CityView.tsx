@@ -45,10 +45,12 @@ import { sharedNow, syncWorldClock } from '@/game/city/worldClock';
 import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
 import MoodLinePop from './MoodLinePop';
+import SkillCutIn from './SkillCutIn';
 import { MOOD_LINES, moodLineKey } from '@/game/data/moodLines';
 import { PLAYER_MOODS } from '@/game/data/npcs';
 import { playerVoice } from '@/game/data/voices';
-import { playVoiceLine, preloadVoices } from '@/game/render/voiceLine';
+import { playActionVoice, playVoiceLine, preloadActionVoices, preloadVoices } from '@/game/render/voiceLine';
+import { allActionVoiceSrcs } from '@/game/data/actionVoices';
 import SoundToggle from './SoundToggle';
 import TvPanel, { TvRemote, TvScreen, placeTvBox, tvCommand } from './TvPanel';
 import { tvPlay as tvPlayShared, tvPos, tvReset, tvState, type TvVideo } from '@/game/city/tvState';
@@ -313,6 +315,9 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
     // 숫자 키 대사 목소리 (나 · 같은 곳 친구)
     world.onVoice = playVoiceLine;
     preloadVoices(PLAYER_MOODS.map((m) => playerVoice(profile.body, m)));
+    // 기합·비명 (공격·기술·맞음·점프 등). 친구 몸의 소리는 처음 들을 때 받는다
+    world.onActionVoice = playActionVoice;
+    preloadActionVoices(allActionVoiceSrcs(profile.body));
     // 날짜·시각·날씨는 모두가 같이 쓰는 동네 시계를 따른다 (서버 시각에 맞춘 뒤, 1분마다 다시 맞춘다)
     world.attachSharedClock(sharedNow);
     void syncWorldClock();
@@ -720,6 +725,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       )}
       {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}
       {!loading && worldRef.current && <MoodLinePop body={profile.body} name={worldRef.current.netName || '나'} pop={moodPop} />}
+      {!loading && <SkillCutIn world={worldRef.current} />}
       {!loading && <VoicePanel voice={voice} touch={touch} />}
       <div
         ref={perfRef}

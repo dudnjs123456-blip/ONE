@@ -106,6 +106,10 @@ export class TownLink {
         const m = payload as { id: string; m: unknown };
         if (m && m.id !== me) this.world.receiveMood(m.id, m.m);
       })
+      .on('broadcast', { event: 'act' }, ({ payload }) => {
+        const m = payload as { id: string; a: unknown };
+        if (m && m.id !== me) this.world.receiveAct(m.id, m.a);
+      })
       .on('broadcast', { event: 'chat' }, ({ payload }) => {
         const m = payload as { id: string; name: string; text: string };
         if (m && m.id !== me && typeof m.text === 'string') this.world.receiveChat(m.id, typeof m.name === 'string' ? m.name : '이웃', m.text);
@@ -144,12 +148,16 @@ export class TownLink {
       w.chatOut.length = 0;
       w.emoteOut.length = 0;
       w.moodOut.length = 0;
+      w.actOut.length = 0;
       return;
     }
     for (const h of w.outbox.splice(0)) void ch.send({ type: 'broadcast', event: 'hit', payload: { from: this.acc.userId, h } });
     // 채팅은 혼자여도 보낸다 (곧 들어올 친구는 못 보지만, 접속 중인 사람에겐 바로)
     for (const e of w.emoteOut.splice(0)) void ch.send({ type: 'broadcast', event: 'emote', payload: { id: this.acc.userId, e } });
     for (const m of w.moodOut.splice(0)) void ch.send({ type: 'broadcast', event: 'mood', payload: { id: this.acc.userId, m } });
+    // 기합·비명은 같이 있는 사람이 있을 때만 (혼자면 들을 사람이 없다)
+    if (this.others.size) for (const a of w.actOut.splice(0)) void ch.send({ type: 'broadcast', event: 'act', payload: { id: this.acc.userId, a } });
+    else w.actOut.length = 0;
     for (const text of w.chatOut.splice(0)) void ch.send({ type: 'broadcast', event: 'chat', payload: { id: this.acc.userId, name: this.acc.username, text } });
     // 혼자면 아무것도 보내지 않는다 (메시지 사용량 절약)
     if (!this.others.size) {

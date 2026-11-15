@@ -11,6 +11,7 @@ import { SHOPS, type ShopDef } from '../data/shops';
 import { CHAT_GAP_MS, CHAT_KEEP, EMOTES, EMOTE_GAP_MS, cleanChat, type ChatLine } from './chat';
 import { PLAYER_MOODS, type PlayerMood } from '../data/npcs';
 import { playerVoice, voiceVolume } from '../data/voices';
+import { ACTION_VOICES, type ActionVoiceKind, SKILL_CUTIN, actionVoiceSrc, hasActionVoice, isActionVoiceName, moveVoiceKind, pickVoice } from '../data/actionVoices';
 import { LIFE_WARNING, LifeTracker } from '../core/life';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
@@ -778,6 +779,14 @@ export class CityWorld {
   moodOut: PlayerMood[] = [];
   /** 대사 목소리를 낼 때 (화면이 붙여서 재생한다): 누가 · 소리 파일 · 크기(0~1) */
   onVoice?: (who: string, src: string, volume: number) => void;
+  /** 액션 목소리 (기합·비명): 누가 · 소리 파일 · 크기(0~1) */
+  onActionVoice?: (who: string, src: string, volume: number) => void;
+  /** 보낼 액션 목소리 이름 (마을 연결이 가져가서 보낸다) */
+  actOut: string[] = [];
+  /** 큰기술 컷인으로 띄울 것 (화면이 가져간다). who = 'me' 또는 친구 id */
+  cutIns: { who: string; kind: ActionVoiceKind; body: string }[] = [];
+  /** 액션 목소리용으로 지난 프레임의 내 상태를 기억해 둔다 */
+  private av = { serial: -1, state: '' as string, hp: -1, downed: false, n: 0, lastAt: -999 };
   private lastEmoteAt = -Infinity;
   private lastChatAt = -Infinity;
   /** 지금 들어가 있는 집의 주인 (null = 내 집) */
@@ -927,6 +936,62 @@ export class CityWorld {
   }
 
   step() {
+    this.stepInner();
+    this.stepActionVoice();
+  }
+
+  /**
+   * 내 동작에 맞춰 기합·비명을 낸다 (작은은발소녀만). 고른 소리 이름을 마을로 보내 친구 화면에서도 같은 소리가 난다.
+   * 큰기술(캐릭터 스킬)은 외침과 함께 옆에 컷인 그림을 띄운다.
+   */
+  private stepActionVoice() {
+    const p = this.player;
+    const av = this.av;
+    const first = av.hp < 0;
+    const downed = this.downedAt !== null;
+    let kind: ActionVoiceKind | null = null;
+    if (!first && hasActionVoice(this.profile.body) && !this.sleep) {
+      const lost = av.hp - p.hp;
+      if (downed && !av.downed) kind = 'down';
+      else if (p.moveSerial !== av.serial && p.state === 'attack' && p.move) kind = moveVoiceKind(p.move);
+      else if (lost > 0) kind = lost >= 15 || p.state === 'launched' || p.state === 'knockdown' ? 'hurtBig' : 'hurt';
+      else if (p.state === 'jump' && av.state !== 'jump') kind = 'jump';
+      else if (p.state === 'getup' && av.state !== 'getup' && !downed) kind = 'getup';
+    }
+    av.serial = p.moveSerial;
+    av.state = p.state;
+    av.hp = p.hp;
+    av.downed = downed;
+    if (!kind) return;
+    const big = kind === 'down' || kind === 'hurtBig' || kind in SKILL_CUTIN;
+    // 잽을 연타할 때마다 소리치면 시끄럽다: 가벼운 소리는 0.3초에 한 번, 가벼운 공격은 두 번에 한 번만
+    if (!big && this.frame - av.lastAt < 18) return;
+    if (kind === 'atk' && av.n % 2 === 1) {
+      av.n++;
+      return;
+    }
+    av.n++;
+    av.lastAt = this.frame;
+    const name = pickVoice(kind, av.n >> 1);
+    const src = actionVoiceSrc(this.profile.body, name);
+    if (src) this.onActionVoice?.('me', src, 1);
+    if (kind in SKILL_CUTIN) this.cutIns.push({ who: 'me', kind, body: this.profile.body ?? '' });
+    this.actOut.push(name);
+  }
+
+  /** 친구의 액션 목소리 (목록에 있는 소리만). 같은 곳에 있으면 거리만큼 들리고, 큰기술이면 컷인도 */
+  receiveAct(id: string, name: unknown) {
+    if (!isActionVoiceName(name)) return;
+    const r = this.remotes.get(id);
+    if (!r || r.room !== this.roomKey) return;
+    const src = actionVoiceSrc(r.body, name);
+    const vol = voiceVolume(Math.hypot(r.fighter.x - this.player.x, r.fighter.z - this.player.z));
+    if (src && vol > 0) this.onActionVoice?.(id, src, vol);
+    const kind = (Object.keys(SKILL_CUTIN) as ActionVoiceKind[]).find((k) => ACTION_VOICES[k].includes(name));
+    if (kind && vol > 0 && r.body) this.cutIns.push({ who: id, kind, body: r.body });
+  }
+
+  private stepInner() {
     // 코디 창에서 외형을 바꾸면 팔다리 길이·반응 속도도 따라 바뀐다
     this.player.body = bodySpecFor(this.profile.body);
     this.frame++;
