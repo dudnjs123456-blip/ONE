@@ -62,9 +62,9 @@ export function allActionVoiceSrcs(body: string | undefined): string[] {
   return Object.values(ACTION_VOICES).flat().map((n) => `/voices/${body}/act/${n}.mp3`);
 }
 
-/** 컷인 그림 (public/portraits/<몸>/<파일>) */
+/** 컷인 그림 (public/portraits/<몸>/<파일>): 숫자 키 대사 때 나오는 원래 캐릭터 그림(화남)을 쓴다 */
 export const SKILL_CUTIN: Record<string, { img: string; name: string }> = {
-  skillFly: { img: 'cutin-fly.jpg', name: '은빛 날라차기' },
-  skillTornado: { img: 'cutin-tornado.jpg', name: '은빛 회오리 차기' },
-  skillBack: { img: 'cutin-back.jpg', name: '은빛 뒤돌려차기' },
+  skillFly: { img: 'angry.png', name: '은빛 날라차기' },
+  skillTornado: { img: 'angry.png', name: '은빛 회오리 차기' },
+  skillBack: { img: 'angry.png', name: '은빛 뒤돌려차기' },
 };

@@ -93,16 +93,10 @@ export default function SkillCutIn({ world }: { world: CityWorld | null }) {
           style={{ animation: `cutin-art ${CUTIN_MS}ms linear forwards` }}
         />
       </div>
-      {/* 기술 이름 */}
-      <div className="absolute bottom-[14%] right-[6%] text-right">
-        {!mine && <div className="mb-1 inline-block rounded bg-amber-400 px-2 py-0.5 text-[11px] font-black text-zinc-900">{shown.name}</div>}
-        <div
-          className={`font-black italic tracking-tight text-white ${mine ? 'text-3xl sm:text-5xl' : 'text-xl sm:text-2xl'}`}
-          style={{ textShadow: '0 0 12px rgba(120,190,255,0.9), 3px 3px 0 #1a1238, -1px -1px 0 #1a1238' }}
-        >
-          {shown.skill}
-        </div>
-      </div>
+      {/* 친구가 쓴 기술이면 누가 썼는지만 (기술 이름은 띄우지 않는다) */}
+      {!mine && (
+        <div className="absolute bottom-[14%] right-[6%] rounded bg-amber-400 px-2 py-0.5 text-[11px] font-black text-zinc-900">{shown.name}</div>
+      )}
     </div>
   );
 }
