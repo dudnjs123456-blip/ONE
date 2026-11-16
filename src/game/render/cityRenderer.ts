@@ -508,7 +508,7 @@ export class CityRenderer {
   /** 성능 표시용: 직전 프레임의 그리기 횟수·삼각형 수 */
   private lastCalls = 0;
   /** 거실 TV 화면 (모델 televisionModern 의 화면 안쪽 면, 집 좌표) */
-  private static TV = { x: 3.5, y: 1.155, z: 0.272, w: 1.56, h: 0.85 };
+  private static TV = { x: 3.85, y: 1.155, z: -0.078, w: 1.56, h: 0.85 };
   private tvPunch = new THREE.Scene();
   private tvDepth = new THREE.MeshBasicMaterial({ colorWrite: false });
   private tvCam: THREE.Camera | null = null;
@@ -1589,10 +1589,10 @@ export class CityRenderer {
     this.sleepDark += ((sv?.dark ?? 0) - this.sleepDark) * smooth(0.15, dt);
     const b = Math.max(sv?.blanket ?? 0, friendBlanket);
     this.duvet.visible = b > 0.01;
-    // 발끝(z 큰 쪽)에서 가슴까지 당겨 덮는다
-    const D = 1.8;
-    this.duvet.scale.z = Math.max(0.01, b);
-    this.duvet.position.z = -0.95 - (D * b) / 2;
+    // 발끝(z 큰 쪽)에서 가슴까지 당겨 덮는다 (이불 상자는 길이 1.8m 로 만들어서 침대 길이에 맞춰 줄인다)
+    const D = 1.55;
+    this.duvet.scale.z = Math.max(0.01, (b * D) / 1.8);
+    this.duvet.position.z = -1.4 - (D * b) / 2;
     // 옆으로 돌아누우면 몸이 높아지는 만큼 이불도 부풀어 오른다 (침대에 누운 사람 중 가장 많이 돌아누운 쪽)
     let side = (this.player as { sleepSide?: number }).sleepSide ?? 0;
     for (const v of this.remoteViews.values()) side = Math.max(side, (v.view as { sleepSide?: number }).sleepSide ?? 0);
@@ -2653,10 +2653,10 @@ export class CityRenderer {
     exitRing.position.set(-4.3, 0.02, 2.5);
     s.add(exitRing);
 
-    // 가구 (직접 만든 모델 — 침대·책상·주방·냉장고·TV·테이블·신발장·화분·러그·커튼·액자)
+    // 가구 (직접 만든 모델 — 1.5룸: 침실·부엌·식탁·세탁기·화장실·거실·현관 + 칸막이 벽)
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe2a8 });
     this.bedLamp = lampMat;
-    furnishHome(s, { lampMat, win: { x0: winX0, x1: winX1, z: z0 }, H, eastX: x1 - 0.075 });
+    furnishHome(s, { lampMat, win: { x0: winX0, x1: winX1, z: z0 }, H, eastX: x1 - 0.075, fpOnly: this.fpOnly });
     // 소파는 TV 쪽(북쪽 = -z)을 본다. 직접 만든 모델이라 앉고 눕는 자세와 쿠션이 딱 맞는다
     const sofa = buildSofa();
     sofa.position.set(3.4, 0, 3.4);
@@ -2679,20 +2679,25 @@ export class CityRenderer {
     }
     // 자는 동안 덮는 두툼한 이불 (평소엔 숨김)
     this.duvet = sleepDuvet();
-    this.duvet.position.set(3.55, 0.86, -1.85);
+    this.duvet.position.set(3.94, 0.86, -1.85);
+    this.duvet.scale.x = 0.73;
     this.duvet.visible = false;
     s.add(this.duvet);
 
-    // 천장 조명 (실내는 작아서 점광원 2개)
-    for (const [lx, lz] of [[-1.5, -1], [2.5, 1]]) {
+    // 천장 조명: 부엌·식탁 · 침실 · 거실 (칸이 나뉘어 세 곳)
+    for (const [lx, lz] of [[-2.2, -0.6], [3.4, -2.2], [2.6, 1.8]]) {
       const l = new THREE.PointLight(0xffffff, 8, 9, 1.6);
       l.position.set(lx, H - 0.2, lz);
       l.castShadow = false;
       s.add(l);
       this.homeLights.push(l);
+      // 천장 등 갓: 천장이 없는 3인칭에선 허공에 떠 보여서 1인칭(천장이 보일 때)에만
       const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.05, 20), new THREE.MeshBasicMaterial({ color: 0xffffff }));
       disc.position.set(lx, H - 0.03, lz);
+      disc.visible = false;
+      disc.userData.keepMaterial = true;
       s.add(disc);
+      this.fpOnly.push(disc);
     }
   }
 }

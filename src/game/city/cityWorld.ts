@@ -100,41 +100,69 @@ export interface Rect {
   z1: number;
 }
 
-/** 원룸 오피스텔 내부 (집 전용 좌표, 방 중심이 원점). 가구는 부딪힘 판정 상자 */
+/**
+ * 집 안 칸막이 벽 (1.5룸: 북동쪽 침실 · 남서쪽 화장실). 부딪힘 상자이자 그리는 벽.
+ * 3인칭 카메라가 위에서 내려다보므로 허리 높이까지만 보이고, 1인칭일 때만 천장까지 보인다.
+ */
+export const HOME_WALLS: Rect[] = [
+  // 침실 서쪽 벽 (창문 오른쪽 끝 바로 옆)
+  { x0: 1.7, x1: 1.8, z0: -4, z1: -0.35 },
+  // 침실 남쪽 벽 (x 1.8~2.75 는 침실 문)
+  { x0: 2.75, x1: 5, z0: -0.45, z1: -0.35 },
+  // 화장실 북쪽 벽 (닫힌 문이 달려 있다) · 서쪽 · 동쪽
+  { x0: -3.05, x1: -0.85, z0: 2.25, z1: 2.35 },
+  { x0: -3.05, x1: -2.95, z0: 2.35, z1: 4 },
+  { x0: -0.95, x1: -0.85, z0: 2.35, z1: 4 },
+];
+
+/** 침실 문 (침실 남쪽 벽의 빈 곳) */
+export const BEDROOM_DOOR = { x0: 1.8, x1: 2.75, z: -0.4 };
+
+/** 1.5룸 빌라 내부 (집 전용 좌표, 방 중심이 원점). 가구는 부딪힘 판정 상자 */
 export const HOME = {
   room: { x0: -5, x1: 5, z0: -4, z1: 4 } as Rect,
   /** 들어왔을 때 서는 곳 (서쪽 현관 안쪽) */
   spawn: { x: -4.2, z: 2.5 },
   furniture: [
-    { id: 'bed', rect: { x0: 2.3, x1: 4.95, z0: -3.95, z1: -0.9 } },
+    // 침실: 침대(동쪽 벽에 붙임) · 옷장 · 협탁
+    { id: 'bed', rect: { x0: 3.03, x1: 4.95, z0: -3.95, z1: -1.35 } },
+    { id: 'wardrobe', rect: { x0: 1.82, x1: 2.5, z0: -3.95, z1: -3.38 } },
     { id: 'desk', rect: { x0: -2.2, x1: 0.4, z0: -3.95, z1: -3.2 } },
+    // 부엌 (현관 쪽 서쪽 벽): 싱크대 · 냉장고 · 세탁기 · 식탁
     { id: 'kitchen', rect: { x0: -4.95, x1: -4.2, z0: -3.95, z1: -0.6 } },
     { id: 'fridge', rect: { x0: -4.95, x1: -4.15, z0: -0.5, z1: 0.4 } },
-    { id: 'tv', rect: { x0: 2.4, x1: 4.6, z0: 0.0, z1: 0.45 } },
+    { id: 'washer', rect: { x0: -4.95, x1: -4.32, z0: 0.5, z1: 1.15 } },
+    { id: 'dining', rect: { x0: -2.9, x1: -1.9, z0: -1.75, z1: -0.25 } },
+    // 거실: 침실 벽에 붙인 TV 장 · 소파 · 테이블
+    { id: 'tv', rect: { x0: 2.8, x1: 4.9, z0: -0.35, z1: 0.08 } },
     { id: 'sofa', rect: { x0: 1.9, x1: 4.9, z0: 2.8, z1: 3.95 } },
     { id: 'table', rect: { x0: 2.8, x1: 4.0, z0: 1.4, z1: 2.1 } },
-    { id: 'shoes', rect: { x0: -3.6, x1: -2.2, z0: 3.55, z1: 3.95 } },
+    // 현관 신발장 (현관문 남쪽 서쪽 벽)
+    { id: 'shoes', rect: { x0: -4.95, x1: -4.5, z0: 3.05, z1: 3.95 } },
+    ...HOME_WALLS.map((rect, i) => ({ id: `wall${i}`, rect })),
   ] as { id: string; rect: Rect }[],
   pois: [
     { id: 'exit', kind: 'home', label: '현관 (밖으로 나가기)', x: -4.3, z: 2.5, radius: 1.0 },
-    { id: 'bed', kind: 'home', label: '침대', x: 3.6, z: -0.5, radius: 1.1 },
+    { id: 'bed', kind: 'home', label: '침대', x: 2.45, z: -1.4, radius: 1.0 },
     { id: 'pc', kind: 'home', label: '컴퓨터', x: -0.9, z: -2.8, radius: 1.0 },
     { id: 'fridge', kind: 'home', label: '냉장고', x: -3.8, z: 0.0, radius: 1.0 },
     { id: 'sofa', kind: 'home', label: '소파 (눕기)', x: 3.4, z: 2.4, radius: 1.0 },
-    { id: 'tv', kind: 'home', label: 'TV (유튜브 보기)', x: 3.5, z: 0.95, radius: 0.8 },
+    { id: 'tv', kind: 'home', label: 'TV (유튜브 보기)', x: 3.85, z: 0.6, radius: 0.8 },
     { id: 'calendar', kind: 'home', label: '달력 (근무 기록 보기)', x: -3.3, z: -3.0, radius: 0.9 },
     { id: 'window', kind: 'home', label: '창문 (열고 밖 보기)', x: 1.05, z: -3.0, radius: 0.75 },
   ] as Poi[],
   /** 북쪽 벽 달력 (주방과 책상 사이) */
   calendar: { x: -3.3, y: 1.6, z: -3.91 },
   /** 잠자기 동선: 침대 옆으로 걸어가서(path) → 걸터앉고(sit) → 눕는다(lie). sit·lie 는 렌더러 자세 기준점 */
+  /** 거실 → 침실 문 → 침대 옆 */
   bed: {
     path: [
-      { x: 1.95, z: -0.5 },
-      { x: 1.95, z: -2.6 },
+      { x: 2.27, z: 0.15 },
+      { x: 2.27, z: -0.9 },
+      { x: 2.65, z: -2.81 },
     ],
-    sit: { x: 2.4, z: -2.6, yaw: -Math.PI / 2 },
-    lie: { x: 3.45, y: 0.8, z: -1.75, yaw: 0 },
+    sit: { x: 3.1, z: -2.81, yaw: -Math.PI / 2 },
+    lie: { x: 3.87, y: 0.8, z: -1.95, yaw: 0 },
   },
   /** 소파: TV 쪽(북쪽)을 보고 앉는 골반 위치(sit), 서쪽 팔걸이에 머리를 괴고 옆으로 누운 골반 위치(lie) */
   sofa: {
@@ -1545,7 +1573,8 @@ export class CityWorld {
     this.lastPvp = null;
     const lost = pvp ? 0 : Math.floor(this.profile.gold * 0.1);
     this.profile.gold -= lost;
-    this.moveTo('home', HOME.bed.path[1].x, HOME.bed.path[1].z, 0, 1);
+    const bedSide = HOME.bed.path[HOME.bed.path.length - 1];
+    this.moveTo('home', bedSide.x, bedSide.z, 0, 1);
     this.player.hp = Math.round(this.player.maxHp * 0.35);
     // 혼자면 행인도 새로 (친구와 같이 보는 거리는 그대로)
     if (this.isTownHost && !this.othersInCity()) this.npcs = this.npcs.map(() => this.makeNpc());
@@ -1764,9 +1793,9 @@ export class CityWorld {
       case 'walk': {
         const path = HOME.bed.path;
         const wp = path[s.wp];
-        if (Math.hypot(wp.x - p.x, wp.z - p.z) > 0.2 && t < 240) {
+        if (Math.hypot(wp.x - p.x, wp.z - p.z) > 0.2 && t < 420) {
           inp.move = { x: wp.x - p.x, z: wp.z - p.z };
-        } else if (s.wp < path.length - 1 && t < 240) {
+        } else if (s.wp < path.length - 1 && t < 420) {
           s.wp++;
         } else {
           // 침대 옆에 서서 침대 반대쪽을 보고 걸터앉을 준비
@@ -1800,7 +1829,8 @@ export class CityWorld {
       case 'wake':
         if (t >= SLEEP_WAKE) {
           this.sleep = null;
-          this.placePlayer(HOME.bed.path[1].x, HOME.bed.path[1].z, 0, 1);
+          const end = HOME.bed.path[HOME.bed.path.length - 1];
+          this.placePlayer(end.x, end.z, 0, 1);
           const slept = sleptLabel(Math.min(s.last, this.nowMs()) - s.since);
           this.say(`☀️ ${s.auto ? '12시간을 자고 저절로 깼다' : '잘 잤다!'} (${slept} 잠) · 피로도 ${Math.round(this.profile.life.fatigue)} · ${this.clock}`, 4);
         }
@@ -3154,7 +3184,9 @@ export class CityWorld {
         }
         // 침대 옆으로 가서 눕고, 직접 깨우거나 12시간이 될 때까지 계속 잔다 (시간은 모두와 같이 흐른다)
         this.autopilot = null;
-        this.sleep = { phase: 'walk', at: this.frame, wp: 0, since: this.nowMs(), last: this.nowMs() };
+        // 거실에서는 침실 문을 지나 침대로, 이미 침실 안이면 바로 침대 옆으로
+        const inBedroom = this.player.z < BEDROOM_DOOR.z && this.player.x > BEDROOM_DOOR.x0;
+        this.sleep = { phase: 'walk', at: this.frame, wp: inBedroom ? 1 : 0, since: this.nowMs(), last: this.nowMs() };
         this.toast = null;
         return;
       }

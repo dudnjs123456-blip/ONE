@@ -520,7 +520,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   // 침대에서 자면 피로 회복
   life.fatigue = 90;
   enterHome(w, (x) => (c = x));
-  w.player.reset(3.6, -0.5, 0, 1);
+  w.player.reset(HOME.pois.find((q) => q.id === 'bed')!.x, HOME.pois.find((q) => q.id === 'bed')!.z, 0, 1);
   c = { move: null, run: false, interact: true };
   w.step(); // 침대
   c = { move: { x: 1, z: 0 }, run: false, interact: false }; // 침대로 가서 눕는 동안 방향키는 무시된다
@@ -551,11 +551,11 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
     phases.add(w.sleep?.phase ?? 'done');
   }
   check('sleep walks to bed, lies down, wakes', ['walk', 'lie', 'sleep', 'wake'].every((ph) => phases.has(ph)) && w.sleep === null, `(${[...phases].join('→')})`);
-  check('bedside reached before lying', Math.abs(lieX - 1.95) < 0.05, `(x=${lieX.toFixed(2)})`);
+  check('bedside reached before lying', Math.abs(lieX - HOME.bed.path[HOME.bed.path.length - 1].x) < 0.05, `(x=${lieX.toFixed(2)})`);
   check('wake clears saved sleep', w.location === 'home' && life.sleepAt === undefined && /잘 잤다/.test(w.toast?.text ?? ''), `(${w.toast?.text})`);
   // 12시간이 넘으면 저절로 깬다
   life.fatigue = 90;
-  w.player.reset(3.6, -0.5, 0, 1);
+  w.player.reset(HOME.pois.find((q) => q.id === 'bed')!.x, HOME.pois.find((q) => q.id === 'bed')!.z, 0, 1);
   c = { move: null, run: false, interact: true };
   w.step();
   c = { move: null, run: false, interact: false };
@@ -664,7 +664,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('resting at home regenerates HP', p.hp > h1, `(${h1} → ${p.hp})`);
   check('HP saved to profile', prof.life.hp === p.hp);
   // 침대에서 자면 가득
-  p.reset(3.6, -0.5, 0, 1);
+  p.reset(HOME.pois.find((q) => q.id === 'bed')!.x, HOME.pois.find((q) => q.id === 'bed')!.z, 0, 1);
   p.hp = 50;
   prof.life.fatigue = 70;
   c = { move: null, run: false, interact: true };
@@ -872,7 +872,7 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   w.profile.life.fatigue = 20;
   enterHome(w, (x) => (c = x));
   c = { move: null, run: false, interact: true };
-  w.player.reset(3.6, -0.5, 0, 1);
+  w.player.reset(HOME.pois.find((q) => q.id === 'bed')!.x, HOME.pois.find((q) => q.id === 'bed')!.z, 0, 1);
   w.step();
   check('cannot sleep when not tired', w.location === 'home' && w.sleep === null && /졸리지/.test(w.toast?.text ?? ''));
 }
@@ -1651,4 +1651,51 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   const other = new CityWorld({ read: () => ({ move: null, run: false, interact: false, skill: 'tornadoKick' }) }, { ...profile, body: 'female' }, 32);
   other.step();
   check('character skills are unavailable to other appearances', other.player.move === null);
+}
+
+// ───── 1.5룸: 현관에서 침실 문을 지나 침대까지 걸어간다 (벽에 막혀 순간이동하지 않는다) · 칸막이는 못 지나간다 ─────
+{
+  let c: CityInput = { move: null, run: false, interact: false };
+  const w = new CityWorld({ read: () => c });
+  w.profile.life.fatigue = 90;
+  enterHome(w, (x) => (c = x));
+  const bed = HOME.pois.find((q) => q.id === 'bed')!;
+  // 거실 쪽(침실 문 앞)에서 침대를 고르면: 문 → 침대 옆 순서로 걷는다
+  w.player.reset(2.27, 0.9, 0, 1);
+  check('bed POI reachable from living room side', Math.hypot(bed.x - 2.27, bed.z - 0.9) > 1.0);
+  w.player.reset(bed.x, bed.z, 0, 1);
+  c = { move: null, run: false, interact: true };
+  w.step();
+  c = { move: null, run: false, interact: false };
+  let walkFrames = 0;
+  for (let i = 0; i < 60 * 15 && w.sleep?.phase === 'walk'; i++) {
+    w.step();
+    walkFrames++;
+  }
+  const end = HOME.bed.path[HOME.bed.path.length - 1];
+  check('walks to bedside without getting stuck', walkFrames < 400, `(${walkFrames}프레임)`);
+  // 거실에서 시작해도 침실 문을 지나 침대 옆까지 (막혀서 시간 초과로 옮겨지지 않는다)
+  const w2 = new CityWorld({ read: () => c });
+  w2.profile.life.fatigue = 90;
+  enterHome(w2, (x) => (c = x));
+  w2.player.reset(0.5, 1.5, 0, 1);
+  (w2 as unknown as { interact: (p: unknown) => void }).interact(bed);
+  let f2 = 0;
+  let minWall = 9;
+  for (let i = 0; i < 60 * 15 && w2.sleep?.phase === 'walk'; i++) {
+    w2.step();
+    f2++;
+    // 침실 서쪽 벽(x 1.7~1.8, z < -0.35)을 뚫고 지나가지 않는다
+    if (w2.player.z < -0.6) minWall = Math.min(minWall, w2.player.x - 1.8);
+  }
+  check('from living room: through the bedroom door to the bed', f2 < 420 && w2.sleep?.phase === 'lie', `(${f2}프레임, ${w2.sleep?.phase})`);
+  check('never walks through the bedroom wall', minWall > 0, `(벽까지 ${minWall.toFixed(2)})`);
+  check('lies down at the bedside', Math.abs(w2.player.x - end.x) < 0.1 && Math.abs(w2.player.z - end.z) < 0.1);
+  // 칸막이: 화장실 벽을 향해 걸어도 들어가지 못한다
+  const w3 = new CityWorld({ read: () => c });
+  enterHome(w3, (x) => (c = x));
+  w3.player.reset(-1.9, 1.6, 0, 1);
+  c = { move: { x: 0, z: 1 }, run: false, interact: false };
+  for (let i = 0; i < 120; i++) w3.step();
+  check('cannot walk into the bathroom (closed door)', w3.player.z < 2.25, `(z=${w3.player.z.toFixed(2)})`);
 }
