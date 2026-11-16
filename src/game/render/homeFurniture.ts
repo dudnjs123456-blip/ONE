@@ -45,7 +45,7 @@ const ball = (r: number, n = 14) => new THREE.SphereGeometry(r, n, Math.max(6, M
 const std = (color: number, roughness = 0.8, map?: THREE.Texture) => new THREE.MeshStandardMaterial({ color, roughness, map: map ?? null });
 const glow = (color: number) => new THREE.MeshBasicMaterial({ color });
 
-// ───────────── 사진 재질 (Firefly 로 만든 소녀방 재질 → scripts/process-home-textures.mjs) ─────────────
+// ───────────── 그림 재질 (코드로 만든 대리석·벽 → scripts/make-home-textures.mjs) ─────────────
 
 const photoTex = new Map<string, THREE.Texture>();
 /**
@@ -65,6 +65,25 @@ export function homePhoto(name: string, rx = 1, ry = 1): THREE.Texture {
   const t = base.clone();
   t.repeat.set(rx, ry);
   return t;
+}
+
+/** 대리석 판 (책상·협탁·주방 상판·걸레받이). w×d 미터 면적에 맞춰 반복 (한 장 = 1.2 × 0.6m) */
+const marbleSlab = (w: number, d: number) => std(0xffffff, 0.3, homePhoto('marble-slab', Math.max(0.3, w / 1.2), Math.max(0.3, d / 0.6)));
+
+/** 방 바닥: 60cm 대리석 타일 (그림 한 장 = 1.2m = 타일 2×2) */
+export function homeFloorMaterial(w: number, d: number) {
+  // 새하얀 바닥은 조명 아래서 눈부셔서 살짝 웜그레이로 눌러 둔다
+  return new THREE.MeshStandardMaterial({ map: homePhoto('marble-floor', w / 1.2, d / 1.2), color: 0xe2ddd5, roughness: 0.28 });
+}
+
+/** 방 벽: 따뜻한 회백색 무광 페인트 (그림 한 장 = 2.5m) */
+export function homeWallMaterial(w: number, h: number) {
+  return new THREE.MeshStandardMaterial({ map: homePhoto('plaster-wall', w / 2.5, h / 2.5), color: 0xe6e0d6, roughness: 0.95 });
+}
+
+/** 걸레받이: 대리석 띠 */
+export function homeBaseboardMaterial(w: number) {
+  return marbleSlab(w, 0.1);
 }
 
 // ───────────── 무늬 (캔버스로 그린다) ─────────────
@@ -146,35 +165,6 @@ function knitTex(base: string) {
       }
     },
     [3, 1],
-  );
-}
-
-/** 대리석 상판 */
-function marbleTex() {
-  return ctex(
-    512,
-    256,
-    (g) => {
-      g.fillStyle = '#ecebe7';
-      g.fillRect(0, 0, 512, 256);
-      g.strokeStyle = '#9d9a94';
-      for (let i = 0; i < 14; i++) {
-        g.globalAlpha = 0.12 + rnd() * 0.25;
-        g.lineWidth = 0.5 + rnd() * 1.5;
-        let x = rnd() * 512;
-        let y = rnd() * 256;
-        g.beginPath();
-        g.moveTo(x, y);
-        for (let k = 0; k < 30; k++) {
-          x += 6 + rnd() * 12;
-          y += (rnd() - 0.45) * 14;
-          g.lineTo(x, y);
-        }
-        g.stroke();
-      }
-      g.globalAlpha = 1;
-    },
-    [2, 1],
   );
 }
 
@@ -322,6 +312,55 @@ function artTex() {
   });
 }
 
+/** 거실 액자 그림: 차분한 추상 (모래색 바탕에 흙빛 아치 · 옅은 해 · 가는 선) */
+function calmArtTex() {
+  return ctex(600, 360, (g) => {
+    g.fillStyle = '#ece6dc';
+    g.fillRect(0, 0, 600, 360);
+    // 종이 결
+    g.fillStyle = 'rgba(120,100,80,0.035)';
+    for (let i = 0; i < 2500; i++) g.fillRect(rnd() * 600, rnd() * 360, 1.4, 1.4);
+    g.fillStyle = '#c9b8a3';
+    g.beginPath();
+    g.arc(380, 150, 62, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#a7765c';
+    g.beginPath();
+    g.moveTo(150, 300);
+    g.lineTo(150, 180);
+    g.arc(230, 180, 80, Math.PI, 0);
+    g.lineTo(310, 300);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#8c9886';
+    g.fillRect(310, 240, 150, 60);
+    g.strokeStyle = '#4a4440';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(90, 300);
+    g.lineTo(510, 300);
+    g.stroke();
+  });
+}
+
+/** 거실 러그: 낮은 대비의 울 러그 (베이지 바탕 + 한 톤 진한 테두리) */
+function woolRugTex() {
+  return ctex(512, 432, (g) => {
+    g.fillStyle = '#d6cbbb';
+    g.fillRect(0, 0, 512, 432);
+    g.strokeStyle = '#c3b6a3';
+    g.lineWidth = 10;
+    g.strokeRect(26, 26, 460, 380);
+    g.lineWidth = 2;
+    g.strokeRect(44, 44, 424, 344);
+    // 울 결 (짧은 털 점)
+    for (let i = 0; i < 9000; i++) {
+      g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(60,45,30,0.06)';
+      g.fillRect(rnd() * 512, rnd() * 432, 1.5, 1.5);
+    }
+  });
+}
+
 /** 인덕션 상판 (화구 3개) */
 function cooktopTex() {
   return ctex(256, 256, (g) => {
@@ -385,12 +424,13 @@ function bed(s: THREE.Object3D) {
   const [bedG, put] = place(s, 3.98, -2.64);
   // 원래 2.6m × 3m 로 만든 모양을 실제 침대 크기로 줄인다 (높이는 그대로)
   bedG.scale.set(0.73, 1, 0.86);
-  const frame = std(0xffffff, 0.95, fabricTex('#f2dce2', '#d8b7c1'));
-  const wood = std(0xe9dccf, 0.6);
-  const sheet = std(0xffffff, 0.95, fabricTex('#fffafb', '#efdde2'));
-  const duvet = std(0xffffff, 0.95, homePhoto('quilt-pink', 3, 2.4));
-  const pillow = std(0xffffff, 0.95, fabricTex('#fffafc', '#f0d6de'));
-  const knit = std(0xffffff, 1, knitTex('#f6e6d8'));
+  // 차분한 호텔 침구: 웜그레이 리넨 헤드보드 · 흰 시트 · 아이보리 이불 · 오트밀 니트
+  const frame = std(0xffffff, 0.95, fabricTex('#cfc7bb', '#ada395'));
+  const wood = std(0x6e5a48, 0.6);
+  const sheet = std(0xffffff, 0.95, fabricTex('#f6f3ee', '#dcd6cc'));
+  const duvet = std(0xffffff, 0.95, fabricTex('#ece6dc', '#cdc3b4', 4));
+  const pillow = std(0xffffff, 0.95, fabricTex('#f8f6f2', '#dcd6cc'));
+  const knit = std(0xffffff, 1, knitTex('#cbbda8'));
 
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(cyl(0.035, 0.028, 0.08, 10), wood, sx * 1.18, 0.04, 0.05 + sz * 1.32);
   put(rb(2.6, 0.3, 2.9, 0.05), frame, 0, 0.23, 0.05);
@@ -403,7 +443,7 @@ function bed(s: THREE.Object3D) {
   put(rb(2.46, 0.26, 2.78, 0.07, 3), sheet, 0, 0.49, 0.07);
   // 베개 2개 (헤드보드에 살짝 기댐) + 포인트 쿠션
   for (const sx of [-1, 1]) put(rb(0.86, 0.16, 0.5, 0.075, 3), pillow, sx * 0.56, 0.71, -1.04, -0.15);
-  put(rb(0.42, 0.3, 0.1, 0.045, 3), std(0xf3a9c0, 0.9), 0.62, 0.8, -0.74, -0.3, -0.12);
+  put(rb(0.42, 0.3, 0.1, 0.045, 3), std(0x9a8f7f, 0.9), 0.62, 0.8, -0.74, -0.3, -0.12);
   // 낮에 덮어 둔 이불: 윗면 + 양옆·발끝으로 늘어진 자락 + 접힌 이불깃
   put(rb(2.56, 0.08, 1.95, 0.038, 3), duvet, 0, 0.66, 0.5);
   for (const sx of [-1, 1]) put(rb(0.05, 0.32, 1.95, 0.02), duvet, sx * 1.265, 0.53, 0.5);
@@ -417,11 +457,12 @@ function bed(s: THREE.Object3D) {
 /** 협탁 + 스탠드 (lampMat: 잠잘 때 어두워지는 갓) */
 function nightstand(s: THREE.Object3D, lampMat: THREE.Material) {
   const [, put] = place(s, 2.78, -3.65);
-  const wood = std(0xffffff, 0.6, woodTex('#8a5f3e', '#4a2e1c'));
+  const wood = std(0xffffff, 0.6, woodTex('#7a6450', '#4e3d2e'));
   const brass = std(0xc9a45c, 0.35);
   const ceramic = std(0xe9e2d4, 0.5);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(cyl(0.016, 0.012, 0.07, 8), brass, sx * 0.21, 0.035, sz * 0.18);
-  put(rb(0.5, 0.44, 0.44, 0.015), wood, 0, 0.29, 0);
+  put(rb(0.5, 0.42, 0.44, 0.015), wood, 0, 0.28, 0);
+  put(rb(0.52, 0.025, 0.46, 0.006), marbleSlab(0.52, 0.46), 0, 0.5, 0); // 대리석 상판
   for (const i of [0, 1]) {
     put(rb(0.46, 0.18, 0.02, 0.008), wood, 0, 0.18 + i * 0.2, 0.225);
     put(ball(0.017, 10), brass, 0, 0.18 + i * 0.2, 0.245);
@@ -442,10 +483,9 @@ function nightstand(s: THREE.Object3D, lampMat: THREE.Material) {
 /** 책상 (창 아래, 앞 = 남쪽) + 모니터 · 키보드 · 소품 */
 function desk(s: THREE.Object3D) {
   const [g, put] = place(s, -0.9, -3.57);
-  const oak = std(0xffffff, 0.55, woodTex('#dcc29c', '#a47f55'));
   const black = std(0x2a2a2c, 0.5);
   const white = std(0xf2f0eb, 0.6);
-  put(rb(2.5, 0.035, 0.72, 0.012), oak, 0, 0.7575, 0);
+  put(rb(2.5, 0.035, 0.72, 0.012), marbleSlab(2.5, 0.72), 0, 0.7575, 0); // 대리석 상판
   // 철제 다리 (ㅁ자 프레임)
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) put(bx(0.045, 0.74, 0.045), black, sx * 1.17, 0.37, sz * 0.3);
@@ -512,7 +552,7 @@ function desk(s: THREE.Object3D) {
 /** 사무용 의자 (책상 쪽 = 북쪽을 본다) */
 function chair(s: THREE.Object3D) {
   const [, put] = place(s, -0.9, -2.8);
-  const fab = std(0xffffff, 0.95, fabricTex('#f4c7d4', '#dba3b4'));
+  const fab = std(0xffffff, 0.95, fabricTex('#b8b0a5', '#8f877c'));
   const mesh = std(0xffffff, 0.9, ctex(64, 64, (g) => {
     g.fillStyle = '#2c2e33';
     g.fillRect(0, 0, 64, 64);
@@ -560,7 +600,7 @@ function kitchen(s: THREE.Object3D) {
   put(bx(0.62, 0.1, L), std(0x3b3b3b, 0.8), -0.04, 0.05, 0);
   put(bx(0.7, 0.78, L), cab, -0.02, 0.49, 0);
   // 상판 (싱크 자리만 비운다)
-  const top = std(0xffffff, 0.35, marbleTex());
+  const top = marbleSlab(0.8, L);
   const T = (x0: number, x1: number, z0: number, z1: number) => put(bx(x1 - x0, 0.04, z1 - z0), top, (x0 + x1) / 2, 0.9, (z0 + z1) / 2);
   T(-0.375, 0.39, -1.67, 1.0);
   T(-0.375, 0.39, 1.45, 1.67);
@@ -699,7 +739,7 @@ function tvSet(s: THREE.Object3D) {
   const dark = std(0x17181b, 0.4);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(cyl(0.022, 0.014, 0.14, 10), std(0x2a2a2a, 0.5), sx * 0.95, 0.07, sz * 0.15);
   // 몸통 (가운데는 열린 칸)
-  put(rb(2.1, 0.03, 0.42, 0.01), walnut, 0, 0.525, 0);
+  put(rb(2.1, 0.03, 0.42, 0.01), marbleSlab(2.1, 0.42), 0, 0.525, 0); // 대리석 상판
   put(bx(2.06, 0.03, 0.4), walnut, 0, 0.155, 0);
   for (const sx of [-1, 1]) put(bx(0.03, 0.37, 0.42), walnut, sx * 1.035, 0.34, 0);
   for (const sx of [-1, 1]) put(bx(0.02, 0.34, 0.4), walnut, sx * 0.36, 0.34, 0);
@@ -758,7 +798,8 @@ function coffeeTable(s: THREE.Object3D) {
   shape.quadraticCurveTo(-w, -d, -w + r, -d);
   const topGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.025, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 10 });
   topGeo.rotateX(-Math.PI / 2);
-  put(topGeo, oak, 0, 0.402, 0);
+  // 상판은 대리석 (ExtrudeGeometry 의 UV 는 미터 단위)
+  put(topGeo, std(0xffffff, 0.3, homePhoto('marble-slab', 0.8, 1.6)), 0, 0.402, 0);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(cyl(0.024, 0.016, 0.4, 10), oak, sx * 0.46, 0.2, sz * 0.22, sz * 0.06, 0, -sx * 0.06);
   put(rb(1.0, 0.02, 0.5, 0.008), oak, 0, 0.12, 0);
   // 아래 선반: 잡지
@@ -884,7 +925,7 @@ const WALL_LOW = 1.05;
  */
 function partitions(s: THREE.Object3D, H: number, fpOnly: THREE.Object3D[]) {
   const cap = std(0xf7f2ee, 0.5);
-  const wall = (w: number, h: number) => std(0xffffff, 0.95, homePhoto('wall-pink-stripe', w / 1.3, h / 1.3));
+  const wall = homeWallMaterial;
   for (const r of HOME_WALLS) {
     const sx = r.x1 - r.x0;
     const sz = r.z1 - r.z0;
@@ -969,7 +1010,7 @@ function diningSet(s: THREE.Object3D) {
   put(rb(0.9, 0.035, 0.7, 0.01), oak, 0, 0.74, 0);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(cyl(0.022, 0.018, 0.72, 10), oak, sx * 0.39, 0.36, sz * 0.29);
   // 의자: 북쪽 하나(남쪽을 봄) · 남쪽 하나(북쪽을 봄)
-  const fab = std(0xffffff, 0.95, fabricTex('#f4dbe2', '#ddb7c3'));
+  const fab = std(0xffffff, 0.95, fabricTex('#c9c0b3', '#a69c8f'));
   for (const sz of [-1, 1]) {
     const cz = sz * 0.55;
     put(rb(0.42, 0.04, 0.4, 0.01), oak, 0, 0.45, cz);
@@ -988,7 +1029,7 @@ function diningSet(s: THREE.Object3D) {
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
     put(cyl(0.003, 0.003, 0.18, 4), std(0x4f7d45, 0.8), -0.25 + Math.cos(a) * 0.012, 0.98, Math.sin(a) * 0.012, Math.sin(a) * 0.15, 0, -Math.cos(a) * 0.15);
-    put(ball(0.022, 8), std(i % 2 ? 0xf3a9c0 : 0xffffff, 0.8), -0.25 + Math.cos(a) * 0.035, 1.07, Math.sin(a) * 0.035);
+    put(ball(0.022, 8), std(i % 2 ? 0xe8dcc8 : 0xffffff, 0.8), -0.25 + Math.cos(a) * 0.035, 1.07, Math.sin(a) * 0.035);
   }
 }
 
@@ -1008,13 +1049,13 @@ function bathroom(s: THREE.Object3D, fpOnly: THREE.Object3D[]) {
   seat.scale.set(1, 1.25, 1);
   // 세면대 (서쪽 칸막이에 붙임, 앞 = 동쪽 +x): 수납장 + 사각 볼 + 수전
   put(rb(0.44, 0.78, 0.7, 0.012), std(0xffffff, 0.6, woodTex('#f1e8dc', '#d8c6ae')), -2.7, 0.39, 3.3);
-  put(rb(0.48, 0.05, 0.74, 0.01), std(0xffffff, 0.35, marbleTex()), -2.69, 0.805, 3.3);
+  put(rb(0.48, 0.05, 0.74, 0.01), marbleSlab(0.48, 0.74), -2.69, 0.805, 3.3);
   put(rb(0.32, 0.08, 0.46, 0.04), porcelain, -2.67, 0.85, 3.3);
   put(cyl(0.015, 0.018, 0.16, 10), chrome, -2.85, 0.91, 3.3);
   put(cyl(0.01, 0.01, 0.1, 8), chrome, -2.8, 0.98, 3.3, 0, 0, Math.PI / 2);
   // 칫솔 컵 · 비누
   put(cyl(0.03, 0.026, 0.09, 12), std(0x9fbde0, 0.4), -2.82, 0.875, 3.06);
-  for (const dz of [-0.008, 0.01]) put(cyl(0.004, 0.004, 0.16, 6), std(dz > 0 ? 0xf3a9c0 : 0x7fd3ff, 0.5), -2.82, 0.96, 3.06 + dz, 0, 0, 0.12);
+  for (const dz of [-0.008, 0.01]) put(cyl(0.004, 0.004, 0.16, 6), std(dz > 0 ? 0xd9cbb8 : 0x9fb3c2, 0.5), -2.82, 0.96, 3.06 + dz, 0, 0, 0.12);
   put(rb(0.08, 0.025, 0.05, 0.01), std(0xf6e3a4, 0.6), -2.82, 0.845, 3.55);
   // 거울 (세면대 위, 1인칭에서만 보이는 높이)
   const mirror = put(rb(0.03, 0.7, 0.55, 0.01), std(0xdfe7ee, 0.05), -2.93, 1.45, 3.3);
@@ -1040,11 +1081,11 @@ function bathroom(s: THREE.Object3D, fpOnly: THREE.Object3D[]) {
   put(rb(0.06, 0.1, 0.05, 0.01), chrome, -0.99, 0.95, 2.6);
   fpPart(put(cyl(0.012, 0.012, 0.9, 8), chrome, -0.99, 1.5, 2.42));
   fpPart(put(cyl(0.07, 0.05, 0.03, 16), chrome, -1.05, 1.92, 2.48, 0.6));
-  // 수건걸이 + 분홍 수건 (동쪽 칸막이 안쪽)
+  // 수건걸이 + 오트밀 수건 (동쪽 칸막이 안쪽)
   put(cyl(0.01, 0.01, 0.5, 8), chrome, -0.98, 0.9, 3.5, Math.PI / 2);
-  put(rb(0.03, 0.42, 0.42, 0.01), std(0xf3a9c0, 0.95), -0.99, 0.72, 3.5);
+  put(rb(0.03, 0.42, 0.42, 0.01), std(0xd8ccb9, 0.95), -0.99, 0.72, 3.5);
   // 발매트 · 휴지통
-  put(rb(0.5, 0.012, 0.38, 0.005), std(0xffffff, 1, fabricTex('#cfe3d5', '#a9c8b3', 4)), -2.2, 0.012, 3.3);
+  put(rb(0.5, 0.012, 0.38, 0.005), std(0xffffff, 1, fabricTex('#d6cdbf', '#b4a999', 4)), -2.2, 0.012, 3.3);
   put(cyl(0.09, 0.08, 0.24, 16), std(0xe9e2d4, 0.5), -1.75, 0.12, 3.85);
   // 닫힌 화장실 문 (북쪽 칸막이, 거실 쪽에서 보인다): 아래는 늘 · 위는 1인칭에서만
   const door = std(0xffffff, 0.6, flutedTex('#efe6da'));
@@ -1102,13 +1143,13 @@ export function furnishHome(s: THREE.Object3D, o: HomeLayout): THREE.Group {
   bathroom(root, o.fpOnly);
 
   // 러그 (거실: TV 와 소파 사이)
-  const rug = new THREE.Mesh(rb(2.6, 0.015, 2.2, 0.006), std(0xffffff, 1, homePhoto('rug-heart', 1, 1)));
+  const rug = new THREE.Mesh(rb(2.6, 0.015, 2.2, 0.006), std(0xffffff, 1, woolRugTex()));
   rug.position.set(3.4, 0.0075, 1.75);
   rug.receiveShadow = true;
   root.add(rug);
 
   // 커튼 (주름) + 커튼봉
-  const linen = std(0xffffff, 1, homePhoto('curtain-lace', 1, 2.2));
+  const linen = std(0xffffff, 1, fabricTex('#ece7df', '#d3cbbf', 2));
   linen.side = THREE.DoubleSide;
   const ch = o.H - 0.2;
   for (const [cx, cw] of [[o.win.x0 - 0.3, 0.6], [o.win.x1 - 0.22, 0.44]]) {
@@ -1132,9 +1173,9 @@ export function furnishHome(s: THREE.Object3D, o: HomeLayout): THREE.Group {
   // 동쪽 벽 액자 (원목 틀 + 흰 여백 + 그림)
   {
     const [g, put] = place(root, o.eastX - 0.03, 2.0, -Math.PI / 2);
-    put(rb(1.26, 0.86, 0.04, 0.008), std(0xffffff, 0.6, woodTex('#f3e6d6', '#d9c3a8')), 0, 1.7, 0);
+    put(rb(1.26, 0.86, 0.04, 0.008), std(0xffffff, 0.6, woodTex('#7a6450', '#4e3d2e')), 0, 1.7, 0);
     put(bx(1.16, 0.76, 0.01), std(0xfbfaf6, 0.9), 0, 1.7, 0.018);
-    const art = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.58), std(0xffffff, 0.9, homePhoto('art-bunny', 1, 1)));
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.58), std(0xffffff, 0.9, calmArtTex()));
     art.position.set(0, 1.7, 0.025);
     g.add(art);
   }
@@ -1145,7 +1186,7 @@ export function furnishHome(s: THREE.Object3D, o: HomeLayout): THREE.Group {
 
 /** 잠잘 때 덮는 두툼한 누빔 이불 */
 export function sleepDuvet(): THREE.Mesh {
-  const m = new THREE.Mesh(rb(2.3, 0.2, 1.8, 0.08, 3), std(0xffffff, 0.95, homePhoto('quilt-pink', 3, 2.4)));
+  const m = new THREE.Mesh(rb(2.3, 0.2, 1.8, 0.08, 3), std(0xffffff, 0.95, fabricTex('#ece6dc', '#cdc3b4', 4)));
   m.castShadow = m.receiveShadow = true;
   return m;
 }
