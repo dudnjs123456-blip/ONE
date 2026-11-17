@@ -20,6 +20,13 @@ export const COSMETIC_SLOTS: { id: CosmeticSlot; label: string; icon: string }[]
 
 /** 옷 무늬 (상의·하의) */
 export type Pattern = 'solid' | 'stripe' | 'check' | 'dot';
+/**
+ * 원단 (Firefly 로 만든 원단 사진 → scripts/process-fabric-textures.mjs → public/textures/fabric/<이름>.jpg).
+ * 원단의 결(밝고 어두운 무늬)만 옷 색에 곱해서 색은 게임 색 그대로 두고 질감만 더한다.
+ */
+export type Fabric = 'knit' | 'suede' | 'denim' | 'tweed' | 'leather';
+export const FABRICS: Fabric[] = ['knit', 'suede', 'denim', 'tweed', 'leather'];
+
 /** 소품 모양 */
 export type AccStyle = 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini' | 'bunny' | 'bunnyTail' | 'bikini';
 
@@ -34,6 +41,8 @@ export interface CosmeticDef {
   /** 무늬 색 (줄무늬·체크·물방울) */
   color2?: number;
   pattern?: Pattern;
+  /** 원단 질감 (니트·스웨이드·데님·트위드·가죽) */
+  fabric?: Fabric;
   style?: AccStyle;
   /** 여자 캐릭터만 입을 수 있다 (비키니) */
   femaleOnly?: boolean;
@@ -72,6 +81,14 @@ export const COSMETICS: CosmeticDef[] = [
   // 안경
   C({ id: 'sun-black', name: '블랙 선글라스', icon: '🕶️', slot: 'glasses', price: 200, color: 0x111114, style: 'sunglasses', desc: '눈부신 날엔 이거.' }),
   C({ id: 'round-gold', name: '골드 동그란 안경', icon: '👓', slot: 'glasses', price: 160, color: 0xc9a24a, style: 'round', desc: '지적인 분위기.' }),
+  // 26 F/W 신상: 요즘 유행하는 원단 (차분한 미니멀 · 니트 · 데님 · 가죽·스웨이드)
+  C({ id: 'fw-knit-cream', name: '크림 꽈배기 니트', icon: '🧶', slot: 'top', price: 280, color: 0xf1e5d0, fabric: 'knit', desc: '도톰한 꽈배기 짜임. 이번 겨울 제일 먼저 꺼내 입을 니트.' }),
+  C({ id: 'fw-knit-charcoal', name: '차콜 꽈배기 니트', icon: '🧶', slot: 'top', price: 280, color: 0x55565e, fabric: 'knit', desc: '어디에 입어도 차분한 차콜 니트.' }),
+  C({ id: 'fw-tweed-ivory', name: '아이보리 트위드 탑', icon: '🧥', slot: 'top', price: 360, color: 0xf3ede0, fabric: 'tweed', desc: '보송한 부클레 트위드. 단정한 어른 룩.' }),
+  C({ id: 'fw-suede-camel', name: '카멜 스웨이드 셔츠', icon: '🧥', slot: 'top', price: 340, color: 0xb98552, fabric: 'suede', desc: '올가을 필수템, 부드러운 스웨이드.' }),
+  C({ id: 'fw-denim-washed', name: '워싱 데님 팬츠', icon: '👖', slot: 'bottom', price: 220, color: 0x5f86bd, fabric: 'denim', desc: '능직 결이 살아 있는 중청 워싱 데님.' }),
+  C({ id: 'fw-leather-black', name: '블랙 레더 팬츠', icon: '👖', slot: 'bottom', price: 300, color: 0x2a2b31, fabric: 'leather', desc: '은은한 결의 램스킨 가죽 바지.' }),
+  C({ id: 'fw-suede-loafer', name: '브라운 스웨이드 로퍼', icon: '👞', slot: 'shoes', price: 240, color: 0x7a5236, fabric: 'suede', desc: '가을 코디의 마무리.' }),
   // 상의
   C({ id: 'tee-white', name: '화이트 티셔츠', icon: '👕', slot: 'top', price: 60, color: 0xffffff, desc: '깨끗한 기본 티.' }),
   C({ id: 'tee-black', name: '블랙 티셔츠', icon: '👕', slot: 'top', price: 80, color: 0x2a2b31, desc: '시크하게.' }),
@@ -171,6 +188,7 @@ function dailyItem(key: string, n: number): CosmeticDef | undefined {
     price,
     color: col.hex,
     ...(pattern !== 'solid' ? { color2: col2.hex, pattern } : {}),
+    ...(pattern === 'solid' && kind.names[ki] === '니트' ? { fabric: 'knit' as Fabric } : {}),
     ...(style ? { style } : {}),
     desc: `${Number(key.slice(4, 6))}월 ${Number(key.slice(6))}일 신상 · ${pick(DESCS)}`,
   };

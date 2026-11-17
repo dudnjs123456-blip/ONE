@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { VRM, VRMHumanBoneName } from '@pixiv/three-vrm';
-import { COSMETIC_BY_ID, type CosmeticDef, type CosmeticSlot, type Pattern } from '../data/fashion';
+import { COSMETIC_BY_ID, FABRICS, type CosmeticDef, type CosmeticSlot, type Fabric, type Pattern } from '../data/fashion';
+import { track } from './loadTracker';
 import { addOutline, toonGradient } from './lookFx';
 
 /**
@@ -261,6 +262,49 @@ const matName = (m: THREE.Material) => m.name.replace(/^[A-Z]\d{2}_\d{3}_(\d{2}_
 
 const textureCache = new Map<string, THREE.Texture>();
 
+/**
+ * 원단 결: 원단 사진의 밝기를 평균 1 로 맞춘 값 (옷 색에 곱한다). 게임을 켤 때 미리 받아 둔다.
+ * 사진 색은 쓰지 않고 결(짜임·결·주름)만 써서, 옷 색은 게임 색 그대로 화풍과 어울리게.
+ */
+const fabricGrain = new Map<Fabric, { n: number; g: Float32Array }>();
+/**
+ * 원단마다 결의 세기(0~1)와 한 장 크기(옷 그림 너비의 몇 분의 1).
+ * 스웨이드·가죽은 결이 세면 수건·털처럼 보여서 약하게, 니트는 꽈배기가 굵게 보이도록 크게
+ */
+const FABRIC_LOOK: Record<Fabric, { strength: number; per: number }> = {
+  knit: { strength: 0.8, per: 4.5 },
+  suede: { strength: 0.3, per: 6 },
+  denim: { strength: 0.6, per: 7 },
+  tweed: { strength: 0.8, per: 7 },
+  leather: { strength: 0.45, per: 6 },
+};
+function loadFabric(name: Fabric) {
+  return new Promise<void>((done) => {
+    const img = new Image();
+    img.onload = () => {
+      const n = Math.min(256, img.width);
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = n;
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return done();
+      ctx.drawImage(img, 0, 0, n, n);
+      const d = ctx.getImageData(0, 0, n, n).data;
+      const g = new Float32Array(n * n);
+      let sum = 0;
+      for (let i = 0; i < n * n; i++) sum += g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+      const mean = Math.max(1, sum / (n * n));
+      // 결을 원단마다 누그러뜨려 사진처럼 튀지 않게
+      const k = FABRIC_LOOK[name].strength;
+      for (let i = 0; i < n * n; i++) g[i] = Math.min(1.35, Math.max(0.55, 1 + (g[i] / mean - 1) * k));
+      fabricGrain.set(name, { n, g });
+      done();
+    };
+    img.onerror = () => done();
+    img.src = `/textures/fabric/${name}.jpg`;
+  });
+}
+if (typeof window !== 'undefined') for (const f of FABRICS) void track(loadFabric(f));
+
 export class OutfitDresser {
   private parts: ClothPart[] = [];
   private m: Metrics | null = null;
@@ -501,6 +545,9 @@ export class OutfitDresser {
     const cm = lin(mix);
     const per = Math.max(8, Math.round(s.w / 18));
     const pat: Pattern = c.pattern ?? 'solid';
+    const fab = c.fabric ? fabricGrain.get(c.fabric) : undefined;
+    // 원단 한 장이 옷 그림에서 차지하는 크기 (몸통에 짜임이 몇 줄 보이게)
+    const tile = Math.max(16, Math.round(s.w / (c.fabric ? FABRIC_LOOK[c.fabric].per : 7)));
     for (let y = 0; y < s.h; y++)
       for (let x = 0; x < s.w; x++) {
         const i = y * s.w + x;
@@ -517,7 +564,8 @@ export class OutfitDresser {
           const qx = odd ? ((x + per / 2) % per) - per / 2 : px;
           if (qx * qx + py * py < (per * 0.22) ** 2) col = cb;
         }
-        const v = s.v[i];
+        let v = s.v[i];
+        if (fab) v *= fab.g[Math.floor(((y % tile) / tile) * fab.n) * fab.n + Math.floor(((x % tile) / tile) * fab.n)];
         img.data[i * 4] = col[0] * v;
         img.data[i * 4 + 1] = col[1] * v;
         img.data[i * 4 + 2] = col[2] * v;
@@ -528,7 +576,7 @@ export class OutfitDresser {
     // clone 은 원본과 그림(source)을 같이 쓰니 새 그림으로 바꿔 끼운다
     t.source = new THREE.Source(cv);
     t.needsUpdate = true;
-    textureCache.set(key, t);
+    if (!c.fabric || fab) textureCache.set(key, t);
     return t;
   }
 }

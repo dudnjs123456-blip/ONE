@@ -3,7 +3,7 @@
 // - 소파엔 한 명만 눕는다
 // - TV 는 같은 집에 있으면 같은 영상·같은 위치
 import { CityWorld, HOME, LOBBY, type CityInput } from '../src/game/city/cityWorld';
-import { COSMETIC_BY_ID, garmentFor, wearBlock } from '../src/game/data/fashion';
+import { COSMETIC_BY_ID, COSMETICS, FABRICS, dailyCosmetics, garmentFor, wearBlock } from '../src/game/data/fashion';
 import type { PlayerProfile } from '../src/game/core/profile';
 import { gameTimeAt } from '../src/game/city/worldClock';
 import { parkPeople, visitorSeats } from '../src/game/city/parkPeople';
@@ -505,4 +505,26 @@ check('A sees B pet', !!pet && pet.sp === 'dog' && pet.x === 1 && pet.z === 2 &&
   check('sleep: two sleepers toss differently', same < 3600 / 5 * 0.8, `(같은 순간 ${same}/${3600 / 5})`);
   // 숨: 4.6초에 한 번, 0~1
   check('sleep: breath is slow and bounded', Math.abs(sleepBreath(0) - sleepBreath(4.6)) < 1e-9 && sleepBreath(1.84) > 0.99 && sleepBreath(0) < 0.01);
+}
+
+// 원단 옷 (Firefly 원단): 26 F/W 신상이 가게에 있고, 매일 신상 '니트' 는 누구 화면에서든 같은 니트 원단
+{
+  const fw = COSMETICS.filter((c) => c.id.startsWith('fw-'));
+  check('fabric: 26 F/W items use every fabric', FABRICS.every((f) => fw.some((c) => c.fabric === f)), `(${fw.map((c) => c.fabric).join(',')})`);
+  let knits = 0;
+  let sameEverywhere = true;
+  for (let d = 1; d <= 28; d++) {
+    const key = `202611${String(d).padStart(2, '0')}`;
+    const a = dailyCosmetics(key);
+    const b = dailyCosmetics(key);
+    if (JSON.stringify(a) !== JSON.stringify(b)) sameEverywhere = false;
+    for (const c of a) {
+      if (/니트$/.test(c.name) && !c.pattern) {
+        knits++;
+        if (c.fabric !== 'knit') sameEverywhere = false;
+      }
+      if (c.fabric && c.pattern) sameEverywhere = false;
+    }
+  }
+  check('fabric: daily knit items get the knit fabric, same for everyone', sameEverywhere && knits > 0, `(니트 ${knits}벌)`);
 }
