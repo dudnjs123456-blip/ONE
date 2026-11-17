@@ -63,6 +63,9 @@ export function allActionVoiceSrcs(body: string | undefined): string[] {
 }
 
 /** 컷인 그림 (public/portraits/<몸>/<파일>): 숫자 키 대사 때 나오는 원래 캐릭터 그림(화남)을 쓴다 */
+/** 큰기술 컷인이 떠 있는 시간 (ms) */
+export const CUTIN_MS = 1500;
+
 export const SKILL_CUTIN: Record<string, { img: string; name: string }> = {
   skillFly: { img: 'angry.png', name: '은빛 날라차기' },
   skillTornado: { img: 'angry.png', name: '은빛 회오리 차기' },

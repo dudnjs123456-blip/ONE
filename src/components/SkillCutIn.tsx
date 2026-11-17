@@ -1,11 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { SKILL_CUTIN } from '@/game/data/actionVoices';
+import { CUTIN_MS, SKILL_CUTIN } from '@/game/data/actionVoices';
 
-/** 컷인이 떠 있는 시간 (ms) */
-const CUTIN_MS = 1500;
+/** 렌더러가 기술을 쓴 캐릭터만 실시간으로 찍어 담는 그림판 · 그 캐릭터를 찍을 수 있는지 */
+export interface CutInLive {
+  canvas: HTMLCanvasElement;
+  can(who: string): boolean;
+}
 
 interface Shown {
   id: number;
@@ -14,14 +17,17 @@ interface Shown {
   skill: string;
   img: string;
   fallback: string;
+  /** 3D 캐릭터가 공격하는 모습을 실시간으로 띄운다 (못 찍으면 초상화) */
+  live: boolean;
 }
 
 /**
- * 큰기술 컷인: 캐릭터 스킬을 쓰면 왼쪽에서 비스듬한 띠와 함께 공격하는 그림이 휙 들어왔다 나간다.
- * 같은 곳의 친구가 쓰면 친구 이름을 달고 작게 뜬다.
+ * 큰기술 컷인: 캐릭터 스킬을 쓰면 왼쪽에서 비스듬한 띠와 함께 그 캐릭터가 실제로 공격하는 모습(3D, 실시간)이
+ * 휙 들어왔다 나간다. 같은 곳의 친구가 쓰면 친구 이름을 달고 작게 뜬다. 캐릭터를 찍을 수 없으면 초상화.
  */
-export default function SkillCutIn({ world }: { world: CityWorld | null }) {
+export default function SkillCutIn({ world, live }: { world: CityWorld | null; live?: RefObject<CutInLive | null> }) {
   const [shown, setShown] = useState<Shown | null>(null);
+  const liveBox = useRef<HTMLDivElement>(null);
 
   // 그림을 미리 받아 둔다 (처음 쓸 때 늦지 않게)
   useEffect(() => {
@@ -39,10 +45,23 @@ export default function SkillCutIn({ world }: { world: CityWorld | null }) {
       const def = SKILL_CUTIN[c.kind];
       if (!def) return;
       const name = c.who === 'me' ? world.netName || '나' : (world.remotes.get(c.who)?.name ?? '이웃');
-      setShown({ id: ++n, who: c.who, name, skill: def.name, img: `/portraits/${c.body}/${def.img}`, fallback: `/portraits/${c.body}/angry.png` });
+      const canLive = !!live?.current?.can(c.who);
+      setShown({ id: ++n, who: c.who, name, skill: def.name, img: `/portraits/${c.body}/${def.img}`, fallback: `/portraits/${c.body}/angry.png`, live: canLive });
     }, 40);
     return () => window.clearInterval(id);
-  }, [world]);
+  }, [world, live]);
+
+  // 실시간 그림판을 띠 안에 붙였다가 컷인이 끝나면 뗀다
+  useEffect(() => {
+    const box = liveBox.current;
+    const cv = live?.current?.canvas;
+    if (!shown?.live || !box || !cv) return;
+    cv.className = 'absolute inset-0 h-full w-full select-none object-cover drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]';
+    box.appendChild(cv);
+    return () => {
+      if (cv.parentElement === box) box.removeChild(cv);
+    };
+  }, [shown, live]);
 
   useEffect(() => {
     if (!shown) return;
@@ -80,8 +99,11 @@ export default function SkillCutIn({ world }: { world: CityWorld | null }) {
       </div>
       {/* 캐릭터 그림: 띠 밖으로 살짝 튀어나오게 */}
       <div className="absolute inset-y-0 left-[2%] w-[58%] overflow-hidden" style={{ clipPath: 'polygon(0 0, 100% 0, 90% 100%, 0 100%)' }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {shown.live ? (
+          <div ref={liveBox} className="absolute inset-0" style={{ animation: `cutin-art ${CUTIN_MS}ms linear forwards` }} />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
           src={shown.img}
           alt=""
           draggable={false}
@@ -92,6 +114,7 @@ export default function SkillCutIn({ world }: { world: CityWorld | null }) {
           className="absolute left-0 top-0 h-full w-full select-none object-cover object-top drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]"
           style={{ animation: `cutin-art ${CUTIN_MS}ms linear forwards` }}
         />
+        )}
       </div>
       {/* 친구가 쓴 기술이면 누가 썼는지만 (기술 이름은 띄우지 않는다) */}
       {!mine && (

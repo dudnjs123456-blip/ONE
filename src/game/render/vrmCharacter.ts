@@ -860,6 +860,14 @@ export class VrmCharacter implements CharacterView {
     return true;
   }
 
+  /** 골반 위치 (월드, 애니메이션으로 뛰어오른 높이까지). 모델이 아직 없으면 false — 큰기술 컷인 카메라가 따라간다 */
+  hipsWorld(out: THREE.Vector3): boolean {
+    const h = this.vrm?.humanoid.getRawBoneNode('hips');
+    if (!h) return false;
+    h.getWorldPosition(out);
+    return true;
+  }
+
   /** 클립이 있는 상태면 절차적 포즈 위에 모션캡처 자세를 섞는다 */
   private applyClip(f: Fighter, c: FrameClock, vrm: VRM) {
     const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);

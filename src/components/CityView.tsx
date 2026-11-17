@@ -45,7 +45,7 @@ import { sharedNow, syncWorldClock } from '@/game/city/worldClock';
 import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
 import MoodLinePop from './MoodLinePop';
-import SkillCutIn from './SkillCutIn';
+import SkillCutIn, { type CutInLive } from './SkillCutIn';
 import { MOOD_LINES, moodLineKey } from '@/game/data/moodLines';
 import { PLAYER_MOODS } from '@/game/data/npcs';
 import { playerVoice } from '@/game/data/voices';
@@ -221,6 +221,8 @@ class CityKeyboard {
 export default function CityView({ profile, account, onExit, onPlay }: { profile: PlayerProfile; account: Account | null; onExit: () => void; /** PC방에서 고른 게임 하러 가기 (끝나면 서울로 돌아온다) */ onPlay?: (g: PcGame) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<CityWorld | null>(null);
+  /** 큰기술 컷인에 띄울 실시간 캐릭터 그림 (렌더러가 그린다) */
+  const cutLiveRef = useRef<CutInLive | null>(null);
   const perfRef = useRef<HTMLDivElement>(null);
   const touch = useIsTouch();
   const [hud, setHud] = useState<CityHud | null>(null);
@@ -343,6 +345,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
     const placeTimer = window.setInterval(savePlace, 2000);
     window.addEventListener('pagehide', savePlace);
     const renderer = new CityRenderer(canvas, world);
+    cutLiveRef.current = { canvas: renderer.cutInCanvas, can: (who) => renderer.canCutIn(world, who) };
     if (process.env.NODE_ENV === 'development') (window as unknown as { __cr?: CityRenderer }).__cr = renderer;
     const resize = () => renderer.resize(canvas.clientWidth, canvas.clientHeight);
     resize();
@@ -725,7 +728,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       )}
       {!loading && worldRef.current && <ChatBox world={worldRef.current} touch={touch} />}
       {!loading && worldRef.current && <MoodLinePop body={profile.body} name={worldRef.current.netName || '나'} pop={moodPop} />}
-      {!loading && <SkillCutIn world={worldRef.current} />}
+      {!loading && <SkillCutIn world={worldRef.current} live={cutLiveRef} />}
       {!loading && <VoicePanel voice={voice} touch={touch} />}
       <div
         ref={perfRef}

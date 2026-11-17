@@ -813,6 +813,8 @@ export class CityWorld {
   actOut: string[] = [];
   /** 큰기술 컷인으로 띄울 것 (화면이 가져간다). who = 'me' 또는 친구 id */
   cutIns: { who: string; kind: ActionVoiceKind; body: string }[] = [];
+  /** 큰기술을 쓴 캐릭터를 따로 찍기 시작한 때 (렌더러가 컷인 띠에 실시간으로 띄운다) */
+  cutInCam: { who: string; at: number } | null = null;
   /** 액션 목소리용으로 지난 프레임의 내 상태를 기억해 둔다 */
   private av = { serial: -1, state: '' as string, hp: -1, downed: false, n: 0, lastAt: -999 };
   private lastEmoteAt = -Infinity;
@@ -1003,7 +1005,10 @@ export class CityWorld {
     const name = pickVoice(kind, av.n >> 1);
     const src = actionVoiceSrc(this.profile.body, name);
     if (src) this.onActionVoice?.('me', src, 1);
-    if (kind in SKILL_CUTIN) this.cutIns.push({ who: 'me', kind, body: this.profile.body ?? '' });
+    if (kind in SKILL_CUTIN) {
+      this.cutIns.push({ who: 'me', kind, body: this.profile.body ?? '' });
+      this.cutInCam = { who: 'me', at: performance.now() };
+    }
     this.actOut.push(name);
   }
 
@@ -1016,7 +1021,10 @@ export class CityWorld {
     const vol = voiceVolume(Math.hypot(r.fighter.x - this.player.x, r.fighter.z - this.player.z));
     if (src && vol > 0) this.onActionVoice?.(id, src, vol);
     const kind = (Object.keys(SKILL_CUTIN) as ActionVoiceKind[]).find((k) => ACTION_VOICES[k].includes(name));
-    if (kind && vol > 0 && r.body) this.cutIns.push({ who: id, kind, body: r.body });
+    if (kind && vol > 0 && r.body) {
+      this.cutIns.push({ who: id, kind, body: r.body });
+      this.cutInCam = { who: id, at: performance.now() };
+    }
   }
 
   private stepInner() {

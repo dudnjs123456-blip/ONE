@@ -43,6 +43,10 @@ import { weatherAt, type WeatherState } from '../city/weather';
 import { tvState } from '../city/tvState';
 import { ThemeParkScene } from './themeParkScene';
 import { RideAudio } from './rideAudio';
+import { CUTIN_MS } from '../data/actionVoices';
+
+/** 큰기술 컷인 카메라만 보는 층 (그 캐릭터와 조명만 이 층에 올린다) */
+const CUT_LAYER = 7;
 import { seatPose, type SeatPose } from '../city/themePark';
 
 // ───────────────────────── 텍스처 (캔버스로 그림) ─────────────────────────
@@ -501,6 +505,129 @@ export class CityRenderer {
   private frameEma = 1 / 60;
   private size = { w: 1, h: 1 };
 
+  /** 큰기술 컷인: 그 캐릭터만 찍은 그림을 옮겨 담는 그림판 (SkillCutIn 이 띠 안에 띄운다) */
+  readonly cutInCanvas = (() => {
+    const c = document.createElement('canvas');
+    c.width = 480;
+    c.height = 600;
+    return c;
+  })();
+  private cutCam = new THREE.PerspectiveCamera(38, 0.8, 0.05, 40);
+  /** 컷인 카메라가 바라보는 곳 (골반을 부드럽게 따라간다) · 지금 찍는 컷인 */
+  private cutLook = new THREE.Vector3();
+  private cutAt = -1;
+  private _cutHips = new THREE.Vector3();
+  /** 조명을 컷인 층에 올려 둔 장면 */
+  private cutLit = new WeakSet<THREE.Scene>();
+  private _cutColor = new THREE.Color();
+
+  /** 이 캐릭터를 컷인에 실시간으로 찍을 수 있나 (나, 또는 같은 곳에 있는 친구) */
+  canCutIn(world: CityWorld, who: string) {
+    if (who === 'me') return true;
+    const r = world.remotes.get(who);
+    return !!r && r.room === world.roomKey && this.remoteViews.has(who);
+  }
+
+  /**
+   * 큰기술 컷인: 게임 화면을 그리기 직전에, 기술을 쓴 캐릭터만(가구·건물 없이) 앞쪽 비스듬한 각도에서
+   * 화면 왼쪽 아래 귀퉁이에 따로 그리고 그림판으로 옮긴다. 바로 뒤에 게임 화면이 그 자리를 덮어 쓴다.
+   * 카메라는 1.5초 동안 천천히 다가가고, 캐릭터가 움직이는 대로 따라간다.
+   */
+  private renderCutIn(world: CityWorld, scene: THREE.Scene, alpha: number) {
+    const c = world.cutInCam;
+    if (!c) return;
+    const age = performance.now() - c.at;
+    if (age > CUTIN_MS) {
+      world.cutInCam = null;
+      return;
+    }
+    let target: THREE.Object3D;
+    let f: CityWorld['player'];
+    let view: CharacterView & { hipsWorld?(out: THREE.Vector3): boolean };
+    if (c.who === 'me') {
+      target = this.playerLift;
+      f = world.player;
+      view = this.player;
+    } else {
+      const v = this.remoteViews.get(c.who);
+      const r = world.remotes.get(c.who);
+      if (!v || !r || r.room !== world.roomKey) return;
+      target = v.lift;
+      f = r.fighter;
+      view = v.view;
+    }
+    target.traverse((o) => o.layers.enable(CUT_LAYER));
+    if (!this.cutLit.has(scene)) {
+      scene.traverse((o) => {
+        if ((o as THREE.Light).isLight) o.layers.enable(CUT_LAYER);
+      });
+      this.cutLit.add(scene);
+    }
+    const lp = f.lerped(alpha);
+    // 바라볼 곳: 골반 조금 위 (회오리 차기처럼 애니메이션으로 뛰어올라도 따라간다). 모델이 없으면 발 위치로 어림
+    const look = this._cutHips;
+    if (!view.hipsWorld?.(look)) look.set(lp.x, target.position.y + lp.y + 0.9, lp.z);
+    look.y += 0.12;
+    if (this.cutAt !== c.at) {
+      this.cutAt = c.at;
+      this.cutLook.copy(look);
+    } else this.cutLook.lerp(look, 0.3);
+    const t = age / CUTIN_MS;
+    const ease = 1 - (1 - t) ** 3;
+    // 캐릭터 앞쪽에서 옆으로 비스듬히, 가슴보다 조금 높은 곳에서 내려다보며 다가간다
+    // (높이 뛰는 회오리 차기도 머리·발이 다 들어오게 넉넉히, 올려다보면 치마 속이 보여서 낮게 두지 않는다)
+    const fl = Math.hypot(f.fx, f.fz) || 1;
+    const fx = f.fx / fl;
+    const fz = f.fz / fl;
+    const dist = 3.3 - 0.5 * ease;
+    const cam = this.cutCam;
+    const at = this.cutLook;
+    cam.position.set(at.x + (fx * 0.82 - fz * 0.57) * dist, at.y + 0.45, at.z + (fz * 0.82 + fx * 0.57) * dist);
+    cam.lookAt(at);
+    cam.layers.set(CUT_LAYER);
+
+    const r = this.renderer;
+    const w = Math.max(1, Math.min(320, this.size.w));
+    const h = Math.max(1, Math.min(400, this.size.h));
+    cam.aspect = w / h;
+    cam.updateProjectionMatrix();
+    const vis = target.visible;
+    const bg = scene.background;
+    const fog = scene.fog;
+    const clearA = r.getClearAlpha();
+    r.getClearColor(this._cutColor);
+    const autoShadow = r.shadowMap.autoUpdate;
+    const needShadow = r.shadowMap.needsUpdate;
+    target.visible = true;
+    scene.background = null;
+    scene.fog = null;
+    r.shadowMap.autoUpdate = false;
+    r.shadowMap.needsUpdate = false;
+    r.setRenderTarget(null);
+    r.setClearColor(0x000000, 0);
+    r.setViewport(0, 0, w, h);
+    r.setScissor(0, 0, w, h);
+    r.setScissorTest(true);
+    r.clear();
+    r.render(scene, cam);
+    r.setScissorTest(false);
+    r.setViewport(0, 0, this.size.w, this.size.h);
+    r.setClearColor(this._cutColor, clearA);
+    r.shadowMap.autoUpdate = autoShadow;
+    r.shadowMap.needsUpdate = needShadow;
+    scene.background = bg;
+    scene.fog = fog;
+    target.visible = vis;
+    // 방금 그린 귀퉁이를 그림판으로 (같은 프레임 안이라 아직 화면 버퍼에 남아 있다)
+    const pr = r.getPixelRatio();
+    const el = r.domElement;
+    const out = this.cutInCanvas;
+    const g = out.getContext('2d');
+    if (!g) return;
+    g.clearRect(0, 0, out.width, out.height);
+    g.drawImage(el, 0, el.height - h * pr, w * pr, h * pr, 0, 0, out.width, out.height);
+  }
+
   private fastFrames = 0;
   /** 한 번 올렸다가 다시 느려진 단계. 그 위로는 다시 올리지 않는다 (오르락내리락 반복 방지) */
   private qualityCeiling = 0;
@@ -909,6 +1036,7 @@ export class CityRenderer {
     const outside = view === 'city' || view === 'park';
     const drawn = this.sceneOf(view);
     this.syncShadowLights(drawn);
+    this.renderCutIn(world, drawn, clock.alpha);
     this.fx.render(drawn, cam, outside ? this.fxNight : 0, outside ? this.fxDusk : 0, !outside);
     this.drawTvHole(view === 'home' && !!tvState.now, cam);
     this.lastCalls = this.renderer.info.render.calls;
