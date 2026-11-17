@@ -13,7 +13,7 @@ export interface PlayerProfile {
   /** 아이템 id → 개수 (data/items.ts) */
   inventory: Record<string, number>;
   /** 생활 수치 (0~100, 높을수록 피곤하고 배고프다) */
-  life: { fatigue: number; hunger: number; /** 도시에서 남은 체력 (없으면 가득) */ hp?: number; /** 자는 중이면 잠든 실제 시각 (ms). 창을 닫아도 계속 잔다 */ sleepAt?: number };
+  life: { fatigue: number; hunger: number; /** 땀·먼지 (0~100, 샤워하면 0) */ dirt?: number; /** 도시에서 남은 체력 (없으면 가득) */ hp?: number; /** 자는 중이면 잠든 실제 시각 (ms). 창을 닫아도 계속 잔다 */ sleepAt?: number };
   /** 일자리 id → 근무 기록 */
   jobs?: Record<string, { shifts: number; earned: number }>;
   /** 도시의 날짜(며칠째)와 시각(분) — 다시 켜도 이어진다 */
@@ -46,6 +46,8 @@ export interface PlayerProfile {
   petShop?: { day: number; sold: string[]; /** 용품 id → 오늘 산 개수 */ goods?: Record<string, number> };
   /** 한강 낚시: 낚싯대 · 미끼 · 살림망 · 도감 */
   fishing?: import('../data/fishing').FishingState;
+  /** 집안일: 싱크대 그릇 · 빨래 바구니 · 세탁기 · 건조대 */
+  chores?: import('../city/chores').ChoreState;
 }
 
 export interface FridgeFood {

@@ -13,6 +13,11 @@ import { PLAYER_MOODS, type PlayerMood } from '../data/npcs';
 import { playerVoice, voiceVolume } from '../data/voices';
 import { ACTION_VOICES, type ActionVoiceKind, SKILL_CUTIN, actionVoiceSrc, hasActionVoice, isActionVoiceName, moveVoiceKind, pickVoice } from '../data/actionVoices';
 import { LIFE_WARNING, LifeTracker } from '../core/life';
+import {
+  CHORE_SPOTS, DIRT_PER_FRAME, DIRTY, DRY_MS, MAX_DISHES, MAX_HAMPER, WASH_LOAD, advanceChores, applyChoreProgress, choreLength, dirtRate, dryness, minutesLabel, normalizeChores,
+  packAction, packChores, rackPhase, showerClean, unpackAction, unpackChores, washLeft, washStage, washerPhase,
+  type ChoreAction, type ChoreKind, type ChoreState, type NetChores,
+} from './chores';
 import { CityNav } from './cityNav';
 import { buildCityMap, CITY_CONST, type CityMap, type Poi } from './cityMap';
 import { SONG_PACKS, SONG_PRICE, isSeatedAct, type KaraokeAct } from './karaoke';
@@ -109,11 +114,17 @@ export const HOME_WALLS: Rect[] = [
   { x0: 1.7, x1: 1.8, z0: -4, z1: -0.35 },
   // 침실 남쪽 벽 (x 1.8~2.75 는 침실 문)
   { x0: 2.75, x1: 5, z0: -0.45, z1: -0.35 },
-  // 화장실 북쪽 벽 (닫힌 문이 달려 있다) · 서쪽 · 동쪽
-  { x0: -3.05, x1: -0.85, z0: 2.25, z1: 2.35 },
+  // 화장실 북쪽 벽 (x -2.3~-1.5 는 화장실 문) · 서쪽 · 동쪽
+  { x0: -3.05, x1: -2.3, z0: 2.25, z1: 2.35 },
+  { x0: -1.5, x1: -0.85, z0: 2.25, z1: 2.35 },
   { x0: -3.05, x1: -2.95, z0: 2.35, z1: 4 },
   { x0: -0.95, x1: -0.85, z0: 2.35, z1: 4 },
 ];
+
+/** 화장실 문 (화장실 북쪽 벽의 빈 곳). 경첩은 서쪽(x0), 화장실 안쪽으로 열린다 */
+export const BATH_DOOR = { x0: -2.3, x1: -1.5, z: 2.3 };
+/** 화장실 안 (샤워·양치는 여기 들어와서만) */
+export const BATH_ROOM = { x0: -2.95, x1: -0.95, z0: 2.35, z1: 3.95 };
 
 /** 침실 문 (침실 남쪽 벽의 빈 곳) */
 export const BEDROOM_DOOR = { x0: 1.8, x1: 2.75, z: -0.4 };
@@ -139,6 +150,14 @@ export const HOME = {
     { id: 'table', rect: { x0: 2.8, x1: 4.0, z0: 1.4, z1: 2.1 } },
     // 현관 신발장 (현관문 남쪽 서쪽 벽)
     { id: 'shoes', rect: { x0: -4.95, x1: -4.5, z0: 3.05, z1: 3.95 } },
+    // 세탁기 옆 빨래 바구니
+    { id: 'hamper', rect: { x0: -4.9, x1: -4.42, z0: 1.2, z1: 1.55 } },
+    // 화장실: 변기 · 세면대 · 샤워 부스 유리
+    { id: 'toilet', rect: { x0: -1.52, x1: -1.08, z0: 3.32, z1: 3.95 } },
+    { id: 'basin', rect: { x0: -2.95, x1: -2.46, z0: 2.95, z1: 3.65 } },
+    { id: 'showerGlass', rect: { x0: -1.68, x1: -0.94, z0: 3.03, z1: 3.11 } },
+    // 거실 남쪽 벽 빨래 건조대
+    { id: 'rack', rect: { x0: -0.1, x1: 1.3, z0: 3.15, z1: 3.9 } },
     ...HOME_WALLS.map((rect, i) => ({ id: `wall${i}`, rect })),
   ] as { id: string; rect: Rect }[],
   pois: [
@@ -150,6 +169,11 @@ export const HOME = {
     { id: 'tv', kind: 'home', label: 'TV (유튜브 보기)', x: 3.85, z: 0.6, radius: 0.8 },
     { id: 'calendar', kind: 'home', label: '달력 (근무 기록 보기)', x: -3.3, z: -3.0, radius: 0.9 },
     { id: 'window', kind: 'home', label: '창문 (열고 밖 보기)', x: 1.05, z: -3.0, radius: 0.75 },
+    { id: 'shower', kind: 'home', label: '샤워하기', x: -1.62, z: 2.78, radius: 0.5 },
+    { id: 'brush', kind: 'home', label: '양치하기 (세면대)', x: -2.2, z: 3.3, radius: 0.5 },
+    { id: 'dishes', kind: 'home', label: '설거지 (싱크대)', x: -3.86, z: -1.03, radius: 0.55 },
+    { id: 'washer', kind: 'home', label: '세탁기', x: -3.9, z: 0.83, radius: 0.5 },
+    { id: 'rack', kind: 'home', label: '빨래 건조대', x: 0.6, z: 2.75, radius: 0.7 },
   ] as Poi[],
   /** 북쪽 벽 달력 (주방과 책상 사이) */
   calendar: { x: -3.3, y: 1.6, z: -3.91 },
@@ -393,6 +417,12 @@ export interface RemotePlayer {
   booth: number | null;
   /** 친구 곁에 보이는 펫 */
   pets: NetPet[];
+  /** 친구가 하는 집안일 (받은 프레임부터 이어서 그린다) */
+  chore: { kind: ChoreKind; t: number; n: number; at: number } | null;
+  /** 친구 집의 집안 상태 (친구가 자기 집에 있을 때 보내 준다) */
+  homeChores: ChoreState | null;
+  /** 오래 안 씻어서 냄새가 난다 */
+  dirty: boolean;
   /** 마지막으로 소식(모습·동네 장면)이 온 프레임. 오래 끊기면 동네 계산을 맡지 않는다 */
   seenAt: number;
 }
@@ -466,6 +496,12 @@ export interface NetState {
   kb?: number;
   /** 타고 있는 놀이기구 '놀이기구:좌석' (놀이공원에서 탈 때만) */
   rd?: string;
+  /** 하고 있는 집안일 '종류:시작한 지 프레임:개수' */
+  ch?: string;
+  /** 내 집에 있으면 집안 상태 (그릇·빨래·세탁기·건조대) */
+  hc?: NetChores;
+  /** 오래 안 씻어서 냄새가 난다 */
+  dt?: 1;
 }
 
 /** 내가 친구를 때렸다. 맞은 쪽이 혼자 할 때와 같은 계산(applyHit)으로 자기 체력에서 뺀다 */
@@ -826,7 +862,7 @@ export class CityWorld {
   private remoteIndex = 700;
   /** 마지막으로 사람을 때린 프레임 (가게 주인이 소문을 듣는다) */
   lastCrimeFrame = -99999;
-  private warned = { park: false };
+  private warned = { park: false, dirty: false };
   private lifeTracker = new LifeTracker();
 
   /** 지금 배고픔이 오르는 배율 (활동량이 많을수록 빠르다) */
@@ -839,6 +875,13 @@ export class CityWorld {
   /** 잠자는 중 (침대로 걸어감 → 눕기 → 밤이 흐름 → 일어나기). 그동안 조작 불가 */
   /** 잠: since = 잠든 실제 시각(ms), last = 회복을 마지막으로 계산한 시각(ms), auto = 12시간이 넘어 저절로 깸 */
   sleep: { phase: SleepPhase; at: number; wp: number; since: number; last: number; auto?: boolean } | null = null;
+  /** 하고 있는 집안일 (샤워·설거지·빨래…) */
+  chore: ChoreAction | null = null;
+  /** 샤워를 시작할 때의 더러움 (씻을수록 여기서 줄어든다) */
+  private choreDirt = 0;
+  /** 세탁이 끝났다고 이미 알렸다 */
+  private washerNotified = false;
+  private choresReady = false;
   /** 지도 클릭 자동 이동 */
   autopilot: { path: { x: number; z: number }[]; i: number; label: string } | null = null;
 
@@ -1081,6 +1124,7 @@ export class CityWorld {
       this.stepAutoDesk(inp);
     }
     if (this.seat) this.stepSeat(inp);
+    if (this.chore) this.stepChore(inp);
     if (this.ride || this.rideQueue) this.stepRide(inp);
     // 자는 동안의 피로·배고픔·체력은 sleepRecover 가 실제 잔 시간만큼 바꾼다
     const { slow, canRun } = sleeping ? { slow: 1, canRun: true } : this.tickLife(inp.run && !!inp.move);
@@ -1102,6 +1146,7 @@ export class CityWorld {
       this.profile.body === 'smallSilverGirl' &&
       p.isActionable &&
       !this.seat &&
+      !this.chore &&
       !this.ride &&
       !this.rideQueue &&
       !this.fishing &&
@@ -1152,7 +1197,7 @@ export class CityWorld {
     if (!frozen) this.hitRemotes();
 
     this.regenHp(inp);
-    this.nearby = sleeping || this.doorway || this.lookingOut || this.fishing || this.ride || this.seat?.spot === 'sofa' ? null : this.findNearby();
+    this.nearby = sleeping || this.chore || this.doorway || this.lookingOut || this.fishing || this.ride || this.seat?.spot === 'sofa' ? null : this.findNearby();
     if (inp.interact && !sleeping && this.job?.tryInteract()) {
       // 출입 확인 처리됨
     } else if (inp.interact && this.nearby) this.interact(this.nearby);
@@ -1782,6 +1827,7 @@ export class CityWorld {
     if (!resting) this.warned.park = false;
     const r = this.lifeTracker.tick(this.profile.life, { running, resting, attackSerial: this.player.moveSerial, working: !!this.job });
     if (r.warn) this.say(LIFE_WARNING[r.warn], 3);
+    this.tickChores();
     if (this.frame % 600 === 0) saveProfile(this.profile); // 10초마다 저장
     return r;
   }
@@ -2839,10 +2885,12 @@ export class CityWorld {
     });
     const food = f.splice(best, 1)[0];
     const life = this.profile.life;
+    const ch = this.chores;
+    ch.dishes = Math.min(MAX_DISHES, ch.dishes + 1);
     life.hunger = Math.max(0, life.hunger - food.hunger);
     life.fatigue = Math.max(0, life.fatigue - food.fatigue);
     saveProfile(this.profile);
-    return `🧊 냉장고에서 ${food.icon} ${food.name}을(를) 꺼내 먹었다 (배고픔 -${food.hunger}) · 남은 음식 ${f.length}개`;
+    return `🧊 냉장고에서 ${food.icon} ${food.name}을(를) 꺼내 먹었다 (배고픔 -${food.hunger}) · 남은 음식 ${f.length}개 · 다 먹은 그릇은 싱크대에 (설거지 ${ch.dishes}개)`;
   }
 
   /** 한계에 닿은 채 방치되면 자동 행동을 시작하고, 진행 중이면 한 단계씩 처리한다 */
@@ -3090,6 +3138,228 @@ export class CityWorld {
     }
   }
 
+  // ───────────────────────── 집안일 ─────────────────────────
+
+  /** 내 집안 상태 (처음 부르면 예전 저장을 받아 채운다) */
+  get chores(): ChoreState {
+    if (!this.choresReady || !this.profile.chores) {
+      this.profile.chores = normalizeChores(this.profile.chores, this.nowMs());
+      this.choresReady = true;
+    }
+    return this.profile.chores;
+  }
+
+  /** 오래 안 씻어서 냄새가 난다 */
+  get dirty(): boolean {
+    return (this.profile.life.dirt ?? 0) > DIRTY;
+  }
+
+  /** 지금 보고 있는 집의 집안 상태 (친구 집이면 친구가 보내 준 것, 친구가 없으면 null) */
+  shownChores(): ChoreState | null {
+    if (this.location !== 'home') return null;
+    if (!this.homeOwner) return this.chores;
+    return this.remotes.get(this.homeOwner)?.homeChores ?? null;
+  }
+
+  /** 내 집안일 동작 (그리기용) */
+  get choreView(): { kind: ChoreKind; t: number; n: number } | null {
+    const a = this.chore;
+    return a ? { kind: a.kind, t: this.frame - a.at, n: a.n } : null;
+  }
+
+  /** 같은 곳에 있는 친구의 집안일 동작 */
+  remoteChoreView(r: RemotePlayer): { kind: ChoreKind; t: number; n: number } | null {
+    const c = r.chore;
+    if (!c || r.room !== this.roomKey) return null;
+    return { kind: c.kind, t: c.t + (this.frame - c.at), n: c.n };
+  }
+
+  /** 더러움이 쌓이고, 시간이 흐르며 빨래가 쌓이고, 세탁이 끝나면 알린다 */
+  private tickChores() {
+    const life = this.profile.life;
+    const c = this.chores;
+    if (!this.chore || this.chore.kind !== 'shower') life.dirt = Math.min(100, (life.dirt ?? 0) + DIRT_PER_FRAME * dirtRate(this.lifeTracker.activity, c.hamper));
+    if (this.dirty && !this.warned.dirty) {
+      this.warned.dirty = true;
+      this.say('😣 몸에서 땀 냄새가 난다… 집에 가서 샤워하자', 3);
+    }
+    if (!this.dirty) this.warned.dirty = false;
+    if (this.frame % 60 !== 0) return;
+    const now = this.nowMs();
+    if (advanceChores(c, now)) saveProfile(this.profile);
+    const done = washerPhase(c, now) === 'done';
+    if (done && !this.washerNotified && !this.chore) {
+      this.washerNotified = true;
+      this.say(this.location === 'home' && !this.homeOwner ? '🔔 띠리리리~ 세탁이 끝났다! 세탁기에서 빨래를 꺼내 널자' : '🔔 집 세탁기: 세탁이 끝났어요 (빨래를 꺼내 널어야 해요)', 4);
+    }
+    if (!done) this.washerNotified = false;
+  }
+
+  /** 집안일 자리의 이름 (지금 상태를 같이 보여 준다) */
+  private choreLabel(id: string): string | null {
+    const c = this.chores;
+    const now = this.nowMs();
+    switch (id) {
+      case 'shower':
+        return this.dirty ? '샤워하기 (땀 냄새가 난다!)' : '샤워하기';
+      case 'dishes':
+        return c.dishes ? `설거지하기 (그릇 ${c.dishes}개)` : '싱크대 (설거지할 그릇 없음)';
+      case 'washer': {
+        const ph = washerPhase(c, now);
+        if (ph === 'running') return `세탁기 (${STAGE_LABEL[washStage(c, now) ?? 'wash']} · ${minutesLabel(washLeft(c, now))} 남음)`;
+        if (ph === 'done') return `세탁기 (다 됐다! 빨래 ${c.washer!.n}벌 꺼내기)`;
+        return c.hamper ? `세탁기 (빨래 ${Math.min(WASH_LOAD, c.hamper)}벌 넣고 돌리기)` : '세탁기 (빨래 바구니가 비었다)';
+      }
+      case 'rack': {
+        const ph = rackPhase(c, now);
+        if (ph === 'dry') return `빨래 건조대 (다 말랐다! ${c.rack!.n}벌 개기)`;
+        if (c.wet) return `빨래 건조대 (젖은 빨래 ${c.wet}벌 널기)`;
+        if (ph === 'drying') return `빨래 건조대 (마르는 중 · ${minutesLabel(DRY_MS - (now - c.rack!.at))} 남음)`;
+        return '빨래 건조대 (비어 있음)';
+      }
+    }
+    return null;
+  }
+
+  private inBathroom(): boolean {
+    const p = this.player;
+    return p.x > BATH_ROOM.x0 - 0.05 && p.x < BATH_ROOM.x1 + 0.05 && p.z > BATH_ROOM.z0 && p.z < BATH_ROOM.z1;
+  }
+
+  /** 집안일 자리에서 E */
+  private interactChore(id: string) {
+    if (this.homeOwner) return;
+    const c = this.chores;
+    const now = this.nowMs();
+    switch (id) {
+      case 'shower':
+        if (!this.inBathroom()) return this.say('🚪 화장실 안으로 들어가서 해요', 2);
+        this.startChore('shower', 1);
+        this.say('🚿 샤워하는 중… (방향키·E 그만하기)', 3);
+        return;
+      case 'brush':
+        if (!this.inBathroom()) return this.say('🚪 화장실 안으로 들어가서 해요', 2);
+        this.startChore('brush', 1);
+        this.say('🪥 양치하는 중… (방향키·E 그만하기)', 3);
+        return;
+      case 'dishes':
+        if (!c.dishes) return this.say('🍽️ 설거지할 그릇이 없다 (냉장고에서 꺼내 먹으면 그릇이 싱크대에 쌓여요)', 3);
+        this.startChore('dishes', c.dishes);
+        this.say(`🧽 설거지 시작 (그릇 ${c.dishes}개) · 방향키·E 그만하기`, 3);
+        return;
+      case 'washer': {
+        const ph = washerPhase(c, now);
+        if (ph === 'running') return this.say(`🫧 세탁기가 돌아가는 중 — ${STAGE_LABEL[washStage(c, now) ?? 'wash']} (${minutesLabel(washLeft(c, now))} 남음)`, 3);
+        if (ph === 'done') {
+          this.startChore('unload', 1);
+          this.say('🧺 빨래를 꺼내는 중…', 2.5);
+          return;
+        }
+        if (!c.hamper) return this.say('🧺 빨래 바구니가 비었다 (입은 옷은 몇 시간마다, 샤워하면 바로 쌓여요)', 3);
+        this.startChore('load', 1);
+        this.say(`🫧 빨래 ${Math.min(WASH_LOAD, c.hamper)}벌을 세탁기에 넣는 중…`, 3);
+        return;
+      }
+      case 'rack': {
+        const ph = rackPhase(c, now);
+        if (ph === 'dry') {
+          this.startChore('fold', c.rack!.n);
+          this.say(`👚 마른 빨래 ${c.rack!.n}벌을 개는 중… (방향키·E 그만하기)`, 3);
+          return;
+        }
+        if (c.wet) {
+          this.startChore('hang', c.wet);
+          this.say(`👕 젖은 빨래 ${c.wet}벌을 너는 중… (방향키·E 그만하기)`, 3);
+          return;
+        }
+        if (ph === 'drying') return this.say(`👕 빨래가 마르는 중 (${Math.round(dryness(c, now) * 100)}% · ${minutesLabel(DRY_MS - (now - c.rack!.at))} 남음)`, 3);
+        return this.say('👕 건조대가 비어 있다 (세탁이 끝난 빨래를 꺼내 오면 널 수 있어요)', 3);
+      }
+    }
+  }
+
+  private startChore(kind: ChoreKind, n: number) {
+    this.autopilot = null;
+    this.chore = { kind, at: this.frame, n, done: 0 };
+    this.choreDirt = this.profile.life.dirt ?? 0;
+  }
+
+  /** 집안일 진행: 자리로 들어가 그쪽을 보고, 단계마다 결과를 반영한다. 방향키·E·공격으로 그만둔다 */
+  private stepChore(inp: CityInput) {
+    const a = this.chore!;
+    const p = this.player;
+    const t = this.frame - a.at;
+    const len = choreLength(a);
+    const wants = !!inp.move || inp.interact || (inp.buttons ?? []).some(Boolean) || !!inp.jump || !!inp.skill;
+    const quit = (t > 20 && wants) || this.location !== 'home' || !!this.homeOwner || p.hp <= 0;
+    // 이 프레임 입력은 동작이 다 쓴다
+    inp.move = null;
+    inp.interact = false;
+    inp.run = false;
+    inp.jump = false;
+    inp.skill = undefined;
+    inp.buttons = undefined;
+    if (!quit) {
+      const s = CHORE_SPOTS[a.kind];
+      const k = t < 25 ? 0.2 : 1;
+      p.x += (s.x - p.x) * k;
+      p.z += (s.z - p.z) * k;
+      p.fx = s.fx;
+      p.fz = s.fz;
+    }
+    const c = this.chores;
+    const now = this.nowMs();
+    const life = this.profile.life;
+    if (a.kind === 'shower') life.dirt = Math.min(life.dirt ?? 0, this.choreDirt * (1 - showerClean(Math.min(t, len))));
+    const before = a.done;
+    applyChoreProgress(c, a, Math.min(t, len), now);
+    if (a.done !== before && t < len && !quit) {
+      if (a.kind === 'dishes') this.say(`🧽 설거지 중… ${a.done}/${a.n} · 방향키·E 그만하기`, 3);
+      if (a.kind === 'hang') this.say(`👕 너는 중… ${a.done}/${a.n}`, 3);
+      if (a.kind === 'fold') this.say(`👚 개는 중… ${a.done}/${a.n}`, 3);
+    }
+    if (t >= len || quit) this.finishChore(t >= len);
+  }
+
+  private finishChore(complete: boolean) {
+    const a = this.chore!;
+    this.chore = null;
+    const c = this.chores;
+    const life = this.profile.life;
+    switch (a.kind) {
+      case 'shower':
+        if (complete) {
+          life.dirt = 0;
+          // 벗은 옷은 빨래 바구니로
+          c.hamper = Math.min(MAX_HAMPER, c.hamper + 1);
+          this.say('🚿 개운하다! 샤워 끝 (더러움 0 · 벗은 옷은 빨래 바구니에)', 3.5);
+        } else this.say(`🚿 샤워를 하다 말았다 (더러움 ${Math.round(life.dirt ?? 0)})`, 3);
+        break;
+      case 'brush':
+        if (complete) {
+          life.dirt = Math.max(0, (life.dirt ?? 0) - 5);
+          this.say('🪥 양치 끝! 입안이 상쾌하다', 3);
+        } else this.say('🪥 양치를 하다 말았다', 2);
+        break;
+      case 'dishes':
+        this.say(a.done ? `🍽️ 설거지 ${a.done}개 끝${c.dishes ? ` (남은 그릇 ${c.dishes}개)` : ' — 싱크대가 깨끗하다!'}` : '🍽️ 설거지를 하다 말았다', 3);
+        break;
+      case 'load':
+        this.say(complete && c.washer ? `🫧 빨래 ${c.washer.n}벌을 넣고 세탁기를 돌렸다 (${minutesLabel(washLeft(c, this.nowMs()))} 뒤 끝나요)` : '🫧 빨래를 넣다 말았다', 3.5);
+        break;
+      case 'unload':
+        this.say(complete ? `🧺 젖은 빨래 ${c.wet}벌을 꺼냈다 — 거실 남쪽 건조대에 널자` : '🧺 빨래를 꺼내다 말았다', 3.5);
+        break;
+      case 'hang':
+        this.say(a.done ? `👕 빨래 ${a.done}벌을 널었다 (${minutesLabel(DRY_MS)} 뒤 다 마른다)` : '👕 빨래를 널다 말았다', 3.5);
+        break;
+      case 'fold':
+        this.say(a.done ? `👚 빨래 ${a.done}벌을 개서 옷장에 넣었다${c.rack ? ` (남은 빨래 ${c.rack.n}벌)` : ''}` : '👚 빨래를 개다 말았다', 3);
+        break;
+    }
+    saveProfile(this.profile);
+  }
+
   say(text: string, seconds = 2.5) {
     this.toast = { text, until: this.frame + seconds * 60 };
   }
@@ -3200,6 +3470,13 @@ export class CityWorld {
       }
       case 'tv':
         this.tvRequest = true;
+        return;
+      case 'shower':
+      case 'brush':
+      case 'dishes':
+      case 'washer':
+      case 'rack':
+        this.interactChore(poi.id);
         return;
       case 'calendar':
         this.calendarRequest = true;
@@ -4136,6 +4413,10 @@ export class CityWorld {
       if (d < sp.radius && d < bestD) best = sp;
     }
     if (best?.id === 'window' && this.homeWindowOpen) return { ...best, label: '창문 (밖 내다보기)' };
+    if (best && this.location === 'home' && !this.homeOwner) {
+      const l = this.choreLabel(best.id);
+      if (l) return { ...best, label: l };
+    }
     if (best?.id === 'sofa') {
       const t = this.sofaTakenBy();
       if (t) return { ...best, label: `소파 (${t.name} 님이 누워 있음)` };
@@ -4188,7 +4469,7 @@ export class CityWorld {
     if (!r) {
       const f = new Fighter(this.remoteIndex++, name, { canBlock: false, body: bodySpecFor(body) });
       f.reset(this.map.home.x, this.map.home.z + 1, 0, 1);
-      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, booth: null, pets: [], seenAt: -99999 };
+      r = { id, name, unit, fighter: f, room: '', target: null, hitLock: 0, myHitAt: -99999, level: 1, job: null, jobAt: 0, seat: null, scene: null, sleep: null, fish: null, booth: null, pets: [], seenAt: -99999, chore: null, homeChores: null, dirty: false };
       this.remotes.set(id, r);
       this.say(`👋 ${name} 님이 접속했어요`, 3);
     }
@@ -4223,6 +4504,9 @@ export class CityWorld {
       sa: seat ? Math.round(this.seatAmount * 20) / 20 : 0,
       ...(this.myBooth() ? { kb: this.karaokeRental!.room } : {}),
       ...(this.ride ? { rd: `${this.ride.id}:${this.ride.seat}` } : {}),
+      ...(this.chore ? { ch: packAction(this.chore, this.frame) } : {}),
+      ...(this.location === 'home' && !this.homeOwner ? { hc: packChores(this.chores) } : {}),
+      ...(this.dirty ? { dt: 1 as const } : {}),
       ...this.netExtras(),
     };
   }
@@ -4380,6 +4664,10 @@ export class CityWorld {
   /** 친구가 하는 일(근무)과 앉은 곳(데스크·소파). 한 자리엔 한 명만: 거의 동시에 차지했으면 늦은 쪽이 비킨다 */
   private applyRemoteBusy(r: RemotePlayer, s: NetState) {
     r.sleep = s.sl ? { rest: s.sl, blanket: s.sb ?? 0 } : null;
+    const ca = unpackAction(s.ch);
+    r.chore = ca ? { ...ca, at: this.frame } : null;
+    r.homeChores = unpackChores(s.hc);
+    r.dirty = s.dt === 1;
     r.fish = s.fs && typeof s.fs.p === 'string' ? { ...s.fs } : null;
     r.pets = Array.isArray(s.pt) ? s.pt.slice(0, 6) : [];
     const job = s.jb ?? null;
@@ -5248,3 +5536,6 @@ function parseRide(v: unknown): { id: RideId; seat: number } | null {
   if (!(id in RIDES) || !Number.isInteger(n) || n < 0 || n >= RIDES[id as RideId].seats) return null;
   return { id: id as RideId, seat: n };
 }
+
+/** 세탁기 단계 이름 */
+const STAGE_LABEL = { soak: '불림', wash: '세탁', rinse: '헹굼', spin: '탈수' } as const;

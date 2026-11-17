@@ -12,12 +12,13 @@ export default function LifeBar({ label, value, color, warn }: { label: string; 
   );
 }
 
-/** 피로도 + 배고픔 두 줄 */
-export function LifeBars({ fatigue, hunger, hungerRate }: { fatigue: number; hunger: number; hungerRate?: number }) {
+/** 피로도 + 배고픔 두 줄 (도시에선 더러움도) */
+export function LifeBars({ fatigue, hunger, hungerRate, dirt }: { fatigue: number; hunger: number; hungerRate?: number; dirt?: number }) {
   return (
     <>
       <LifeBar label="피로도" value={Math.round(fatigue)} color="bg-violet-400" warn={80} />
       <LifeBar label="배고픔" value={Math.round(hunger)} color="bg-orange-400" warn={85} />
+      {dirt !== undefined && <LifeBar label="더러움" value={Math.round(dirt)} color="bg-lime-600" warn={80} />}
       {hungerRate !== undefined && hungerRate >= 1.15 && (
         <div className="mt-0.5 text-[10px] text-orange-200/80">🔥 활동량이 많아 배고픔 ×{hungerRate.toFixed(1)}</div>
       )}

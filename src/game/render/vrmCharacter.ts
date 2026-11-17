@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { ChoreKind } from '../city/chores';
+import { chorePose, type ArmPose, type ChorePose } from './chorePose';
 import { addOutline, setupMToonRim, updateMToonRim, type MToonRim } from './lookFx';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils, type VRM, type VRMHumanBoneName } from '@pixiv/three-vrm';
@@ -379,6 +381,11 @@ export class VrmCharacter implements CharacterView {
   /** 두 손으로 낚싯대를 쥔 자세 (pitch = 대를 든 각도 rad). null = 안 쥠 */
   hold: { pitch: number } | null = null;
   private holdW = 0;
+  /** 집안일 동작 (샤워·설거지·빨래…). t = 시작한 지 프레임 */
+  chore: { kind: ChoreKind; t: number } | null = null;
+  private choreW = 0;
+  /** 단계가 바뀔 때 툭 끊기지 않게 따라가는 지금 자세 */
+  private choreCur: ChorePose | null = null;
   private holdPitch = 0.5;
   private fallback: Mannequin;
   /** 앉아서 휴대폰 보기·쳐다보기 섞는 정도 (부드럽게) */
@@ -560,6 +567,7 @@ export class VrmCharacter implements CharacterView {
       else this.applyRest(vrm, this.rest, lp, yaw, t);
     }
     this.applyHold(vrm, c.dt);
+    this.applyChore(vrm, c.dt);
 
     // 표정
     const em = vrm.expressionManager;
@@ -850,6 +858,46 @@ export class VrmCharacter implements CharacterView {
     arm('left', -0.45 - lift * 0.2, -1.35, -0.45);
     bone('chest')?.quaternion.slerp(q.setFromEuler(e.set(0.05, -0.12, 0)), k);
     bone('head')?.quaternion.slerp(q.setFromEuler(e.set(0.18 - lift * 0.1, 0, 0)), k);
+  }
+
+  /** 집안일 자세: 팔·상체·고개를 단계 표(chorePose)대로. 단계 사이는 부드럽게 이어진다 */
+  private applyChore(vrm: VRM, dt: number) {
+    const want = this.chore ? chorePose(this.chore.kind, this.chore.t) : null;
+    this.choreW += ((want ? 1 : 0) - this.choreW) * smooth(0.2, dt);
+    if (want) {
+      const cur = (this.choreCur ??= structuredClone(want));
+      const a = smooth(0.3, dt);
+      const mixArm = (x: ArmPose, y: ArmPose) => {
+        x.tw = (x.tw ?? 0) + ((y.tw ?? 0) - (x.tw ?? 0)) * a;
+        x.sh += (y.sh - x.sh) * a;
+        x.el += (y.el - x.el) * a;
+        x.ar += (y.ar - x.ar) * a;
+      };
+      mixArm(cur.L, want.L);
+      mixArm(cur.R, want.R);
+      cur.lean += (want.lean - cur.lean) * a;
+      cur.head += (want.head - cur.head) * a;
+    }
+    const k = this.choreW;
+    const P = this.choreCur;
+    if (k < 0.002 || !P) {
+      if (k < 0.002) this.choreCur = null;
+      return;
+    }
+    const bone = (n: VRMHumanBoneName) => vrm.humanoid.getNormalizedBoneNode(n);
+    const q = _q;
+    const e = _e;
+    const arm = (side: 'left' | 'right', a: ArmPose) => {
+      const hang = ARM_HANG - a.ar;
+      bone(side === 'left' ? 'leftUpperArm' : 'rightUpperArm')?.quaternion.slerp(q.setFromEuler(e.set(a.sh, a.tw ?? 0, side === 'left' ? -hang : hang, 'XYZ')), k);
+      const ax = side === 'left' ? _axL.set(Math.cos(hang), Math.sin(hang), 0) : _axR.set(Math.cos(hang), -Math.sin(hang), 0);
+      bone(side === 'left' ? 'leftLowerArm' : 'rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(ax, a.el), k);
+    };
+    arm('left', P.L);
+    arm('right', P.R);
+    bone('spine')?.quaternion.slerp(q.setFromEuler(e.set(P.lean * 0.5, 0, 0)), k);
+    bone('chest')?.quaternion.slerp(q.setFromEuler(e.set(P.lean * 0.5, 0, 0)), k);
+    bone('head')?.quaternion.slerp(q.setFromEuler(e.set(P.head, 0, 0)), k);
   }
 
   /** 오른손 위치 (월드). 모델이 아직 없으면 false */

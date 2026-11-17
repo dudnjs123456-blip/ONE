@@ -1691,11 +1691,11 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
   check('from living room: through the bedroom door to the bed', f2 < 420 && w2.sleep?.phase === 'lie', `(${f2}프레임, ${w2.sleep?.phase})`);
   check('never walks through the bedroom wall', minWall > 0, `(벽까지 ${minWall.toFixed(2)})`);
   check('lies down at the bedside', Math.abs(w2.player.x - end.x) < 0.1 && Math.abs(w2.player.z - end.z) < 0.1);
-  // 칸막이: 화장실 벽을 향해 걸어도 들어가지 못한다
+  // 칸막이: 화장실은 문(x -2.3~-1.5)으로만 들어가고, 문 옆 벽은 막혀 있다
   const w3 = new CityWorld({ read: () => c });
   enterHome(w3, (x) => (c = x));
-  w3.player.reset(-1.9, 1.6, 0, 1);
+  w3.player.reset(-2.7, 1.6, 0, 1);
   c = { move: { x: 0, z: 1 }, run: false, interact: false };
   for (let i = 0; i < 120; i++) w3.step();
-  check('cannot walk into the bathroom (closed door)', w3.player.z < 2.25, `(z=${w3.player.z.toFixed(2)})`);
+  check('cannot walk through the bathroom wall (only the door)', w3.player.z < 2.25, `(z=${w3.player.z.toFixed(2)})`);
 }

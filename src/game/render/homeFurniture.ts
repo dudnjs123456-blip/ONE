@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { toonify } from './lookFx';
-import { HOME_WALLS, BEDROOM_DOOR } from '../city/cityWorld';
+import { HOME_WALLS, BEDROOM_DOOR, BATH_DOOR } from '../city/cityWorld';
 
 /**
  * 1.5룸 집 가구 (직접 만든 모델). 자리·크기는 HOME.furniture 부딪힘 상자와 자세 기준점에 맞춰 있다.
@@ -963,6 +963,19 @@ function partitions(s: THREE.Object3D, H: number, fpOnly: THREE.Object3D[]) {
   lintel.userData.keepMaterial = true;
   s.add(lintel);
   fpOnly.push(lintel);
+  // 화장실 문틀 (가로로 놓인 벽이라 기둥은 x 방향으로 선다) + 문 위 벽
+  const b = BATH_DOOR;
+  for (const x of [b.x0 + 0.03, b.x1 - 0.03]) {
+    const post = new THREE.Mesh(bx(0.06, WALL_LOW + 0.03, 0.14), cap);
+    post.position.set(x, (WALL_LOW + 0.03) / 2, b.z);
+    s.add(post);
+  }
+  const bl = new THREE.Mesh(bx(b.x1 - b.x0, H - 2.1, 0.1), wall(b.x1 - b.x0, H - 2.1));
+  bl.position.set((b.x0 + b.x1) / 2, (2.1 + H) / 2, b.z);
+  bl.visible = false;
+  bl.userData.keepMaterial = true;
+  s.add(bl);
+  fpOnly.push(bl);
 }
 
 /** 옷장 (침실 북서쪽 구석, 앞 = 남쪽 +z): 여닫이 두 짝 + 위 수납 상자 */
@@ -983,7 +996,8 @@ function wardrobe(s: THREE.Object3D) {
 
 /** 드럼 세탁기 (냉장고 옆 서쪽 벽, 앞 = 동쪽 +x) */
 function washer(s: THREE.Object3D) {
-  const [, put] = place(s, -4.63, 0.83);
+  const [g, put] = place(s, -4.63, 0.83);
+  g.name = 'washer';
   const white = std(0xf4f4f2, 0.4);
   const chrome = std(0xb8bcc2, 0.3);
   put(rb(0.6, 0.85, 0.62, 0.03), white, 0, 0.425, 0);
@@ -991,10 +1005,9 @@ function washer(s: THREE.Object3D) {
   put(bx(0.004, 0.1, 0.56), std(0xe2e2e0, 0.4), 0.302, 0.78, 0);
   put(rb(0.01, 0.06, 0.16, 0.004), std(0xdcdcd9, 0.4), 0.305, 0.78, -0.18);
   put(cyl(0.035, 0.035, 0.02, 20), chrome, 0.31, 0.78, 0.12, 0, 0, Math.PI / 2);
-  put(bx(0.002, 0.03, 0.08), glow(0x7fd3ff), 0.307, 0.78, -0.02);
-  // 둥근 문 (크롬 테두리 + 어두운 유리)
-  put(new THREE.TorusGeometry(0.19, 0.03, 12, 32), chrome, 0.31, 0.4, 0, 0, Math.PI / 2);
-  put(cyl(0.165, 0.165, 0.012, 32), std(0x2e3a44, 0.15), 0.306, 0.4, 0, 0, 0, Math.PI / 2);
+  // 둥근 문 자리: 안쪽 드럼 통 (문·유리·옷은 choreProps)
+  put(cyl(0.2, 0.2, 0.02, 32), std(0xd9dcdf, 0.4), 0.296, 0.4, 0, 0, 0, Math.PI / 2);
+  put(cyl(0.17, 0.17, 0.02, 32), std(0x1d2329, 0.6), 0.3, 0.4, 0, 0, 0, Math.PI / 2);
   // 위: 세제 통 · 개어 둔 수건
   put(rb(0.1, 0.2, 0.07, 0.015), std(0x6fb3e6, 0.5), -0.1, 0.95, -0.15);
   put(cyl(0.02, 0.02, 0.03, 10), std(0xf4f4f2, 0.5), -0.1, 1.065, -0.15);
@@ -1070,6 +1083,7 @@ function bathroom(s: THREE.Object3D, fpOnly: THREE.Object3D[]) {
     m.userData.keepMaterial = true;
     fpOnly.push(m);
   };
+  glassMat.name = 'showerGlass';
   const glassLow = put(bx(0.72, WALL_LOW, 0.012), glassMat, -1.31, WALL_LOW / 2, 3.07);
   glassLow.userData.keepMaterial = true;
   glassLow.castShadow = false;
@@ -1087,13 +1101,28 @@ function bathroom(s: THREE.Object3D, fpOnly: THREE.Object3D[]) {
   // 발매트 · 휴지통
   put(rb(0.5, 0.012, 0.38, 0.005), std(0xffffff, 1, fabricTex('#d6cdbf', '#b4a999', 4)), -2.2, 0.012, 3.3);
   put(cyl(0.09, 0.08, 0.24, 16), std(0xe9e2d4, 0.5), -1.75, 0.12, 3.85);
-  // 닫힌 화장실 문 (북쪽 칸막이, 거실 쪽에서 보인다): 아래는 늘 · 위는 1인칭에서만
+  // 화장실 문 (북쪽 칸막이): 서쪽 경첩에 달려 화장실 안쪽으로 열린다 (choreProps 가 사람이 오면 연다)
+  // 아래는 늘 보이고, 위는 1인칭에서만
   const door = std(0xffffff, 0.6, flutedTex('#efe6da'));
   const brass = std(0xc9a45c, 0.35);
-  for (const z of [2.235, 2.365]) {
-    put(rb(0.8, WALL_LOW - 0.02, 0.02, 0.005), door, -1.9, (WALL_LOW - 0.02) / 2, z);
-    fpPart(put(rb(0.8, 2.05 - WALL_LOW, 0.02, 0.005), door, -1.9, (WALL_LOW + 2.05) / 2, z));
-    put(ball(0.022, 10), brass, -1.6, 0.95, z + (z < 2.3 ? -0.02 : 0.02));
+  const hinge = new THREE.Group();
+  hinge.name = 'bathDoor';
+  hinge.position.set(BATH_DOOR.x0 + 0.02, 0, BATH_DOOR.z);
+  s.add(hinge);
+  const W = BATH_DOOR.x1 - BATH_DOOR.x0 - 0.04;
+  const leaf = (h0: number, h1: number) => {
+    const m = new THREE.Mesh(rb(W, h1 - h0, 0.04, 0.005), door);
+    m.position.set(W / 2, (h0 + h1) / 2, 0);
+    m.castShadow = m.receiveShadow = true;
+    hinge.add(m);
+    return m;
+  };
+  leaf(0.01, WALL_LOW - 0.02);
+  fpPart(leaf(WALL_LOW - 0.02, 2.05));
+  for (const dz of [-0.03, 0.03]) {
+    const knob = new THREE.Mesh(ball(0.022, 10), brass);
+    knob.position.set(W - 0.08, 0.95, dz);
+    hinge.add(knob);
   }
 }
 

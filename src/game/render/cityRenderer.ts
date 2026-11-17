@@ -12,6 +12,8 @@ import { makeKitBuilding } from './cityKit';
 import { allLoaded } from './loadTracker';
 import { buildSofa } from './sofaModel';
 import { furnishHome, homeBaseboardMaterial, homeFloorMaterial, homeWallMaterial, sleepDuvet } from './homeFurniture';
+import { ChoreProps, StinkFx, type ChoreActor } from './choreProps';
+import type { ChoreKind } from '../city/chores';
 import { apartmentSigns, buildVillaEntrance, decorateFacade, swingDoors, type DoorControl } from './signage';
 import { instanceProp } from './propsKit';
 import { CarKit, type CarView } from './carKit';
@@ -226,7 +228,13 @@ export class CityRenderer {
   /** 접속한 친구들의 캐릭터와 이름표 */
   /** 내 머리 위 레벨·아이디·체력바 */
   private myPlate = new Nameplate(false);
-  private remoteViews = new Map<string, { view: CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void }; plate: Nameplate; lift: THREE.Group; outfit?: string; url: string; fish?: FishingView }>();
+  private remoteViews = new Map<string, { view: CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void }; plate: Nameplate; lift: THREE.Group; outfit?: string; url: string; fish?: FishingView; stink?: StinkFx }>();
+  /** 집안일 소품 (그릇·세탁기·건조대·샤워 물줄기…) */
+  private choreProps: ChoreProps | null = null;
+  private choreAtHome = false;
+  /** 오래 안 씻으면 내 머리 위에 피어오르는 냄새 */
+  private myStink = new StinkFx();
+  private _choreHand = new THREE.Vector3();
   /** 친구 곁의 펫 (친구 id:펫 id) */
   private remotePetViews = new Map<string, { model: ReturnType<typeof buildPet>; species: string; phase: number }>();
   /** 내 코디 (바뀌면 다시 입힌다) */
@@ -857,6 +865,10 @@ export class CityRenderer {
       const holder = this.player as CharacterView & { hold?: { pitch: number } | null };
       if ('hold' in holder) holder.hold = world.fishing && world.location === 'city' ? { pitch: this.fishingView?.armPitch ?? 0.5 } : null;
     }
+    {
+      const cv = this.player as CharacterView & { chore?: { kind: ChoreKind; t: number } | null };
+      if ('chore' in cv) cv.chore = world.choreView;
+    }
     this.player.update(world.player, clock);
     if (world.fishing || this.fishingView?.group.visible) {
       this.fishingView ??= new FishingView(this.city);
@@ -983,6 +995,7 @@ export class CityRenderer {
       for (const s of world.drainSpeech()) this.homeTexts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
     }
     this.syncRemotes(world, clock);
+    this.syncChores(world, clock, loc, view);
     this.syncPets(world, clock, loc);
 
     this.sparks.update(clock.dt);
@@ -1097,6 +1110,56 @@ export class CityRenderer {
   }
 
   /** 코디 창에서 몸(남자·여자)을 바꿨으면 새 모델을 불러와서, 다 불러온 뒤 갈아 끼운다 */
+  /** 오른손 위치 (모델이 있으면) */
+  private handOf(view: CharacterView | undefined): THREE.Vector3 | null {
+    const h = view as (CharacterView & { handWorld?(out: THREE.Vector3): boolean }) | undefined;
+    return h?.handWorld?.(this._choreHand) ? this._choreHand.clone() : null;
+  }
+
+  /** 집안일 소품과 냄새: 집에 있으면 집안 상태·하는 동작대로 그리고, 오래 안 씻은 사람 머리 위엔 냄새 */
+  private syncChores(world: CityWorld, clock: FrameClock, loc: CityLocation, view: CityLocation) {
+    if (this.choreProps) {
+      if (loc === 'home') {
+        const actors: ChoreActor[] = [];
+        const people: { x: number; z: number }[] = [];
+        const p = world.player;
+        const lp = p.lerped(clock.alpha);
+        people.push({ x: lp.x, z: lp.z });
+        const mine = world.choreView;
+        if (mine) actors.push({ ...mine, x: lp.x, z: lp.z, fx: p.fx, fz: p.fz, hand: this.handOf(this.player) });
+        for (const r of world.remotes.values()) {
+          if (r.room !== world.roomKey) continue;
+          const lr = r.fighter.lerped(clock.alpha);
+          people.push({ x: lr.x, z: lr.z });
+          const rv = world.remoteChoreView(r);
+          if (rv) actors.push({ ...rv, x: lr.x, z: lr.z, fx: r.fighter.fx, fz: r.fighter.fz, hand: this.handOf(this.remoteViews.get(r.id)?.view) });
+        }
+        this.choreProps.update(world.shownChores(), actors, people, world.nowMs(), clock.dt, view === 'home');
+        this.choreAtHome = true;
+      } else if (this.choreAtHome) {
+        this.choreProps.silence();
+        this.choreAtHome = false;
+      }
+    }
+    // 냄새: 지금 보고 있는 장면에 붙인다
+    const sc = this.sceneOf(view);
+    const sleeping = !!world.sleepView && world.sleepView.rest > 0;
+    if (this.myStink.sprite.parent !== sc) sc.add(this.myStink.sprite);
+    const p = world.player;
+    const lp = p.lerped(clock.alpha);
+    const showMine = world.dirty && !sleeping && this.playerLift.visible && !world.chore;
+    this.myStink.update(showMine ? new THREE.Vector3(lp.x, this.playerLift.position.y + lp.y + PLATE_Y - 0.1, lp.z) : null, clock.dt);
+    for (const [id, v] of this.remoteViews) {
+      const r = world.remotes.get(id);
+      const show = !!r && r.dirty && r.room === world.roomKey && v.view.root.visible && !r.sleep && !r.chore;
+      if (!show && !v.stink) continue;
+      v.stink ??= new StinkFx();
+      if (v.stink.sprite.parent !== sc) sc.add(v.stink.sprite);
+      const lr = r ? r.fighter.lerped(clock.alpha) : null;
+      v.stink.update(show && lr ? new THREE.Vector3(lr.x, v.lift.position.y + lr.y + PLATE_Y - 0.1, lr.z) : null, clock.dt);
+    }
+  }
+
   private syncBody(world: CityWorld) {
     const want = bodyUrl(world.profile.body);
     if (this.nextPlayer && this.nextPlayer.url !== want) {
@@ -1175,6 +1238,10 @@ export class CityRenderer {
       if ('hold' in holder) holder.hold = fishScene ? { pitch: v.fish?.armPitch ?? 0.5 } : null;
       const rd = world.location === 'park' ? r.ride : null;
       if (rd) v.view.rest = { t: 0.35, sit: { x: 0, z: 0, yaw: 0 }, lie: HOME.bed.lie, seatY: 0.45, sitLeg: 1.45 };
+      {
+        const cv = v.view as CharacterView & { chore?: { kind: ChoreKind; t: number } | null };
+        if ('chore' in cv) cv.chore = world.remoteChoreView(r);
+      }
       v.view.update(f, clock);
       if (fishScene || v.fish?.group.visible) {
         v.fish ??= new FishingView(this.city);
@@ -2785,6 +2852,7 @@ export class CityRenderer {
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe2a8 });
     this.bedLamp = lampMat;
     furnishHome(s, { lampMat, win: { x0: winX0, x1: winX1, z: z0 }, H, eastX: x1 - 0.075, fpOnly: this.fpOnly });
+    this.choreProps = new ChoreProps(s);
     // 소파는 TV 쪽(북쪽 = -z)을 본다. 직접 만든 모델이라 앉고 눕는 자세와 쿠션이 딱 맞는다
     const sofa = buildSofa();
     sofa.position.set(3.4, 0, 3.4);

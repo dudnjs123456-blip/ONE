@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { DASH_FRAMES, GETUP_FRAMES } from '../core/constants';
 import type { Fighter } from '../core/fighter';
 import { isPlantedKick } from '../core/reach';
+import type { ChoreKind } from '../city/chores';
+import { chorePose } from './chorePose';
 import { smooth, type FrameClock } from './clock';
 import { totalFrames, type MoveAnim, type MoveDef } from '../data/moves';
 
@@ -982,6 +984,8 @@ export class Mannequin implements CharacterView {
   private spring = new PoseSpring();
   private heading = new Heading();
   private footLock = new FootLock();
+  /** 집안일 동작 (샤워·설거지·빨래…). t = 시작한 지 프레임 */
+  chore: { kind: ChoreKind; t: number } | null = null;
   private loco = new Locomotion();
   private mainMat!: THREE.MeshStandardMaterial;
 
@@ -1041,6 +1045,8 @@ export class Mannequin implements CharacterView {
     this.loco.update(lp, c.dt, f.state === 'run' ? 1.7 : 0.8);
     let target = poseFor(f, t, c.sub, this.loco);
     if (this.casual && f.state === 'idle') target = { ...target, ...RELAXED };
+    const cp = this.chore ? chorePose(this.chore.kind, this.chore.t) : null;
+    if (cp) target = { ...target, shL: cp.L.sh, elL: cp.L.el, arL: cp.L.ar, shR: cp.R.sh, elR: cp.R.el, arR: cp.R.ar, lean: cp.lean };
     const p = this.spring.step(target, c.dt, attackBoost(f), kicking(f));
     const speed = Math.hypot(this.loco.fwd, this.loco.lat);
     const { yaw, bank } = this.heading.update(Math.atan2(lp.fx, lp.fz), c.dt, f.state === 'attack', speed);

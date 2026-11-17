@@ -79,6 +79,8 @@ interface CityHud {
   /** 덤비는 행인 수 */
   attackers: number;
   fatigue: number;
+  /** 땀·먼지 (샤워하면 0) */
+  dirt: number;
   hungerRate: number;
   care: string | null;
   hunger: number;
@@ -591,6 +593,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         downed: world.downedAt !== null,
         attackers: world.npcs.filter((n) => n.fight > 0).length,
         fatigue: Math.round(profile.life.fatigue),
+        dirt: Math.round(profile.life.dirt ?? 0),
         hunger: Math.round(profile.life.hunger),
         hungerRate: Math.round(world.hungerRate * 10) / 10,
         care: world.careLabel,
@@ -754,7 +757,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
               <span className="ml-3 text-amber-200">{hud.gold.toLocaleString()} G</span>
             </div>
             <HpBar hp={hud.hp} maxHp={hud.maxHp} />
-            <LifeBars fatigue={hud.fatigue} hunger={hud.hunger} hungerRate={hud.hungerRate} />
+            <LifeBars fatigue={hud.fatigue} hunger={hud.hunger} hungerRate={hud.hungerRate} dirt={hud.dirt} />
             {hud.online && <OnlineBadge online={hud.online} />}
           </div>
 
