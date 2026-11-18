@@ -62,12 +62,18 @@ export function allActionVoiceSrcs(body: string | undefined): string[] {
   return Object.values(ACTION_VOICES).flat().map((n) => `/voices/${body}/act/${n}.mp3`);
 }
 
-/** 컷인 그림 (public/portraits/<몸>/<파일>): 숫자 키 대사 때 나오는 원래 캐릭터 그림(화남)을 쓴다 */
 /** 큰기술 컷인이 떠 있는 시간 (ms) */
 export const CUTIN_MS = 1500;
 
+/**
+ * 컷인 그림 (public/portraits/<몸>/<파일>): 숫자 키 대사 때 나오는 원래 캐릭터 그림(default.png)을 바탕으로
+ * 얼굴·옷·그림체는 그대로 두고 자세만 그 기술로 바꿔 그린 공격 그림 (Firefly · Nano Banana, 표정 그림과 같은 방법)
+ */
 export const SKILL_CUTIN: Record<string, { img: string; name: string }> = {
-  skillFly: { img: 'angry.png', name: '은빛 날라차기' },
-  skillTornado: { img: 'angry.png', name: '은빛 회오리 차기' },
-  skillBack: { img: 'angry.png', name: '은빛 뒤돌려차기' },
+  skillFly: { img: 'cutin-fly.webp', name: '은빛 날라차기' },
+  skillTornado: { img: 'cutin-tornado.webp', name: '은빛 회오리 차기' },
+  skillBack: { img: 'cutin-back.webp', name: '은빛 뒤돌려차기' },
 };
+
+/** 공격 그림이 있는 몸 (이 몸은 3D 실시간 대신 그림으로 컷인) */
+export const CUTIN_ART_BODIES = new Set<string>(['smallSilverGirl']);

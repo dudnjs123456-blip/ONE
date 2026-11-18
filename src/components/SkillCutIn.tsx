@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
-import { CUTIN_MS, SKILL_CUTIN } from '@/game/data/actionVoices';
+import { CUTIN_ART_BODIES, CUTIN_MS, SKILL_CUTIN } from '@/game/data/actionVoices';
 
 /** 렌더러가 기술을 쓴 캐릭터만 실시간으로 찍어 담는 그림판 · 그 캐릭터를 찍을 수 있는지 */
 export interface CutInLive {
@@ -22,8 +22,8 @@ interface Shown {
 }
 
 /**
- * 큰기술 컷인: 캐릭터 스킬을 쓰면 왼쪽에서 비스듬한 띠와 함께 그 캐릭터가 실제로 공격하는 모습(3D, 실시간)이
- * 휙 들어왔다 나간다. 같은 곳의 친구가 쓰면 친구 이름을 달고 작게 뜬다. 캐릭터를 찍을 수 없으면 초상화.
+ * 큰기술 컷인: 캐릭터 스킬을 쓰면 왼쪽에서 비스듬한 띠와 함께 그 캐릭터가 그 기술을 쓰는 공격 그림이
+ * 휙 들어왔다 나간다 (그림이 없는 몸은 3D 캐릭터를 실시간으로 찍어서). 같은 곳의 친구가 쓰면 친구 이름을 달고 작게 뜬다.
  */
 export default function SkillCutIn({ world, live }: { world: CityWorld | null; live?: RefObject<CutInLive | null> }) {
   const [shown, setShown] = useState<Shown | null>(null);
@@ -45,7 +45,8 @@ export default function SkillCutIn({ world, live }: { world: CityWorld | null; l
       const def = SKILL_CUTIN[c.kind];
       if (!def) return;
       const name = c.who === 'me' ? world.netName || '나' : (world.remotes.get(c.who)?.name ?? '이웃');
-      const canLive = !!live?.current?.can(c.who);
+      // 공격 그림이 있으면 그림으로, 없으면 3D 캐릭터를 실시간으로 찍는다
+      const canLive = !CUTIN_ART_BODIES.has(c.body) && !!live?.current?.can(c.who);
       setShown({ id: ++n, who: c.who, name, skill: def.name, img: `/portraits/${c.body}/${def.img}`, fallback: `/portraits/${c.body}/angry.png`, live: canLive });
     }, 40);
     return () => window.clearInterval(id);
@@ -98,7 +99,7 @@ export default function SkillCutIn({ world, live }: { world: CityWorld | null; l
         <div className="absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-amber-300 via-amber-100 to-transparent" />
       </div>
       {/* 캐릭터 그림: 띠 밖으로 살짝 튀어나오게 */}
-      <div className="absolute inset-y-0 left-[2%] w-[58%] overflow-hidden" style={{ clipPath: 'polygon(0 0, 100% 0, 90% 100%, 0 100%)' }}>
+      <div className={`absolute inset-y-0 left-[2%] ${shown.live ? 'w-[58%] overflow-hidden' : 'w-[66%]'}`} style={shown.live ? { clipPath: 'polygon(0 0, 100% 0, 90% 100%, 0 100%)' } : undefined}>
         {shown.live ? (
           <div ref={liveBox} className="absolute inset-0" style={{ animation: `cutin-art ${CUTIN_MS}ms linear forwards` }} />
         ) : (
@@ -111,7 +112,7 @@ export default function SkillCutIn({ world, live }: { world: CityWorld | null; l
             if (e.currentTarget.src.endsWith(shown.fallback)) return;
             e.currentTarget.src = shown.fallback;
           }}
-          className="absolute left-0 top-0 h-full w-full select-none object-cover object-top drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]"
+          className="absolute left-0 top-0 h-full w-full select-none object-contain drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]"
           style={{ animation: `cutin-art ${CUTIN_MS}ms linear forwards` }}
         />
         )}

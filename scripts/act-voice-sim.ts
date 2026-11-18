@@ -3,7 +3,8 @@ import { CityWorld } from '../src/game/city/cityWorld';
 import { newProfile } from '../src/game/core/profile';
 import type { PlayerProfile } from '../src/game/core/profile';
 import { MOVES } from '../src/game/data/moves';
-import { moveVoiceKind } from '../src/game/data/actionVoices';
+import { CUTIN_ART_BODIES, SKILL_CUTIN, moveVoiceKind } from '../src/game/data/actionVoices';
+import { existsSync } from 'node:fs';
 
 function check(name: string, ok: boolean, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name} ${detail}`);
@@ -86,4 +87,13 @@ check('kind: character skills shout their own name', moveVoiceKind(MOVES.smallSi
   next = { ...idle(), buttons: [true, false, false, false] } as Inp;
   for (let i = 0; i < 10; i++) A.step();
   check('body: characters without a voice stay silent', heard.length === 0 && A.actOut.length === 0, `(${heard.join()})`);
+}
+
+// 큰기술 컷인: 공격 그림이 있는 몸은 세 기술 그림 파일이 다 있다 (기본 초상화가 아니라 기술마다 다른 그림)
+{
+  for (const body of CUTIN_ART_BODIES) {
+    const imgs = Object.values(SKILL_CUTIN).map((c) => c.img);
+    check(`${body}: 큰기술 컷인 공격 그림이 모두 있다`, imgs.every((f) => existsSync(`public/portraits/${body}/${f}`)), `(${imgs.join(', ')})`);
+    check(`${body}: 기술마다 다른 그림`, new Set(imgs).size === imgs.length);
+  }
 }
