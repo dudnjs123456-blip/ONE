@@ -1419,8 +1419,6 @@ export class ThemeParkScene {
 
   /** 놀이기구를 지금 시각(공유)에 맞춰 움직인다 */
   update(nowMs: number, night: number) {
-    // 속도선은 탑승 카메라가 켤 때만 (내리면 감춘다)
-    if (this.speedLines) this.speedLines.visible = false;
     for (const { m, k } of this.nightMats) m.emissiveIntensity = (0.15 + night) * k;
     // 롤러코스터
     const { s } = coasterAt(coasterTime(nowMs));
@@ -1572,63 +1570,6 @@ export class ThemeParkScene {
     cam.near = 0.05;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
-    this.updateSpeedLines(cam, v, dt);
-  }
-
-  // ───────────── 속도선: 빠를 때 화면 가장자리로 스쳐 지나가는 흰 줄 ─────────────
-
-  private speedLines: THREE.LineSegments | null = null;
-  private speedZ: Float32Array | null = null;
-  private static readonly SPEED_LINES = 90;
-
-  private updateSpeedLines(cam: THREE.Camera, v: number, dt: number) {
-    const N = ThemeParkScene.SPEED_LINES;
-    if (!this.speedLines) {
-      const pos = new Float32Array(N * 6);
-      this.speedZ = new Float32Array(N);
-      for (let i = 0; i < N; i++) {
-        // 시선 가운데는 비우고 가장자리 둘레에 (카메라 기준: -z 가 앞)
-        const a = (i / N) * Math.PI * 2 + Math.sin(i * 12.9898) * 0.3;
-        const r = 1.9 + ((i * 7) % 11) * 0.25;
-        pos[i * 6] = pos[i * 6 + 3] = Math.cos(a) * r;
-        pos[i * 6 + 1] = pos[i * 6 + 4] = Math.sin(a) * r * 0.7;
-        this.speedZ[i] = -1 - ((i * 37) % 16);
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 6), 3));
-      // 더하기 섞기: 어두운 색일수록 투명 → 먼 줄은 흐리게, 가까운 줄은 밝게
-      const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false });
-      this.speedLines = new THREE.LineSegments(geo, mat);
-      this.speedLines.frustumCulled = false;
-      this.speedLines.renderOrder = 999;
-      this.scene.add(this.speedLines);
-    }
-    const lines = this.speedLines;
-    const zs = this.speedZ!;
-    const mat = lines.material as THREE.LineBasicMaterial;
-    // 시속 25km 쯤부터 보이기 시작해 빠를수록 진하고 길게
-    const show = Math.max(0, Math.min(1, (v - 7) / 18));
-    mat.opacity = show * 0.8;
-    lines.visible = show > 0.01;
-    if (!lines.visible) return;
-    lines.position.copy(cam.position);
-    lines.quaternion.copy(cam.quaternion);
-    const pos = (lines.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
-    const col = (lines.geometry.getAttribute('color') as THREE.BufferAttribute).array as Float32Array;
-    const len = 0.5 + v * 0.09;
-    for (let i = 0; i < N; i++) {
-      zs[i] += v * 1.2 * dt;
-      if (zs[i] > -0.3) zs[i] -= 16;
-      pos[i * 6 + 2] = zs[i];
-      pos[i * 6 + 5] = zs[i] - len;
-      // 가까울수록 밝고, 꼬리 끝은 어둡게
-      const near = Math.max(0, 1 + zs[i] / 16);
-      col[i * 6] = col[i * 6 + 1] = col[i * 6 + 2] = near;
-      col[i * 6 + 3] = col[i * 6 + 4] = col[i * 6 + 5] = near * 0.15;
-    }
-    lines.geometry.getAttribute('position').needsUpdate = true;
-    lines.geometry.getAttribute('color').needsUpdate = true;
   }
 
   /** 오른쪽·위·앞 축으로 좌석 행렬 (친구 모습을 좌석에 앉힐 때) */
