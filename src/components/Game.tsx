@@ -378,6 +378,13 @@ export default function Game() {
             </table>
           </section>
         </div>
+
+        <footer className="tg-muted mt-10 text-center text-xs">
+          일부 NPC 대답은 AI가 만든 답변이에요 ·{' '}
+          <a href="/privacy" target="_blank" rel="noopener" className="underline hover:text-white">
+            개인정보 처리방침
+          </a>
+        </footer>
       </div>
     </main>
   );

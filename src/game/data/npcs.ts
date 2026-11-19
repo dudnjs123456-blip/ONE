@@ -192,4 +192,6 @@ export interface NpcReply {
   gift: boolean;
   /** API 키가 없어 미리 써 둔 대사로 답했다 */
   offline?: boolean;
+  /** 화면에 띄울 안내 (예: 요청 횟수 제한) */
+  notice?: string;
 }

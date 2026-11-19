@@ -98,6 +98,14 @@ export default function LoginScreen({ onLogin }: { onLogin: (acc: Account) => vo
             </button>
           </form>
         </div>
+        <p className="tg-muted mt-4 text-center text-xs leading-relaxed">
+          {tab === 'signup' && <>가입하면 아이디·비밀번호·게임 기록을 저장해요. </>}
+          일부 NPC 대답은 AI가 만든 답변이에요.
+          <br />
+          <a href="/privacy" target="_blank" rel="noopener" className="underline">
+            개인정보 처리방침
+          </a>
+        </p>
       </div>
     </main>
   );

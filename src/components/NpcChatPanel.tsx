@@ -8,6 +8,15 @@ import { EMOTION_FACE, TALK_NPCS, type NpcEmotion, type PlayerMood } from '@/gam
 import { BODY_TYPES } from '@/game/render/looks';
 import { PLAYER_PORTRAITS } from '@/game/data/portraits';
 
+/** AI 가 만든 대사 옆에 붙는 작은 표시 */
+function AiBadge() {
+  return (
+    <span title="AI가 만든 대사예요" className="mr-1.5 inline-block rounded border border-violet-300/50 bg-violet-500/25 px-1 align-middle text-[10px] font-bold leading-4 text-violet-100">
+      AI 생성
+    </span>
+  );
+}
+
 /** 한 글자씩 찍히는 속도 (ms) */
 const TYPE_MS = 28;
 
@@ -38,6 +47,9 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
   const [note, setNote] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [affinity, setAffinity] = useState(() => bondOf(world, npcId).affinity);
+  // AI 가 만든 대사인지 (첫 인사·오프라인 대사는 미리 써 둔 글이라 아니다)
+  const [aiLines, setAiLines] = useState<Set<number>>(() => new Set());
+  const [shownAi, setShownAi] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -77,11 +89,15 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
     const next: ChatLine[] = [...lines, { role: 'user', content: msg }];
     setLines(next);
     setShown({ who: 'me', text: msg });
+    setShownAi(false);
     setBusy(true);
     const r = await ask(world, npcId, next);
-    const n = applyReply(world, npcId, r);
+    const n = applyReply(world, npcId, r) ?? r.notice ?? null;
+    const ai = !r.offline;
+    if (ai) setAiLines((s) => new Set(s).add(next.length));
     setLines((l) => [...l, { role: 'assistant', content: r.reply }]);
     setShown({ who: 'npc', text: r.reply });
+    setShownAi(ai);
     setEmotion(r.emotion);
     setMood(r.playerMood ?? '기본');
     setOffline(!!r.offline);
@@ -131,6 +147,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
             {lines.map((l, i) => (
               <div key={i}>
                 <span className={`mr-2 font-bold ${l.role === 'user' ? 'text-sky-300' : 'text-amber-200'}`}>{l.role === 'user' ? myName : npc.callName}</span>
+                {aiLines.has(i) && <AiBadge />}
                 <span className="text-white/85">{l.content}</span>
               </div>
             ))}
@@ -152,6 +169,7 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
             {!meTalking && <span className="text-lg leading-none">{npcFace}</span>}
             {meTalking ? myName : npc.title}
             {!meTalking && <span className="ml-1 text-xs font-normal text-pink-200" title="호감도">♥ {affinity}</span>}
+            {!meTalking && shownAi && <AiBadge />}
           </div>
 
           {/* 대사: 한 글자씩 찍히고, 누르면 바로 끝까지 */}
@@ -202,6 +220,13 @@ export default function NpcChatPanel({ world, npcId, onClose }: { world: CityWor
             ))}
             {offline && <span className="self-center text-[11px] text-amber-300/80">오프라인 대사</span>}
           </div>
+          {/* AI 이용 안내 (AI 기본법 제31조) · 개인정보 입력 주의 (입력한 글은 해외 AI 회사로 전송된다) */}
+          <p className="px-4 pb-2 text-[11px] leading-snug text-white/45">
+            ⓘ {npc.callName}의 대답은 AI가 만든 답변이에요. 입력한 말은 AI 회사(Anthropic, 미국)로 보내져요 — 이름·연락처 같은 개인정보는 입력하지 마세요.{' '}
+            <a href="/privacy" target="_blank" rel="noopener" className="underline hover:text-white/70">
+              개인정보 처리방침
+            </a>
+          </p>
           <form
             className="flex gap-2 border-t border-white/10 p-3"
             onSubmit={(e) => {

@@ -1,16 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NPC_EMOTIONS, PLAYER_MOODS, TALK_NPCS, type NpcContext, type NpcReply } from '@/game/data/npcs';
+import { DATA_NOTE, cleanContext, clientIp, overLimit, whoIs } from './guard';
 
 /**
  * NPC 대화 (서버). API 키는 서버에만 두고 브라우저엔 대사만 돌려준다.
  * - 성격(persona)은 고정 system 프롬프트 → 캐시된다
  * - 그때그때의 게임 상황은 대화 끝에 system 메시지로 덧붙인다
  * - 출력은 JSON 형식으로 고정하고, 서버에서 한 번 더 범위를 검사한다
+ * - 로그인 확인 · 요청 횟수 제한 · 게임 상황 값 검사는 guard.ts
  */
 
 const MODEL = process.env.NPC_MODEL || 'claude-opus-5-5';
 const MAX_TURNS = 20;
 const MAX_CHARS = 200;
+/** 요청 본문 최대 크기 (대화 20줄 × 200자 + 상황이면 충분) */
+const MAX_BODY = 32_000;
+/** 대답은 JSON 한 덩어리(대사 200자 안팎)라 이 정도면 넉넉하다 */
+const MAX_TOKENS = 1000;
 
 const SCHEMA = {
   type: 'object',
@@ -36,9 +42,20 @@ let client: Anthropic | null = null;
 
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: 'no_key' }, { status: 503 });
+
+  // 로그인한 사람만 (서버에 Supabase 가 없는 오프라인 개발 환경은 IP 로만 센다)
+  const user = await whoIs(req);
+  if (user === null) return Response.json({ error: 'login_required' }, { status: 401 });
+  const wait = await overLimit(user ?? `ip:${clientIp(req)}`);
+  if (wait) return Response.json({ error: 'too_many' }, { status: 429, headers: { 'Retry-After': String(wait) } });
+
   let body: Body;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (raw.length > MAX_BODY) return Response.json({ error: 'too_large' }, { status: 413 });
+    body = JSON.parse(raw);
+    // 브라우저가 보낸 게임 상황은 그대로 믿지 않고 범위·길이를 맞춘다
+    body.context = cleanContext(body.context);
   } catch {
     return Response.json({ error: 'bad_request' }, { status: 400 });
   }
@@ -60,7 +77,7 @@ export async function POST(req: Request) {
   try {
     const res = await client.beta.messages.create({
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: MAX_TOKENS,
       ...fallback,
       system: [{ type: 'text', text: npc.persona, cache_control: { type: 'ephemeral' } }],
       messages: [...history, { role: 'system', content: npc.id === 'mom' ? describeMom(body.context) : describe(body.context) }],
@@ -83,6 +100,7 @@ export async function POST(req: Request) {
 function describeMom(c: NpcContext): string {
   const child = c.child === '아들' ? '아들' : '딸';
   return [
+    DATA_NOTE,
     '[지금 상황]',
     `- ${c.day}일째 ${c.clock} (${c.partOfDay})`,
     `- 자식은 ${child}. 지금 집에서 너(엄마)에게 말을 걸었다.`,
@@ -103,6 +121,7 @@ function describeMom(c: NpcContext): string {
 /** 게임 상황 → AI 가 읽을 글 (박 반장) */
 function describe(c: NpcContext): string {
   const lines = [
+    DATA_NOTE,
     '[지금 상황]',
     `- ${c.day}일째 ${c.clock} (${c.partOfDay})`,
     ...(c.doing ? [`- 너(박 반장)는 지금 ${String(c.doing).slice(0, 60)}`] : []),

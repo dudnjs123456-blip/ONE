@@ -3,6 +3,7 @@ import { TALK_NPCS, type NpcBond, type NpcContext, type NpcReply } from '../data
 import type { CityWorld } from './cityWorld';
 import { FLOWER_GIFTS } from '../data/items';
 import { MALE_BODIES } from '../data/fashion';
+import { getSupabase } from '../net/supabase';
 
 /** 기억은 최근 것만 남긴다 */
 const MAX_MEMORIES = 15;
@@ -107,12 +108,18 @@ export function greeting(world: CityWorld, npcId: string): string {
 export async function ask(world: CityWorld, npcId: string, lines: ChatLine[]): Promise<NpcReply> {
   const context = buildContext(world, npcId);
   try {
+    // 서버는 로그인한 사람만 AI 를 부르게 한다 → 로그인 토큰을 같이 보낸다
+    const token = (await getSupabase()?.auth.getSession())?.data.session?.access_token;
     const res = await fetch('/api/npc-chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ npcId, messages: lines, context }),
     });
     if (res.ok) return (await res.json()) as NpcReply;
+    if (res.status === 429) {
+      const r = offlineReply(npcId, lines[lines.length - 1]?.content ?? '', context);
+      return { ...r, notice: 'AI 대화를 너무 자주 했어요. 잠시 후 다시 AI가 대답해요 (1분에 10번까지)' };
+    }
   } catch {
     // 네트워크 오류 → 오프라인 대사
   }
