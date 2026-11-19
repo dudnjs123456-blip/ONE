@@ -225,3 +225,38 @@ body {
   .tg-cloud { animation: none; translate: var(--x, 0) 0; }
   .tg-sparkle { animation: none; }
 }
+
+/* 다른 차원 접속 연출: 화면이 깨지며 빛 속으로 빨려 들어간다 */
+.dim-warp {
+  background: radial-gradient(circle at 50% 50%, rgba(160, 120, 255, 0.15) 0%, rgba(40, 20, 90, 0.92) 55%, #05030f 100%);
+  animation: dim-warp 1.6s ease-in forwards;
+}
+.dim-warp::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(120, 240, 255, 0.12) 0 2px, transparent 2px 6px);
+  animation: dim-scan 0.18s steps(3) infinite;
+}
+@keyframes dim-warp {
+  0% { opacity: 1; transform: scale(1); filter: hue-rotate(0deg); }
+  60% { opacity: 1; transform: scale(1.04); filter: hue-rotate(60deg); }
+  100% { opacity: 0; transform: scale(1.4); filter: hue-rotate(120deg); }
+}
+@keyframes dim-scan {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(6px); }
+}
+
+/* 집 컴퓨터: 접속 버튼을 누르면 화면이 깨진다 */
+.dim-glitch {
+  animation: dim-glitch 0.9s steps(6) forwards;
+}
+@keyframes dim-glitch {
+  0% { transform: translate(0); filter: none; }
+  20% { transform: translate(-4px, 2px) skewX(4deg); filter: hue-rotate(90deg) saturate(2); }
+  40% { transform: translate(5px, -3px) skewX(-6deg); filter: invert(0.2) hue-rotate(180deg); }
+  60% { transform: translate(-3px, 4px) scale(1.04); filter: brightness(1.6) hue-rotate(260deg); }
+  80% { transform: scale(1.15); filter: brightness(2.4) blur(2px); opacity: 0.7; }
+  100% { transform: scale(1.4); filter: brightness(4) blur(6px); opacity: 0; }
+}

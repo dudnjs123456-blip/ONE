@@ -18,13 +18,23 @@ import { startBgm, stopBgm } from '@/game/render/bgm';
 import { unlockAudioOnInput } from '@/game/render/sfx';
 import InventoryPanel from './InventoryPanel';
 import { attachZoomControls } from './zoomControls';
+import { DimensionLink } from '@/game/net/dimension';
+import type { Account } from '@/game/net/auth';
 
-export default function FieldView({ profile, onExit }: { profile: PlayerProfile; onExit: () => void }) {
+/** 접속 연출 시간 (ms) */
+const WARP_MS = 1600;
+
+/**
+ * 다른 차원: 서울 집 컴퓨터로 접속하는 사냥터. 로그인했으면 같은 차원에 들어온 사람들과 같은 몬스터를 본다.
+ * 로그아웃하면 서울 집 컴퓨터 앞으로 돌아간다.
+ */
+export default function FieldView({ profile, account = null, onExit }: { profile: PlayerProfile; account?: Account | null; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<FieldWorld | null>(null);
   const [hud, setHud] = useState<FieldHudState | null>(null);
   const [paused, setPaused] = useState(false);
   const [inventory, setInventory] = useState(false);
+  const [warp, setWarp] = useState(true);
   // 키보드와 화면 터치 버튼이 같은 입력을 쓴다
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
@@ -38,8 +48,14 @@ export default function FieldView({ profile, onExit }: { profile: PlayerProfile;
     const unlock = unlockAudioOnInput();
     startBgm('field');
 
-    const world = new FieldWorld(new FieldKeyboardController(kb, P1_KEYS, 0), new AutoHuntController(), profile, Date.now() & 0xffff);
+    const world = new FieldWorld(new FieldKeyboardController(kb, P1_KEYS, 0), new AutoHuntController(), profile, Date.now() & 0xffff, !!account);
     worldRef.current = world;
+    // 로그인했으면 같은 차원에 접속 (서울 동네 접속은 서울 화면을 나오면서 끊겨, 서울에선 내가 사라진다)
+    const link = account ? new DimensionLink(world, account) : null;
+    link?.start();
+    profile.dimension = { visits: (profile.dimension?.visits ?? 0) + 1 };
+    saveProfile(profile);
+    const warpTimer = window.setTimeout(() => setWarp(false), WARP_MS);
 
     const renderer = new FieldRenderer(canvas);
     const detachZoom = attachZoomControls(renderer, 0.2, 2.2);
@@ -75,6 +91,7 @@ export default function FieldView({ profile, onExit }: { profile: PlayerProfile;
       }
       if (steps === 5) acc = 0;
 
+      link?.tick(now);
       renderer.sync(world, makeClock(world.frame, acc / FRAME_MS, world.hitstop > 0, dt));
       const h = world.hud();
       const key = JSON.stringify(h);
@@ -88,6 +105,8 @@ export default function FieldView({ profile, onExit }: { profile: PlayerProfile;
     return () => {
       cancelAnimationFrame(raf);
       window.clearInterval(autosave);
+      window.clearTimeout(warpTimer);
+      link?.stop();
       saveProfile(profile);
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
@@ -99,7 +118,7 @@ export default function FieldView({ profile, onExit }: { profile: PlayerProfile;
       renderer.dispose();
       worldRef.current = null;
     };
-  }, [profile, kb]);
+  }, [profile, kb, account]);
 
   // 패드로 일시정지 메뉴: A 계속, B 메인 메뉴 (뜬 직후 0.7초는 무시)
   useEffect(() => {
@@ -126,11 +145,24 @@ export default function FieldView({ profile, onExit }: { profile: PlayerProfile;
         <button onClick={() => setPaused(true)} className="rounded bg-black/50 px-3 py-1.5 text-white/80 hover:bg-black/70">
           메뉴{!touch && ' (Esc)'}
         </button>
+        <button onClick={onExit} className="rounded bg-cyan-500/30 px-3 py-1.5 font-bold text-cyan-100 hover:bg-cyan-500/50">
+          🖥️ 로그아웃
+        </button>
       </div>
 
       <RotateHint touch={touch} />
 
       {inventory && <InventoryPanel profile={profile} onClose={() => setInventory(false)} />}
+
+      {/* 접속 연출: 모니터 속으로 빨려 들어간다 */}
+      {warp && (
+        <div className="dim-warp pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="text-center font-mono text-cyan-100">
+            <div className="text-2xl font-black tracking-[0.3em]">CONNECTING</div>
+            <div className="mt-2 text-sm text-white/70">차원 접속 중…</div>
+          </div>
+        </div>
+      )}
 
       {paused && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
@@ -141,7 +173,7 @@ export default function FieldView({ profile, onExit }: { profile: PlayerProfile;
             </button>
             <VibrationToggle />
             <button onClick={onExit} className="rounded bg-white/10 py-2 hover:bg-white/20">
-              메인 메뉴
+              로그아웃 (서울 집으로)
             </button>
           </div>
         </div>

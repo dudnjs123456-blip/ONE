@@ -163,7 +163,7 @@ export const HOME = {
   pois: [
     { id: 'exit', kind: 'home', label: '현관 (밖으로 나가기)', x: -4.3, z: 2.5, radius: 1.0 },
     { id: 'bed', kind: 'home', label: '침대', x: 2.45, z: -1.4, radius: 1.0 },
-    { id: 'pc', kind: 'home', label: '컴퓨터', x: -0.9, z: -2.8, radius: 1.0 },
+    { id: 'pc', kind: 'home', label: '컴퓨터 (다른 차원 접속)', x: -0.9, z: -2.8, radius: 1.0 },
     { id: 'fridge', kind: 'home', label: '냉장고', x: -3.8, z: 0.0, radius: 1.0 },
     { id: 'sofa', kind: 'home', label: '소파 (눕기)', x: 3.4, z: 2.4, radius: 1.0 },
     { id: 'tv', kind: 'home', label: 'TV (유튜브 보기)', x: 3.85, z: 0.6, radius: 0.8 },
@@ -746,6 +746,8 @@ export class CityWorld {
   busRequest = false;
   /** PC방에서 E → 게임 고르기 창 */
   pcRoomRequest = false;
+  /** 내 집 컴퓨터를 켰다 (다른 차원 접속 화면) */
+  homePcRequest = false;
   /** 펫샵 창을 열어 달라 (UI 가 읽고 끈다) */
   petShopRequest = false;
   /** 펫샵 놀이터에서 고른 아이 (UI 가 분양 창을 연다) */
@@ -3596,7 +3598,11 @@ export class CityWorld {
       bus: '버스 — 노선 준비 중',
       park: '근린공원 — 이벤트 준비 중',
     };
-    if (poi.id === 'pc') this.say('컴퓨터 — 오늘의 동네 소식 (준비 중)');
+    if (poi.id === 'pc') {
+      if (this.homeOwner) this.say('🖥️ 친구 컴퓨터는 함부로 켜지 않는 게 좋겠다');
+      else if (this.job) this.say('🖥️ 근무 중에는 컴퓨터를 할 수 없어요');
+      else this.homePcRequest = true;
+    }
     else if (poi.id === 'fridge') this.say(this.eatFromFridge() ?? '냉장고가 텅 비었다… 편의점에 가볼까');
     else this.say(soon[poi.kind] ?? `${poi.label} (준비 중)`);
   }

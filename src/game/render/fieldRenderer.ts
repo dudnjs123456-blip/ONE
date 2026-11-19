@@ -6,7 +6,7 @@ import type { Fighter } from '../core/fighter';
 import { FIELD_SPAWNS } from '../data/monsters';
 import { smooth, type FrameClock } from './clock';
 import { FloatingTexts, Nameplate, SparkSystem } from './effects';
-import { playerLook } from './looks';
+import { playerLook, type BodyType } from './looks';
 import { wornList } from '../data/fashion';
 import type { Appearance } from './mannequin';
 import { createCharacter } from './vrmCharacter';
@@ -24,7 +24,7 @@ interface Actor {
   height: number;
 }
 
-/** 필드 렌더러: 쿼터뷰 추적 카메라, 풀밭/나무/마을, 머리 위 HP, 데미지 숫자 */
+/** 다른 차원(필드) 렌더러: 쿼터뷰 추적 카메라, 보랏빛 들판/수정/귀환 포탈, 머리 위 HP, 데미지 숫자 */
 export class FieldRenderer {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -37,6 +37,7 @@ export class FieldRenderer {
   private camPos = new THREE.Vector3();
   private shake = 0;
   private initialized = false;
+  private portal: THREE.Group | null = null;
 
   /** 카메라 거리 배율 (1 = 기본 쿼터뷰, 작을수록 가까이) */
   private camOffset: THREE.Vector3;
@@ -51,12 +52,12 @@ export class FieldRenderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    const sky = 0x9cc9ec;
+    const sky = 0x3a2a63;
     this.scene.background = new THREE.Color(sky);
-    this.scene.fog = new THREE.Fog(sky, 30, 75);
+    this.scene.fog = new THREE.Fog(sky, 26, 70);
 
-    this.scene.add(new THREE.HemisphereLight(0xdff1ff, 0x4a6b3a, 1.1));
-    this.sun = new THREE.DirectionalLight(0xfff2d6, 2.4);
+    this.scene.add(new THREE.HemisphereLight(0xd9c8ff, 0x2c3d4a, 1.25));
+    this.sun = new THREE.DirectionalLight(0xe6dcff, 2.1);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
@@ -114,6 +115,12 @@ export class FieldRenderer {
       this.targetRing.rotation.z = clock.t * 0.03;
     }
 
+    if (this.portal) {
+      this.portal.rotation.y = clock.t * 0.01;
+      const ring = this.portal.children[0];
+      ring.scale.setScalar(1 + Math.sin(clock.t * 0.05) * 0.04);
+    }
+
     this.updateCamera(world.player, clock);
     this.renderer.render(this.scene, this.camera);
   }
@@ -137,7 +144,8 @@ export class FieldRenderer {
   // ───────────────────────── 내부 ─────────────────────────
 
   private syncActors(world: FieldWorld, clock: FrameClock) {
-    const present = new Set<Fighter>([world.player, ...world.monsters.map((m) => m.fighter)]);
+    const hunters = [...world.hunters.values()].filter((h) => h.target);
+    const present = new Set<Fighter>([world.player, ...world.monsters.map((m) => m.fighter), ...hunters.map((h) => h.fighter)]);
     for (const [f, a] of this.actors) {
       if (present.has(f)) continue;
       this.scene.remove(a.mannequin.root, a.plate.sprite);
@@ -164,9 +172,19 @@ export class FieldRenderer {
     const p = world.player;
     const pa = ensure(p, playerLook(wornList(world.profile.wardrobe), world.profile.body), 1, false);
     pa.mannequin.update(p, clock);
-    pa.plate.draw(`Lv.${world.level} PLAYER`, p.hp, p.maxHp);
+    pa.plate.draw(`Lv.${world.level} 나`, p.hp, p.maxHp);
     const pp = p.lerped(clock.alpha);
     pa.plate.sprite.position.set(pp.x, pp.y + pa.height, pp.z);
+
+    // 같은 차원에 있는 다른 사람 (그 사람이 입은 옷 그대로)
+    for (const h of hunters) {
+      const f = h.fighter;
+      const a = ensure(f, playerLook(h.outfit, h.body as BodyType | undefined), 1, false);
+      a.mannequin.update(f, clock);
+      a.plate.draw(`Lv.${h.level} ${h.name}`, f.hp, f.maxHp);
+      const fp = f.lerped(clock.alpha);
+      a.plate.sprite.position.set(fp.x, fp.y + a.height, fp.z);
+    }
 
     for (const m of world.monsters) {
       const f = m.fighter;
@@ -209,7 +227,7 @@ export class FieldRenderer {
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(160, 160),
-      new THREE.MeshStandardMaterial({ color: 0x5f9446, roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: 0x2f3f4e, roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -218,44 +236,54 @@ export class FieldRenderer {
     // 사냥터 영역 표시 (조금 밝은 풀)
     const field = new THREE.Mesh(
       new THREE.PlaneGeometry(FIELD_HALF * 2, FIELD_HALF * 2),
-      new THREE.MeshStandardMaterial({ color: 0x6ea851, roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: 0x3e5a5c, roughness: 1 }),
     );
     field.rotation.x = -Math.PI / 2;
     field.position.y = 0.005;
     field.receiveShadow = true;
     s.add(field);
 
-    // 마을 광장
+    // 접속 지점 (귀환 포탈이 서 있는 바닥)
     const plaza = new THREE.Mesh(
       new THREE.CircleGeometry(3.6, 48),
-      new THREE.MeshStandardMaterial({ color: 0xb8a98a, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: 0x6d6a8c, roughness: 0.8 }),
     );
     plaza.rotation.x = -Math.PI / 2;
     plaza.position.y = 0.01;
     plaza.receiveShadow = true;
     s.add(plaza);
 
-    const wall = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.9 });
-    const roof = new THREE.MeshStandardMaterial({ color: 0xb4513b, roughness: 0.8 });
-    for (const [x, z, rot] of [[-4.6, -3.2, 0.4], [4.4, -3.6, -0.5], [0, -5.4, 0]] as const) {
-      const house = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(2, 1.6, 1.8), wall);
-      body.position.y = 0.8;
-      const top = new THREE.Mesh(new THREE.ConeGeometry(1.7, 1.1, 4), roof);
-      top.position.y = 2.15;
-      top.rotation.y = Math.PI / 4;
-      for (const m of [body, top]) {
-        m.castShadow = true;
-        m.receiveShadow = true;
-        house.add(m);
-      }
-      house.position.set(x, 0, z);
-      house.rotation.y = rot;
-      s.add(house);
+    // 귀환 포탈: 여기로 들어왔고, 로그아웃하면 여기서 서울 집 컴퓨터 앞으로 돌아간다
+    const portal = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(1.3, 0.12, 16, 64),
+      new THREE.MeshStandardMaterial({ color: 0x7ef3ff, emissive: 0x38d8ff, emissiveIntensity: 2.2, roughness: 0.3 }),
+    );
+    ring.position.y = 1.6;
+    const veil = new THREE.Mesh(
+      new THREE.CircleGeometry(1.2, 48),
+      new THREE.MeshBasicMaterial({ color: 0x9a7bff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    veil.position.y = 1.6;
+    portal.add(ring, veil);
+    portal.position.set(0, 0, -2.6);
+    const glow = new THREE.PointLight(0x6fdcff, 6, 9, 2);
+    glow.position.set(0, 1.6, -2.4);
+    s.add(portal, glow);
+    this.portal = portal;
+
+    // 떠 있는 차원 수정
+    const crystalMat = new THREE.MeshStandardMaterial({ color: 0xb48cff, emissive: 0x6a3cff, emissiveIntensity: 0.9, roughness: 0.25, metalness: 0.1 });
+    for (const [x, z, h] of [[-4.6, -3.4, 1.6], [4.4, -3.8, 1.9], [-3.8, 3.6, 1.2], [4.2, 3.2, 1.4]] as const) {
+      const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), crystalMat);
+      c.scale.set(0.8, h, 0.8);
+      c.position.set(x, h * 0.6, z);
+      c.castShadow = true;
+      s.add(c);
     }
 
     // 경계 울타리
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x7a5534, roughness: 0.9 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x4b4566, roughness: 0.9 });
     const postGeo = new THREE.BoxGeometry(0.15, 0.9, 0.15);
     const posts: THREE.Vector3[] = [];
     for (let i = -FIELD_HALF; i <= FIELD_HALF; i += 2) {
@@ -281,12 +309,12 @@ export class FieldRenderer {
     }
     const trunk = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(0.15, 0.2, 1.2, 6),
-      new THREE.MeshStandardMaterial({ color: 0x6b4a2b }),
+      new THREE.MeshStandardMaterial({ color: 0x3b2f46 }),
       trees.length,
     );
     const leaves = new THREE.InstancedMesh(
       new THREE.ConeGeometry(1.1, 2.6, 7),
-      new THREE.MeshStandardMaterial({ color: 0x2f6b3a, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: 0x4a2f7a, roughness: 0.9, emissive: 0x1a0f33 }),
       trees.length,
     );
     const q = new THREE.Quaternion();
@@ -300,7 +328,7 @@ export class FieldRenderer {
 
     // 바위
     const rockGeo = new THREE.DodecahedronGeometry(0.5, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x8a8d91, roughness: 1 });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x5c5a70, roughness: 1 });
     for (let i = 0; i < 30; i++) {
       const x = (rng() - 0.5) * FIELD_HALF * 2;
       const z = (rng() - 0.5) * FIELD_HALF * 2;

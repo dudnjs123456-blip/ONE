@@ -53,17 +53,57 @@ if (w.profile.kills === 0) process.exitCode = 1;
   if (!ok) process.exitCode = 1;
 }
 
-// 보스 권장 레벨에 닿으면 필드 기록에 도전 안내가 뜬다 (Lv.3 → 고블린 킹)
+// 같은 차원 두 사람: 먼저 들어온 A 가 몬스터를 계산하고, B 는 받은 장면을 따른다.
+// B 의 타격은 A 에게, 몬스터가 B 를 때린 건 B 에게, 같이 잡은 몬스터는 둘 다 보상을 받는다. A 가 나가면 B 가 이어서 계산한다.
 {
-  const prof = newProfile();
-  const w3 = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), prof);
-  let notice = '';
-  const seen = new Set<number>();
-  for (let f = 0; f < 6 * 3600 && !notice; f++) {
-    w3.step();
-    for (const l of w3.log) if (!seen.has(l.id)) { seen.add(l.id); if (l.text.includes('고블린 킹')) notice = l.text; }
+  const mk = (id: string, at: number) => {
+    const w = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile(), at, true);
+    w.netId = id;
+    w.joinedAt = at;
+    return w;
+  };
+  const A = mk('a', 100);
+  const B = mk('b', 200);
+  A.upsertHunter('b', 'B', 200);
+  B.upsertHunter('a', 'A', 100);
+  A.netReady = B.netReady = true;
+  let strikes = 0, hits = 0, kills = 0, bKillMsgs = 0;
+  for (let f = 0; f < 4 * 3600; f++) {
+    A.step();
+    B.step();
+    A.applyHunterState('b', B.netState());
+    B.applyHunterState('a', A.netState());
+    if (f % 6 === 0) B.applyMonsters(A.netMonsters());
+    for (const h of A.strikeOut.splice(0)) if (h.to === 'b') { strikes++; B.receiveStrike(h); }
+    for (const h of B.hitOut.splice(0)) if (h.to === 'a') { hits++; A.receiveHunterHit('b', h); }
+    for (const k of A.killOut.splice(0)) { kills++; if (k.who.includes('b')) bKillMsgs++; B.receiveKill(k); }
+    B.killOut.length = 0;
+    A.hitOut.length = 0;
   }
-  const ok = !!notice && w3.level >= 3;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  boss-ready notice at Lv.3 (${notice || '없음'})`);
+  B.applyMonsters(A.netMonsters());
+  const sameIds = A.monsters.map((m) => m.id).sort().join(',') === B.monsters.map((m) => m.id).sort().join(',');
+  const ok = A.isHost && !B.isHost && sameIds && hits > 0 && strikes > 0 && B.profile.kills > 0 && A.profile.kills > 0 && bKillMsgs > 0;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  shared dimension (A 처치 ${A.profile.kills}, B 처치 ${B.profile.kills}, B→A 타격 ${hits}, 몬스터→B ${strikes}, 처치 알림 ${kills}, 같은 몬스터 ${sameIds})`);
+  if (!ok) process.exitCode = 1;
+
+  // A 가 나갔다: B 가 받은 장면에서 이어서 몬스터를 계산한다
+  B.removeHunter('a');
+  const before = B.profile.kills;
+  for (let f = 0; f < 3 * 3600; f++) B.step();
+  const ok2 = B.isHost && B.profile.kills > before && B.monsters.length > 0;
+  console.log(`${ok2 ? 'PASS' : 'FAIL'}  host hand-over (B 가 이어서 계산, 처치 ${before} → ${B.profile.kills}, 몬스터 ${B.monsters.length})`);
+  if (!ok2) process.exitCode = 1;
+}
+
+// 접속했는데 아직 누가 있는지 모르면 몬스터를 만들지 않는다 (먼저 온 사람 장면을 받아야 하므로)
+{
+  const w = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile(), 5, true);
+  w.netId = 'z';
+  for (let f = 0; f < 120; f++) w.step();
+  const waited = w.monsters.length === 0;
+  w.netReady = true;
+  for (let f = 0; f < 5; f++) w.step();
+  const ok = waited && w.monsters.length > 0;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  wait for presence before spawning (기다리는 동안 ${waited ? '0' : '있음'}, 확인 후 ${w.monsters.length})`);
   if (!ok) process.exitCode = 1;
 }

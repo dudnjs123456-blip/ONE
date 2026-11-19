@@ -12,18 +12,15 @@ import KeySettings from './KeySettings';
 import TouchGuide from './TouchGuide';
 import { notationArrows } from '@/game/data/notation';
 import { bindLabel } from '@/game/core/keybinds';
-import { BOSSES, type BossDef } from '@/game/data/bosses';
 import { PLAYER_MOVE_LIST, playerStartup } from '@/game/data/moves';
 import { cloudSave, type SyncState } from '@/game/net/cloudSave';
 import { sessionLock } from '@/game/net/sessionLock';
 import { expToNext } from '@/game/data/progression';
-import BossSelect from './BossSelect';
 import type { PcGame } from './PcRoomPanel';
 import { loadRecord, loadStreak, rankOf } from '@/game/core/cpuRecord';
 
 // 게임 화면들은 들어갈 때 불러온다 (첫 화면·로그인을 빨리 띄우려고 — 3D·서울 코드가 크다)
 const loadingScreen = () => <div className="flex h-screen w-screen items-center justify-center bg-black text-sm text-white/60">불러오는 중…</div>;
-const BossView = dynamic(() => import('./BossView'), { ssr: false, loading: loadingScreen });
 const CityView = dynamic(() => import('./CityView'), { ssr: false, loading: loadingScreen });
 const FieldView = dynamic(() => import('./FieldView'), { ssr: false, loading: loadingScreen });
 const GameView = dynamic(() => import('./GameView'), { ssr: false, loading: loadingScreen });
@@ -34,7 +31,7 @@ const GameView = dynamic(() => import('./GameView'), { ssr: false, loading: load
  */
 function prefetchScreens() {
   const run = () => {
-    for (const load of [() => import('./GameView'), () => import('./FieldView'), () => import('./BossView'), () => import('./CityView')]) {
+    for (const load of [() => import('./GameView'), () => import('./FieldView'), () => import('./CityView')]) {
       load().catch(() => {});
     }
   };
@@ -55,14 +52,7 @@ type Screen =
   | { kind: 'menu' }
   | { kind: 'field' }
   | { kind: 'city' }
-  | { kind: 'bossSelect' }
-  | { kind: 'boss'; boss: BossDef; attempt: number }
   | { kind: 'match'; mode: MatchMode };
-
-const RPG_MODES: { screen: Screen; label: string; desc: string; tag: string }[] = [
-  { screen: { kind: 'field' }, label: '필드 사냥', desc: '몬스터 사냥 · 자동사냥 · 레벨업', tag: 'AUTO' },
-  { screen: { kind: 'bossSelect' }, label: '보스 레이드', desc: '강력한 보스와 1:1 · 직접 조작', tag: '수동' },
-];
 
 const VERSUS_MODES: { mode: MatchMode; label: string; desc: string }[] = [
   { mode: 'cpu', label: 'VS CPU', desc: '컴퓨터와 3판 2선승' },
@@ -211,31 +201,22 @@ export default function Game() {
   };
   const playFromCity = (g: PcGame) => {
     setFromCity(true);
-    go(g === 'cpu' ? { kind: 'match', mode: 'cpu' } : g === 'training' ? { kind: 'match', mode: 'training' } : g === 'boss' ? { kind: 'bossSelect' } : { kind: 'field' });
+    go({ kind: 'match', mode: g });
+  };
+  // 서울 집 컴퓨터로 다른 차원에 접속: 로그아웃하면 서울(집 컴퓨터 앞)로 돌아온다
+  const enterDimension = () => {
+    setFromCity(true);
+    go({ kind: 'field' });
   };
 
   switch (screen.kind) {
     case 'field':
-      return <FieldView profile={profile} onExit={menu} />;
+      return <FieldView profile={profile} account={account} onExit={menu} />;
     case 'city':
-      return <CityView profile={profile} account={account} onExit={menu} onPlay={playFromCity} />;
-    case 'bossSelect':
-      return <BossSelect profile={profile} onSelect={(boss) => go({ kind: 'boss', boss, attempt: 0 })} onBack={menu} />;
-    case 'boss':
-      return (
-        <BossView
-          key={screen.attempt}
-          boss={screen.boss}
-          profile={profile}
-          onRetry={() => go({ ...screen, attempt: screen.attempt + 1 })}
-          onExit={() => go({ kind: 'bossSelect' })}
-        />
-      );
+      return <CityView profile={profile} account={account} onExit={menu} onPlay={playFromCity} onDimension={enterDimension} />;
     case 'match':
       return <GameView key={screen.mode} mode={screen.mode} onExit={menu} profile={profile} />;
   }
-
-  const bossesCleared = BOSSES.filter((b) => profile.bossClears[b.id]).length;
 
   return (
     <main className="tg-sky px-6 py-12">
@@ -257,9 +238,6 @@ export default function Game() {
             <div className="tg-muted mt-1.5 flex justify-between gap-3 whitespace-nowrap text-xs">
               <span>🪙 {profile.gold.toLocaleString()} G</span>
               <span>⚔️ 처치 {profile.kills}</span>
-              <span>
-                👑 보스 {bossesCleared}/{BOSSES.length}
-              </span>
             </div>
           </div>
           <SyncBadge sync={sync} />
@@ -270,7 +248,7 @@ export default function Game() {
           )}
           <button
             onClick={() => {
-              if (!confirm('레벨·골드·보스 기록을 모두 초기화할까요?')) return;
+              if (!confirm('레벨·골드 기록을 모두 초기화할까요?')) return;
               const fresh = newProfile();
               saveProfile(fresh);
               setProfile(fresh);
@@ -290,31 +268,8 @@ export default function Game() {
             <span className="text-2xl font-bold">서울 · 내 집</span>
             <span className="tg-pill">NEW ✨</span>
           </div>
-          <div className="tg-muted mt-1 text-sm">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 코인노래방 · 친구와 같은 동네에서 만나기</div>
+          <div className="tg-muted mt-1 text-sm">한강 동네에서 살기 · 일자리 · 낚시 · 펫 · 카지노 · 코인노래방 · 친구와 같은 동네에서 만나기 · 🌀 내 집 컴퓨터로 몬스터가 사는 다른 차원에 접속</div>
         </button>
-
-        <h2 className="tg-section">🗡️ RPG</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {RPG_MODES.map((m) => (
-            <button
-              key={m.label}
-              onClick={() => go(m.screen)}
-              className="tg-card tg-btn tg-tint-lemon"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-2xl font-bold">{m.label}</span>
-                <span className="tg-pill">{m.tag}</span>
-              </div>
-              <div className="tg-muted mt-1 text-sm">{m.desc}</div>
-              {/* 내 진행 상황 */}
-              <div className="tg-accent mt-2 text-xs font-bold">
-                {m.screen.kind === 'field'
-                  ? `누적 처치 ${profile.kills.toLocaleString()}마리`
-                  : `클리어 ${BOSSES.filter((b) => profile.bossClears[b.id]).length}/${BOSSES.length} 보스`}
-              </div>
-            </button>
-          ))}
-        </div>
 
         <h2 className="tg-section">🥊 대전</h2>
         <div className="grid gap-4 sm:grid-cols-3">

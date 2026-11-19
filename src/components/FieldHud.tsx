@@ -33,7 +33,7 @@ export default function FieldHud({
       <div className={`absolute left-4 top-4 rounded-lg border border-white/15 bg-black/50 p-3 backdrop-blur-sm ${touch ? 'w-64' : 'w-72'}`}>
         <div className="flex items-baseline justify-between">
           <span className="text-lg font-black">
-            <span className="text-amber-300">Lv.{hud.level}</span> PLAYER
+            <span className="text-amber-300">Lv.{hud.level}</span> 나
           </span>
           <span className="text-sm text-amber-200">{hud.gold.toLocaleString()} G</span>
         </div>
@@ -50,6 +50,11 @@ export default function FieldHud({
           <span className="w-16 text-right tabular-nums">{Math.floor((hud.exp / hud.expNext) * 100)}%</span>
         </div>
         <div className="mt-1 text-xs text-white/60">처치 {hud.kills}</div>
+        {hud.others.length > 0 && (
+          <div className="mt-1 truncate text-[11px] text-cyan-200/90" title={hud.others.map((o) => `Lv.${o.level} ${o.name}`).join(', ')}>
+            🌀 같은 차원 {hud.others.length}명 · {hud.others.map((o) => o.name).join(', ')}
+          </div>
+        )}
         {hud.session.kills > 0 && (
           <div className="mt-1 rounded bg-white/5 px-2 py-1 text-[11px] leading-4 text-white/75">
             <span className="text-white/50">이번 사냥 {Math.floor(hud.session.seconds / 60)}분</span> · 처치 {hud.session.kills}

@@ -33,6 +33,7 @@ import BusPanel from './BusPanel';
 import ChatBox from './ChatBox';
 import VoicePanel from './VoicePanel';
 import PcRoomPanel, { type PcGame } from './PcRoomPanel';
+import HomePcPanel from './HomePcPanel';
 import PetPanel from './PetPanel';
 import FishingPanel, { type FishTab } from './FishingPanel';
 import FishingShopPanel, { type FishShopTab } from './FishingShopPanel';
@@ -221,7 +222,21 @@ class CityKeyboard {
 }
 
 /** 서울 라이프: 도시 + 내 집 (일상 모드) */
-export default function CityView({ profile, account, onExit, onPlay }: { profile: PlayerProfile; account: Account | null; onExit: () => void; /** PC방에서 고른 게임 하러 가기 (끝나면 서울로 돌아온다) */ onPlay?: (g: PcGame) => void }) {
+export default function CityView({
+  profile,
+  account,
+  onExit,
+  onPlay,
+  onDimension,
+}: {
+  profile: PlayerProfile;
+  account: Account | null;
+  onExit: () => void;
+  /** PC방에서 고른 게임 하러 가기 (끝나면 서울로 돌아온다) */
+  onPlay?: (g: PcGame) => void;
+  /** 집 컴퓨터로 다른 차원에 접속 (로그아웃하면 집 컴퓨터 앞으로 돌아온다) */
+  onDimension?: () => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<CityWorld | null>(null);
   /** 큰기술 컷인에 띄울 실시간 캐릭터 그림 (렌더러가 그린다) */
@@ -257,6 +272,11 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
   const [pcRoom, setPcRoom] = useState(false);
   const onPlayRef = useRef(onPlay);
   onPlayRef.current = onPlay;
+  const [homePc, setHomePc] = useState(false);
+  const homePcRef = useRef(homePc);
+  homePcRef.current = homePc;
+  const onDimensionRef = useRef(onDimension);
+  onDimensionRef.current = onDimension;
   const [pets, setPets] = useState<null | 'shop' | 'care'>(null);
   const [adoptPick, setAdoptPick] = useState<string | null>(null);
   const [keys, setKeys] = useState(false);
@@ -309,7 +329,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
     const world = new CityWorld({
       read: () => {
         const input = kb.read();
-        return menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current
+        return menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || homePcRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current
           ? { move: null, run: false, interact: false }
           : input;
       },
@@ -421,6 +441,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
         else if (karaokeDeskRef.current) setKaraokeDesk(false);
         else if (busRef.current) setBus(false);
         else if (pcRoomRef.current) setPcRoom(false);
+        else if (homePcRef.current) setHomePc(false);
         else if (petsRef.current) setPets(null);
         else if (clothesRef.current) setClothes(null);
         else if (fishDexRef.current) setFishDex(null);
@@ -561,7 +582,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       }
 
       // 화면 위 글자(HUD)는 0.08초마다만 새로 만든다 (매 프레임 비교하던 것을 줄여서 가볍게)
-      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.karaokeDeskRequest || world.busRequest || world.pcRoomRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
+      const hudDue = now - lastHud >= 80 || world.jobPanelRequest || world.calendarRequest || world.tvRequest || world.casinoRequest || world.karaokeRequest || world.karaokeDeskRequest || world.busRequest || world.pcRoomRequest || world.homePcRequest || world.petShopRequest || !!world.petAdoptRequest || !!world.clothesShopRequest || world.wardrobeRequest || !!world.fishingShopRequest || !!world.fishDexRequest;
       const h: CityHud | null = !hudDue ? null : {
         location: world.location,
         floor: world.floor,
@@ -640,6 +661,11 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       if (world.busRequest) {
         world.busRequest = false;
         setBus(true);
+      }
+      if (world.homePcRequest) {
+        world.homePcRequest = false;
+        if (onDimensionRef.current) setHomePc(true);
+        else world.say('🖥️ 컴퓨터 — 지금은 켤 수 없어요');
       }
       if (world.pcRoomRequest) {
         world.pcRoomRequest = false;
@@ -922,6 +948,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
       )}
       {bus && worldRef.current && <BusPanel world={worldRef.current} onClose={() => setBus(false)} />}
       {pcRoom && worldRef.current && onPlay && <PcRoomPanel world={worldRef.current} onPlay={onPlay} onClose={() => setPcRoom(false)} />}
+      {homePc && onDimension && <HomePcPanel profile={profile} onConnect={onDimension} onClose={() => setHomePc(false)} />}
       {gear && worldRef.current && (
         <GearPanel
           world={worldRef.current}

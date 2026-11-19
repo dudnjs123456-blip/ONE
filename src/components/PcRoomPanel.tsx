@@ -3,16 +3,14 @@
 import type { CityWorld } from '@/game/city/cityWorld';
 import { PC_ROOM_FEE } from '@/game/city/cityWorld';
 
-export type PcGame = 'cpu' | 'training' | 'boss' | 'field';
+export type PcGame = 'cpu' | 'training';
 
 const GAMES: { id: PcGame; icon: string; label: string; desc: string }[] = [
   { id: 'cpu', icon: '🥊', label: 'IRON FIST · VS CPU', desc: '컴퓨터와 3판 2선승 · 랭크 올리기' },
   { id: 'training', icon: '🎯', label: 'IRON FIST · 연습 모드', desc: '허수아비·콤보 시연·연습 과제' },
-  { id: 'boss', icon: '👹', label: '보스 레이드', desc: '강력한 보스와 1:1' },
-  { id: 'field', icon: '⚔️', label: '필드 사냥', desc: '자동사냥으로 레벨업' },
 ];
 
-/** PC방 (E): 이용료를 내고 격투·RPG 모드를 한다. 끝나면 서울 PC방 앞으로 돌아온다 */
+/** PC방 (E): 이용료를 내고 격투 게임을 한다. 끝나면 서울 PC방 앞으로 돌아온다 */
 export default function PcRoomPanel({ world, onPlay, onClose }: { world: CityWorld; onPlay: (g: PcGame) => void; onClose: () => void }) {
   const gold = world.profile.gold;
   return (
