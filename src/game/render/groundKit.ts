@@ -26,6 +26,63 @@ interface Pair {
   normal: THREE.Texture;
 }
 
+/**
+ * 날씨가 바닥에 남기는 흔적 (모든 바닥 재질이 같이 쓴다):
+ * - wet 0~1: 비에 젖으면 색이 짙어지고 매끈해져 하늘·햇빛이 비친다. 낮은 곳엔 물웅덩이가 거울처럼 반짝인다
+ * - snow 0~1: 눈이 쌓이면 군데군데부터 하얗게 덮인다 (얼룩 무늬는 땅 위치로 정해서 걸어도 안 바뀐다)
+ */
+export const GROUND_WEATHER = { wet: { value: 0 }, snow: { value: 0 } };
+
+const NOISE_GLSL = /* glsl */ `
+  uniform float gWet; uniform float gSnow; uniform float gPuddleAmt;
+  varying vec3 vGWorld;
+  float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float gNoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(gHash(i), gHash(i + vec2(1, 0)), u.x), mix(gHash(i + vec2(0, 1)), gHash(i + vec2(1, 1)), u.x), u.y);
+  }
+  float gFbm(vec2 p) { return gNoise(p) * 0.55 + gNoise(p * 2.3 + 7.1) * 0.3 + gNoise(p * 5.1 + 3.7) * 0.15; }
+`;
+
+/** @param puddles 물웅덩이가 생기는 정도 (잔디·흙은 물이 스며들어 거의 안 생긴다) */
+function addWeather(m: THREE.MeshStandardMaterial, puddles: number) {
+  const gPuddleAmt = { value: puddles };
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.gPuddleAmt = gPuddleAmt;
+    sh.uniforms.gWet = GROUND_WEATHER.wet;
+    sh.uniforms.gSnow = GROUND_WEATHER.snow;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGWorld;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvGWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + NOISE_GLSL)
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        float gPuddle = smoothstep(0.58, 0.68, gFbm(vGWorld.xz * 0.18)) * gPuddleAmt;
+        float gSnowMask = smoothstep(1.0 - gSnow * 1.15, 1.0 - gSnow * 1.15 + 0.22, gFbm(vGWorld.xz * 0.45 + 11.0));
+        // 젖은 바닥: 물을 머금어 짙어진다 (웅덩이는 더)
+        diffuseColor.rgb *= 1.0 - gWet * (0.32 + gPuddle * 0.25);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.92, 0.95), gSnowMask);`,
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.55, gWet);
+        roughnessFactor = mix(roughnessFactor, 0.06, gWet * gPuddle);
+        roughnessFactor = mix(roughnessFactor, 0.85, gSnowMask);`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        // 웅덩이·눈 덮인 곳은 바닥 결(울퉁불퉁)이 묻혀 평평하다
+        `#include <normal_fragment_maps>
+        normal = normalize(mix(normal, normalize(vNormal), clamp(gWet * gPuddle + gSnowMask, 0.0, 1.0)));`,
+      );
+  };
+  m.customProgramCacheKey = () => 'ground-weather';
+}
+
 export class GroundKit {
   private loader = new THREE.TextureLoader();
   private pairs = new Map<GroundKind, Pair>();
@@ -82,6 +139,7 @@ export class GroundKit {
         metalness: 0,
       });
       m.name = `ground-${key}`;
+      addWeather(m, kind === 'grass' ? 0 : kind === 'path' ? 0.4 : 1);
       this.mats.set(key, m);
     }
     return m;

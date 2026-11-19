@@ -2,3 +2,5 @@ art
 scripts
 .next
 node_modules
+.next-*
+assets-src

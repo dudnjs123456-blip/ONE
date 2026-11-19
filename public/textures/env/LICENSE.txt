@@ -1,0 +1,2 @@
+kloofendal_48d_partly_cloudy_puresky_1k.hdr — Poly Haven (CC0) https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky
+waternormals.jpg — three.js examples (MIT) https://github.com/mrdoob/three.js

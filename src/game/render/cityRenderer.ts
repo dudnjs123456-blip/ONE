@@ -5,7 +5,7 @@ import { CORRIDOR, HOME, LOBBY, type CityLocation, type CityWorld } from '../cit
 import { buildLobbyScene } from './lobbyScene';
 import { glassMaterial, initGlassEnv } from './glassKit';
 import { UnitWindow, coverPlate } from './unitWindows';
-import { LookFx, SkyDome, toonify } from './lookFx';
+import { ART_REAL, LookFx, SkyDome, loadSkyEnv, toonify } from './lookFx';
 import { MODE_LEVEL, QUALITY_MAX, TIER_START, detectGpu, getGfxMode, onGfxMode, type GfxMode } from './graphics';
 import { PersonView, ROBBER_SKIN } from './personView';
 import { makeKitBuilding } from './cityKit';
@@ -31,7 +31,7 @@ import { HEROINE, type CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { MOOD_LINE_MS } from '../data/moodLines';
 import type { PlayerMood } from '../data/npcs';
-import { GroundKit, type GroundKind } from './groundKit';
+import { GROUND_WEATHER, GroundKit, type GroundKind } from './groundKit';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { FacadeKit, villaSet, type FacadeSet } from './facadeKit';
 import { buildVacantShop } from './vacantShop';
@@ -317,6 +317,8 @@ export class CityRenderer {
   private weather: WeatherState = weatherAt(1, 0);
   private _rainAt = new THREE.Vector3();
   private fxNight = 0;
+  /** 한강 물 (잔물결이 흐른다) */
+  private riverMat: THREE.MeshStandardMaterial | null = null;
   private fxDusk = 0;
   private nightGlow: THREE.Material[] = [];
   private lampGlow!: THREE.InstancedMesh;
@@ -334,6 +336,9 @@ export class CityRenderer {
   private texts!: FloatingTexts;
   /** 실사 바닥 재질 (아스팔트·보도블록·잔디·흙길) */
   private groundKit!: GroundKit;
+  /** 바닥이 젖은 정도 · 눈 쌓인 정도 (날씨를 천천히 따라간다. 처음 들어왔을 땐 바로 지금 날씨에 맞춘다) */
+  private groundWet = -1;
+  private groundSnow = -1;
   /** 실사 건물 재질 (빌라) */
   private facadeKit!: FacadeKit;
   private camPos = new THREE.Vector3();
@@ -453,6 +458,14 @@ export class CityRenderer {
     // 비·눈은 툰 재질로 바꾸지 않는다 (위에서 바꾼 뒤에 붙인다)
     this.weatherFx = new WeatherFx(this.city);
     this.fx = new LookFx(this.renderer);
+    if (ART_REAL)
+      void loadSkyEnv(this.renderer).then((env) => {
+        for (const s of [this.city, this.home, this.lobby, this.corridor, this.store]) {
+          s.environment = env;
+          // 실내는 창으로 들어오는 하늘빛만 은은하게
+          if (s !== this.city) s.environmentIntensity = 0.35;
+        }
+      });
     // 지난번에 이 컴퓨터에서 쓰던 화질로 시작한다 (매번 최고 화질에서 한 단계씩 내려가며 버벅이지 않게).
     // 처음 접속이면 그래픽카드 이름으로 사양을 가늠해서 시작 단계를 정한다
     const gpu = detectGpu(this.renderer.getContext());
@@ -492,7 +505,6 @@ export class CityRenderer {
       l.castShadow = on && l.userData.castShadow;
     });
   }
-
 
   resize(width: number, height: number) {
     this.size = { w: width, h: height };
@@ -1037,6 +1049,7 @@ export class CityRenderer {
       const pp = world.player.lerped(clock.alpha);
       this._rainAt.set((cam.position.x + pp.x) / 2, 0, (cam.position.z + pp.z) / 2);
       this.weatherFx.update(this.weather, this._rainAt, clock.dt, this.fxNight);
+      this.updateGroundWeather(clock.dt);
     }
     this.renderer.shadowMap.needsUpdate = this.shadowTick++ % 2 === 0;
     this.syncPortal(world, clock.dt);
@@ -1703,7 +1716,13 @@ export class CityRenderer {
     this.sun.intensity = (0.45 * moon + daylight * 2.2) * shade;
     this.sun.color.set(0xffffff).lerp(new THREE.Color(0xffa060), this.fxDusk).lerp(new THREE.Color(0x9fb4ff), moon);
     // 밤에도 나무·건물이 새까만 덩어리로 보이지 않게 하늘빛을 넉넉히
-    this.hemi.intensity = 0.95 + daylight * 0.25 - w.cloud * daylight * 0.1 + flash * 2.2;
+    this.hemi.intensity = (ART_REAL ? 0.45 : 0.95 + daylight * 0.25) - w.cloud * daylight * 0.1 + flash * 2.2;
+    if (ART_REAL) this.city.environmentIntensity = 0.12 + daylight * 0.75 * (1 - w.cloud * 0.3);
+    if (this.riverMat?.normalMap) {
+      const t = performance.now() / 1000;
+      this.riverMat.normalMap.offset.set(t * 0.004, t * 0.009);
+      this.riverMat.color.set(0x24465a).lerp(new THREE.Color(0x0b1622), 1 - daylight);
+    }
     this.hemi.color.set(0xdff1ff).lerp(new THREE.Color(0x6f7fb8), moon).lerp(new THREE.Color(0xc9ced6), w.cloud * daylight * 0.6);
     const night = 1 - daylight;
     // 툰 재질은 발광이 그대로 더해져서 예전보다 낮게
@@ -1715,6 +1734,26 @@ export class CityRenderer {
     this.treeKit.setNight(night);
     for (const m of this.nightGlow) (m as THREE.MeshBasicMaterial).opacity = night;
     this.lampGlow.visible = night > 0.05;
+  }
+
+/**
+   * 비가 오면 바닥이 30초쯤에 걸쳐 젖고, 그치면 3분쯤에 걸쳐 마른다.
+   * 눈은 4분쯤에 걸쳐 쌓이고 그치면 8분쯤에 걸쳐 녹는다 (처음 들어왔을 땐 지금 날씨 모습에서 바로 시작)
+   */
+  private updateGroundWeather(dt: number) {
+    const w = this.weather;
+    const wetTo = Math.min(1, w.rain * 1.2);
+    const snowTo = Math.min(1, w.snow) * 0.92;
+    if (this.groundWet < 0) {
+      this.groundWet = wetTo;
+      this.groundSnow = snowTo;
+    }
+    const ease = (v: number, to: number, up: number, down: number) => v + (to - v) * (1 - Math.exp(-dt / (to > v ? up : down)));
+    this.groundWet = ease(this.groundWet, wetTo, 30, 180);
+    this.groundSnow = ease(this.groundSnow, snowTo, 240, 480);
+    // 눈이 덮이면 젖은 반짝임은 눈 아래로 묻힌다
+    GROUND_WEATHER.wet.value = this.groundWet * (1 - this.groundSnow * 0.8);
+    GROUND_WEATHER.snow.value = this.groundSnow;
   }
 
   private updateHomeLight(daylight: number, minutes: number) {
@@ -2068,10 +2107,11 @@ export class CityRenderer {
     ground('grass', 1600, m.parkZ[1] - m.parkZ[0], 0, (m.parkZ[0] + m.parkZ[1]) / 2, 0.01);
     ground('path', 1600, 2.5, 0, m.parkZ[0] + 7, 0.03); // 산책로
     ground('asphalt', 1600, 1.6, 0, m.parkZ[0] + 9.5, 0.03, 0x7fa6e6); // 자전거길 (파란 아스팔트)
-    const water = new THREE.Mesh(
-      new THREE.PlaneGeometry(1600, 300),
-      new THREE.MeshStandardMaterial({ color: 0x2f6f9f, roughness: 0.25, metalness: 0.3 }),
-    );
+    const waterNormal = new THREE.TextureLoader().load('/textures/env/waternormals.jpg');
+    waterNormal.wrapS = waterNormal.wrapT = THREE.RepeatWrapping;
+    waterNormal.repeat.set(160, 30);
+    this.riverMat = new THREE.MeshStandardMaterial({ color: 0x24465a, roughness: 0.08, metalness: 0.05, normalMap: waterNormal, normalScale: new THREE.Vector2(0.25, 0.25), envMapIntensity: 1.4 });
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(1600, 300), this.riverMat);
     water.rotation.x = -Math.PI / 2;
     water.position.set(0, -1.2, m.riverZ + 150);
     s.add(water);

@@ -4,7 +4,7 @@ import type { WeatherState } from '../city/weather';
 /** 비·눈이 내리는 상자 크기 (카메라를 둘러싼다) */
 const BOX = new THREE.Vector3(56, 32, 56);
 const RAIN_MAX = 7000;
-const SNOW_MAX = 4500;
+const SNOW_MAX = 9000;
 
 /** 상자 안에서 감고 돌아가는 공통 셰이더 조각: 세상에 고정된 자리 + 흐른 거리 → 카메라 주변 상자 안 위치 */
 const WRAP_GLSL = /* glsl */ `
@@ -99,7 +99,8 @@ export class WeatherFx {
       for (let i = 0; i < SNOW_MAX; i++) {
         const x = Math.random(), y = Math.random(), z = Math.random();
         // 크기·낙하 속도는 자리와 따로 뽑는다 (자리 y 로 속도를 정하면 시간이 지나며 눈이 한 높이로 몰린다)
-        const size = 0.12 + Math.random() * 0.12;
+        // 실제 함박눈 크기 (2~5cm). 예전 12~24cm 는 카메라 앞에서 동전만 한 점으로 보였다
+        const size = 0.02 + Math.random() * 0.035;
         // 속도는 0.01 단위 (낙하 거리를 3200m 마다 감아도 모든 눈송이가 정확히 제자리로 돌아오게)
         const speed100 = 70 + Math.floor(Math.random() * 61);
         for (let k = 0; k < 4; k++) {
@@ -122,11 +123,14 @@ export class WeatherFx {
           fallen: { value: 0 },
           time: { value: 0 },
           opacity: { value: 0.9 },
+          /** 눈송이 색: 낮엔 흰색, 밤엔 주변 빛만큼 어둡고 푸르게 (밤에 형광 흰 점으로 튀지 않게) */
+          tint: { value: new THREE.Color(1, 1, 1) },
         },
         vertexShader: /* glsl */ `
           attribute vec3 corner;
           uniform vec3 drift; uniform float fallen; uniform float time;
           varying vec2 vUv;
+          varying float vNear;
           ${WRAP_GLSL}
           void main() {
             // corner.z = 속도×100 (정수) + 크기 (1 미만): 속성 하나에 둘을 담았다
@@ -139,18 +143,24 @@ export class WeatherFx {
             vUv = corner.xy;
             vec4 mv = viewMatrix * vec4(w, 1.0);
             // 멀리 있는 눈송이도 화면에서 몇 픽셀은 되게 거리에 비례해 키운다
-            mv.xy += corner.xy * max(size, -mv.z * 0.006);
+            mv.xy += corner.xy * max(size, -mv.z * 0.0032);
+            // 카메라 바로 앞(2m 안)을 지나는 눈송이는 초점이 안 맞은 것처럼 흐리게 사라진다
+            vNear = smoothstep(0.8, 3.0, -mv.z);
             gl_Position = projectionMatrix * mv;
           }
         `,
         fragmentShader: /* glsl */ `
           uniform float opacity;
+          uniform vec3 tint;
           varying float vFade;
+          varying float vNear;
           varying vec2 vUv;
           void main() {
             float d = length(vUv);
             if (d > 0.5) discard;
-            gl_FragColor = vec4(1.0, 1.0, 1.0, opacity * vFade * (1.0 - smoothstep(0.15, 0.5, d)));
+            // 가장자리가 부드럽게 퍼지는 솜털 모양 (딱딱한 원판 대신)
+            float a = exp(-d * d * 14.0);
+            gl_FragColor = vec4(tint, opacity * vFade * vNear * a);
           }
         `,
       });
@@ -197,7 +207,8 @@ export class WeatherFx {
     su.fallen.value = (su.fallen.value + 1.6 * dt) % (BOX.y * 100);
     su.time.value = this.time;
     su.center.value.copy(center);
-    su.opacity.value = 0.95 - night * 0.3;
+    su.opacity.value = 0.9 - night * 0.15;
+    (su.tint.value as THREE.Color).setRGB(1 - night * 0.38, 1 - night * 0.32, 1 - night * 0.2);
     const snowN = Math.round(SNOW_MAX * w.snow);
     this.snow.visible = snowN > 0;
     this.snow.geometry.setDrawRange(0, snowN * 6);

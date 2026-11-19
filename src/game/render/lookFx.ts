@@ -5,6 +5,26 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+
+/** 화풍: true = 실사 (PBR 재질 + 하늘 사진 빛), false = 예전 애니메이션 툰 */
+export const ART_REAL = true;
+
+/**
+ * 실제 하늘을 360° 로 찍은 사진(HDRI, Poly Haven CC0)으로 만든 빛·반사 지도.
+ * scene.environment 에 넣으면 모든 실사 재질이 이 하늘빛을 받고 비춘다 (한 번만 받아서 같이 쓴다)
+ */
+let envPromise: Promise<THREE.Texture> | null = null;
+export function loadSkyEnv(renderer: THREE.WebGLRenderer): Promise<THREE.Texture> {
+  envPromise ??= new RGBELoader().loadAsync('/textures/env/kloofendal_48d_partly_cloudy_puresky_1k.hdr').then((hdr) => {
+    const pm = new THREE.PMREMGenerator(renderer);
+    const env = pm.fromEquirectangular(hdr).texture;
+    hdr.dispose();
+    pm.dispose();
+    return env;
+  });
+  return envPromise;
+}
 
 /**
  * 화면 분위기 (애니메이션 툰 화풍):
@@ -15,8 +35,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    saturation: { value: 1.15 },
-    vignette: { value: 0.32 },
+    saturation: { value: 1.04 },
+    vignette: { value: 0.22 },
     tint: { value: new THREE.Color(1, 1, 1) },
     /** 화면 암전 (0 = 보통, 1 = 깜깜) — 장소가 바뀔 때 */
     fade: { value: 0 },
@@ -83,7 +103,15 @@ export function updateRim(night: number, dusk: number, indoor: boolean) {
   if (indoor) RIM.color.value.setRGB(1, 0.93, 0.82);
   else RIM.color.value.setRGB(1, 0.95, 0.86).lerp(_rimDusk, Math.min(1, dusk)).lerp(_rimNight, night);
   RIM.strength.value = indoor ? 0.22 : 0.3 + night * 0.12;
+  // 캐릭터 보정광: 밤 거리에선 푸른 달빛만 받아 머리·피부가 남색으로 묻히므로 흰빛을 조금 더 받게 한다
+  CHAR_LIGHT.lift.value = indoor ? 0.05 : 0.07 + night * 0.16;
 }
+
+/**
+ * 캐릭터(VRM)만 받는 보정광 (게임 엔진의 '캐릭터 조명' 같은 것).
+ * 거리·건물 밝기는 그대로 두고, 캐릭터는 제 색(머리·피부·옷)이 또렷이 보이게 바탕색에 비례한 흰빛을 더한다
+ */
+export const CHAR_LIGHT = { lift: { value: 0.07 } };
 const _rimDusk = new THREE.Color(1, 0.62, 0.38);
 const _rimNight = new THREE.Color(0.45, 0.62, 1);
 
@@ -132,13 +160,32 @@ export function setupMToonRim(root: THREE.Object3D): MToonRim[] {
       mt.parametricRimFresnelPowerFactor = 4.5;
       mt.parametricRimLiftFactor = 0;
       mt.rimLightingMixFactor = 0.35;
+      addCharLight(mt);
       out.push({ mat: mt, base: mt.parametricRimColorFactor.clone() });
     }
   });
   return out;
 }
 export function updateMToonRim(list: MToonRim[]) {
-  for (const r of list) r.mat.parametricRimColorFactor.copy(RIM.color.value).multiplyScalar(RIM.strength.value * 1.6).add(r.base);
+  // 림 라이트는 윤곽만 살짝 (세면 밤에 푸른 빛이 캐릭터를 뿌옇게 덮는다)
+  for (const r of list) r.mat.parametricRimColorFactor.copy(RIM.color.value).multiplyScalar(RIM.strength.value * 0.9).add(r.base);
+}
+
+/** MToon 셰이더에 캐릭터 보정광을 끼워 넣는다 (three-vrm 의 원래 셰이더 손질 뒤에 이어서) */
+function addCharLight(mt: THREE.Material) {
+  if (mt.userData.charLight) return;
+  mt.userData.charLight = true;
+  const prev = mt.onBeforeCompile.bind(mt);
+  const prevKey = mt.customProgramCacheKey.bind(mt);
+  mt.onBeforeCompile = (sh, r) => {
+    prev(sh, r);
+    sh.uniforms.charLift = CHAR_LIGHT.lift;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('uniform vec3 litFactor;', 'uniform vec3 litFactor;\nuniform float charLift;')
+      .replace('col += totalEmissiveRadiance;', 'col += diffuseColor.rgb * charLift;\n  col += totalEmissiveRadiance;');
+  };
+  mt.customProgramCacheKey = () => prevKey() + '|charLight';
+  mt.needsUpdate = true;
 }
 
 export class LookFx {
@@ -275,6 +322,16 @@ export function toonify(root: THREE.Object3D, swapped = new Map<THREE.Material, 
   const convert = (m: THREE.Material): THREE.Material => {
     if (!(m instanceof THREE.MeshStandardMaterial)) return m;
     let t = swapped.get(m);
+    if (!t && ART_REAL) {
+      if ((m.transparent && m.opacity < 0.6) || m.userData.glass) return m;
+      const r = m.clone();
+      // 금속값이 빠져 1 로 읽힌 에셋(무광 소품)은 무광으로, 너무 매끈한 것도 살짝 거칠게
+      if (opts.matte && r.metalness > 0.45 && !r.metalnessMap) r.metalness = 0;
+      r.roughness = Math.max(r.roughness, r.metalness > 0.5 ? 0.25 : 0.45);
+      r.name = m.name;
+      swapped.set(m, r);
+      return r;
+    }
     if (!t) {
       // 반짝이는 유리·금속은 툰으로 바꾸면 밋밋해져서 둔다
       // (matte: 금속값이 빠져 기본값 1 로 읽힌 에셋도 무광으로 보고 바꾼다)
