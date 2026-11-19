@@ -972,12 +972,13 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
  * 외곽선 굵기는 미터 단위라 카메라가 가까울수록(대전·동네·코디 창) 화면에서 두꺼워 보인다.
  * 필드 카메라(약 12m, 시야 45°)에서 보이는 굵기를 기준으로, 그보다 가까우면 그만큼 가늘게 해서
  * 어디서 보든 화면 속 선 굵기가 필드와 비슷하게 한다. 더 멀 때는 지금처럼 둔다.
- * 색은 짙은 밤색(검정보다 부드럽지만 어두운 거리에서도 윤곽이 보이게), 굵기는 원래의 80%.
+ * 색은 중간 밝기의 장밋빛 갈색, 굵기는 화면에서 약 1px.
+ * (이 방식은 몸 바깥 둘레에만 선이 생겨서, 진하면 안쪽은 선이 없는데 테두리만 스티커처럼 떠 보인다)
  * (2026-11-07 에 연한 장밋빛·절반 굵기로 바꿨더니 캐릭터가 배경에 묻혀 흐릿해 보였다)
  */
-const SOFT_OUTLINE = 0x352630;
-/** 외곽선의 화면 속 굵기 (화면 높이 900px 기준 약 1.5px). 카메라가 멀어도 가까워도 같은 굵기로 보인다 */
-const OUTLINE_PX = (2 * 1.5) / 900;
+const SOFT_OUTLINE = 0x5c4652;
+/** 외곽선의 화면 속 굵기 (화면 높이 900px 기준 약 1px). 카메라가 멀어도 가까워도 같은 굵기로 보인다 */
+const OUTLINE_PX = (2 * 1.0) / 900;
 export function keepFieldOutline(root: THREE.Object3D) {
   const mats = new Set<THREE.Material>();
   root.traverse((o) => {
