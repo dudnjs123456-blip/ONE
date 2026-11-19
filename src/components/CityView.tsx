@@ -18,6 +18,7 @@ import { LifeBars } from './LifeBar';
 import CityMapOverlay from './CityMapOverlay';
 import ParkMapOverlay from './ParkMapOverlay';
 import ParkGuide from './ParkGuide';
+import HudPortrait, { hudMood } from './HudPortrait';
 import RideStaffTalk from './RideStaffTalk';
 import { drawParkBase, drawParkPlayer } from './parkMapDraw';
 import JobPanel from './JobPanel';
@@ -741,8 +742,15 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
 
       {hud && !wardrobe && (
         <div className="pointer-events-none absolute inset-0 select-none">
-          {/* 위치 · 시간 · 돈 */}
+          {/* 내 캐릭터 · 위치 · 시간 · 돈 */}
           <div className="absolute left-4 top-4 rounded-lg border border-white/15 bg-black/45 px-4 py-3 backdrop-blur-sm">
+            <HudPortrait
+              body={profile.body}
+              name={account?.username ?? worldRef.current?.netName ?? null}
+              level={profile.level}
+              mood={hudMood({ hp: hud.hp, maxHp: hud.maxHp, fatigue: hud.fatigue, hunger: hud.hunger })}
+            />
+            <div className="my-2 h-px bg-white/15" />
             <div className="text-xs text-white/60">{hud.place}</div>
             <div className="mt-0.5 flex items-baseline gap-2">
               <span className="text-3xl font-black tabular-nums">{hud.clock}</span>
@@ -753,8 +761,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
               <span className="text-xs text-white/60">{shortDay(hud.day)}</span>
             </div>
             <div className="mt-1 text-sm">
-              <span className="text-amber-300">Lv.{profile.level}</span>
-              <span className="ml-3 text-amber-200">{hud.gold.toLocaleString()} G</span>
+              <span className="text-amber-200">{hud.gold.toLocaleString()} G</span>
             </div>
             <HpBar hp={hud.hp} maxHp={hud.maxHp} />
             <LifeBars fatigue={hud.fatigue} hunger={hud.hunger} hungerRate={hud.hungerRate} dirt={hud.dirt} />
@@ -801,7 +808,7 @@ export default function CityView({ profile, account, onExit, onPlay }: { profile
             </div>
           )}
           {hud.job && (
-            <div className="absolute left-4 top-[230px] w-64 rounded-lg border border-sky-400/40 bg-black/60 p-3 text-sm">
+            <div className="absolute left-4 top-[300px] w-64 rounded-lg border border-sky-400/40 bg-black/60 p-3 text-sm">
               <div className="flex justify-between font-bold">
                 <span>{hud.job.name} 근무 중</span>
                 <span className="tabular-nums text-sky-300">{hud.job.left}</span>
