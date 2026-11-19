@@ -1047,7 +1047,8 @@ export class CityWorld {
     av.lastAt = this.frame;
     const name = pickVoice(kind, av.n >> 1);
     const src = actionVoiceSrc(this.profile.body, name);
-    if (src) this.onActionVoice?.('me', src, 1);
+    // 큰기술은 기술 이름을 외치지 않는다 (컷인 그림과 타격음만)
+    if (src && !(kind in SKILL_CUTIN)) this.onActionVoice?.('me', src, 1);
     if (kind in SKILL_CUTIN) {
       this.cutIns.push({ who: 'me', kind, body: this.profile.body ?? '' });
       this.cutInCam = { who: 'me', at: performance.now() };
@@ -1062,8 +1063,8 @@ export class CityWorld {
     if (!r || r.room !== this.roomKey) return;
     const src = actionVoiceSrc(r.body, name);
     const vol = voiceVolume(Math.hypot(r.fighter.x - this.player.x, r.fighter.z - this.player.z));
-    if (src && vol > 0) this.onActionVoice?.(id, src, vol);
     const kind = (Object.keys(SKILL_CUTIN) as ActionVoiceKind[]).find((k) => ACTION_VOICES[k].includes(name));
+    if (src && vol > 0 && !kind) this.onActionVoice?.(id, src, vol);
     if (kind && vol > 0 && r.body) {
       this.cutIns.push({ who: id, kind, body: r.body });
       this.cutInCam = { who: id, at: performance.now() };

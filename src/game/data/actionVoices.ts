@@ -36,7 +36,7 @@ export function actionVoiceSrc(body: string | undefined, name: string): string |
   return hasActionVoice(body) && isActionVoiceName(name) ? `/voices/${body}/act/${name}.mp3` : null;
 }
 
-/** 큰기술 (캐릭터 스킬): 외침 + 옆에 컷인 그림 */
+/** 큰기술 (캐릭터 스킬): 옆에 컷인 그림 (기술 이름 외침은 끔 — 소리는 타격음만) */
 export const SKILL_VOICE: Record<string, ActionVoiceKind> = {
   smallSilverFlyingKick: 'skillFly',
   smallSilverTornadoKick: 'skillTornado',
@@ -59,7 +59,10 @@ export function pickVoice(kind: ActionVoiceKind, n: number): string {
 /** 모든 액션 목소리 파일 (미리 받기용) */
 export function allActionVoiceSrcs(body: string | undefined): string[] {
   if (!hasActionVoice(body)) return [];
-  return Object.values(ACTION_VOICES).flat().map((n) => `/voices/${body}/act/${n}.mp3`);
+  // 큰기술 외침은 안 쓰므로 받지 않는다
+  return (Object.keys(ACTION_VOICES) as ActionVoiceKind[])
+    .filter((k) => !(k in SKILL_CUTIN))
+    .flatMap((k) => ACTION_VOICES[k].map((n) => `/voices/${body}/act/${n}.mp3`));
 }
 
 /** 큰기술 컷인이 떠 있는 시간 (ms) */

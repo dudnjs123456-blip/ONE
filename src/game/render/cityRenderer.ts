@@ -46,6 +46,8 @@ import { tvState } from '../city/tvState';
 import { ThemeParkScene } from './themeParkScene';
 import { RideAudio } from './rideAudio';
 import { CUTIN_MS } from '../data/actionVoices';
+import type { CombatEvent } from '../core/combat';
+import { playHit } from './sfx';
 
 /** 큰기술 컷인 카메라만 보는 층 (그 캐릭터와 조명만 이 층에 올린다) */
 const CUT_LAYER = 7;
@@ -972,6 +974,7 @@ export class CityRenderer {
       this.updateDayNight(world.daylight, world.minutes);
       for (const e of world.drainEvents()) {
         this.sparks.spawn(e);
+        this.hitSound(e);
         if (e.damage > 0) this.texts.spawn(String(e.damage), e.x, e.y + 0.4, e.z, e.kind === 'counter' ? '#ffb020' : '#ffffff');
       }
       for (const s of world.drainSpeech()) this.texts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
@@ -1512,6 +1515,7 @@ export class CityRenderer {
     });
     for (const e of world.drainEvents()) {
       sparks.spawn(e);
+      this.hitSound(e);
       if (e.damage > 0) texts.spawn(String(e.damage), e.x, e.y + 0.4, e.z, e.kind === 'counter' ? '#ffb020' : '#ffffff');
     }
     for (const s of world.drainSpeech()) texts.spawn(s.text, s.x, 2.4, s.z, s.color ?? '#ffe08a', 1.1);
@@ -1740,6 +1744,13 @@ export class CityRenderer {
    * 비가 오면 바닥이 30초쯤에 걸쳐 젖고, 그치면 3분쯤에 걸쳐 마른다.
    * 눈은 4분쯤에 걸쳐 쌓이고 그치면 8분쯤에 걸쳐 녹는다 (처음 들어왔을 땐 지금 날씨 모습에서 바로 시작)
    */
+  /** 맞을 때 타격음 (대전·필드와 같은 소리). 멀리서 맞으면 작게, 25m 넘으면 안 들린다 */
+  private hitSound(e: CombatEvent) {
+    const d = Math.hypot(e.x - this.camera.position.x, e.z - this.camera.position.z);
+    const vol = Math.max(0, 1 - d / 25);
+    if (vol > 0.02) playHit(e.kind, e.heavy || e.damage >= 18, vol);
+  }
+
   private updateGroundWeather(dt: number) {
     const w = this.weather;
     const wetTo = Math.min(1, w.rain * 1.2);

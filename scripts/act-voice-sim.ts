@@ -20,7 +20,7 @@ check('kind: jab is a light shout', moveVoiceKind(MOVES.jab) === 'atk');
 check('kind: uppercut is a heavy shout', moveVoiceKind(MOVES.uppercut) === 'heavy');
 check('kind: character skills shout their own name', moveVoiceKind(MOVES.smallSilverFlyingKick) === 'skillFly' && moveVoiceKind(MOVES.smallSilverTornadoKick) === 'skillTornado' && moveVoiceKind(MOVES.smallSilverBackTurnKick) === 'skillBack');
 
-// 큰기술: 내 외침 + 컷인, 같은 곳 친구도 같은 소리 + 컷인
+// 큰기술: 기술 이름은 외치지 않고 컷인만 (내 화면 · 같은 곳 친구 화면 둘 다)
 {
   let next: Inp = idle();
   const A = new CityWorld({ read: () => next }, girl(), 41);
@@ -36,7 +36,7 @@ check('kind: character skills shout their own name', moveVoiceKind(MOVES.smallSi
   A.step();
   next = idle();
   for (let i = 0; i < 3; i++) A.step();
-  check('skill: I shout the skill name', heardA.includes('me /voices/smallSilverGirl/act/skillFly.mp3'), `(${heardA.join()})`);
+  check('skill: no skill-name shout', !heardA.some((h) => h.includes('/act/skill')), `(${heardA.join()})`);
   check('skill: cut-in shows on my screen', A.cutIns.some((c) => c.who === 'me' && c.kind === 'skillFly'));
   const sent = A.actOut.splice(0);
   check('skill: the shout is sent to the town', sent.includes('skillFly'), `(${sent.join()})`);
@@ -45,7 +45,7 @@ check('kind: character skills shout their own name', moveVoiceKind(MOVES.smallSi
   ra.fighter.x = B.player.x + 3;
   ra.fighter.z = B.player.z;
   for (const s of sent) B.receiveAct('a', s);
-  check('skill: friend nearby hears the same shout', heardB.some((h) => h.who === 'a' && h.src.endsWith('/act/skillFly.mp3') && h.v > 0.5), `(${JSON.stringify(heardB)})`);
+  check('skill: friend hears no skill-name shout either', !heardB.some((h) => h.src.includes('/act/skill')), `(${JSON.stringify(heardB)})`);
   check('skill: friend sees my cut-in too', B.cutIns.some((c) => c.who === 'a' && c.kind === 'skillFly'));
 
   // 맞으면 비명
