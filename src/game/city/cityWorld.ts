@@ -1046,10 +1046,13 @@ export class CityWorld {
     av.n++;
     av.lastAt = this.frame;
     const name = pickVoice(kind, av.n >> 1);
-    const src = actionVoiceSrc(this.profile.body, name);
-    // 큰기술은 기술 이름을 외치지 않는다 (컷인 그림과 타격음만)
-    if (src && !(kind in SKILL_CUTIN)) this.onActionVoice?.('me', src, 1);
-    if (kind in SKILL_CUTIN) {
+    const skill = kind in SKILL_CUTIN;
+    // 큰기술은 기술 이름 대신 강공격 기합을 낸다 (기합 이름도 마을로 보내 친구 화면에서 같은 소리)
+    const shout = skill ? pickVoice('heavy', av.n >> 1) : name;
+    const src = actionVoiceSrc(this.profile.body, shout);
+    if (src) this.onActionVoice?.('me', src, 1);
+    if (skill) this.actOut.push(shout);
+    if (skill) {
       this.cutIns.push({ who: 'me', kind, body: this.profile.body ?? '' });
       this.cutInCam = { who: 'me', at: performance.now() };
     }

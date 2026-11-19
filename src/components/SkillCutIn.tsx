@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
 import { CUTIN_ART_BODIES, CUTIN_MS, SKILL_CUTIN } from '@/game/data/actionVoices';
+import { playWhoosh } from '@/game/render/sfx';
 
 /** 렌더러가 기술을 쓴 캐릭터만 실시간으로 찍어 담는 그림판 · 그 캐릭터를 찍을 수 있는지 */
 export interface CutInLive {
@@ -44,6 +45,8 @@ export default function SkillCutIn({ world, live }: { world: CityWorld | null; l
       if (!c) return;
       const def = SKILL_CUTIN[c.kind];
       if (!def) return;
+      // 큰기술을 휘두르는 "휙" 소리 (맞으면 타격음은 따로 난다)
+      playWhoosh(true);
       const name = c.who === 'me' ? world.netName || '나' : (world.remotes.get(c.who)?.name ?? '이웃');
       // 공격 그림이 있으면 그림으로, 없으면 3D 캐릭터를 실시간으로 찍는다
       const canLive = !CUTIN_ART_BODIES.has(c.body) && !!live?.current?.can(c.who);

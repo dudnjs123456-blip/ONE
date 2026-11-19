@@ -36,7 +36,7 @@ export function actionVoiceSrc(body: string | undefined, name: string): string |
   return hasActionVoice(body) && isActionVoiceName(name) ? `/voices/${body}/act/${name}.mp3` : null;
 }
 
-/** 큰기술 (캐릭터 스킬): 옆에 컷인 그림 (기술 이름 외침은 끔 — 소리는 타격음만) */
+/** 큰기술 (캐릭터 스킬): 옆에 컷인 그림 + 강공격 기합 · 휘두르는 소리 (기술 이름 외침은 끔) */
 export const SKILL_VOICE: Record<string, ActionVoiceKind> = {
   smallSilverFlyingKick: 'skillFly',
   smallSilverTornadoKick: 'skillTornado',
