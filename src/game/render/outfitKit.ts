@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { VRM, VRMHumanBoneName } from '@pixiv/three-vrm';
 import { COSMETIC_BY_ID, FABRICS, type CosmeticDef, type CosmeticSlot, type Fabric, type Pattern } from '../data/fashion';
 import { track } from './loadTracker';
+import { buildBathrobe, measureRestBones, type RestBones } from './bathrobe';
 import { addOutline, toonGradient } from './lookFx';
 
 /**
@@ -334,6 +335,7 @@ export class OutfitDresser {
       }
     }
     try {
+      this.rest = measureRestBones(vrm);
       this.m = measure(vrm);
     } catch (e) {
       console.warn('코디 치수 재기 실패:', e);
@@ -364,6 +366,59 @@ export class OutfitDresser {
 
   private clothMeshes: THREE.Object3D[] = [];
   private shoeMeshes: THREE.Object3D[] = [];
+  /** 샤워 가운·머리 수건 (처음 입을 때 만든다) · 입었나 · 가운 밑 옷을 벗겼나 · 가운 입을 때 감추는 머리카락·장신구 메쉬 */
+  private robe: THREE.Object3D[] | null = null;
+  private rest: RestBones = {};
+  private robeOn = false;
+  private robeStrip = false;
+  private hairMeshes: THREE.Object3D[] | null = null;
+
+  /**
+   * 샤워 가운을 입히거나 벗긴다. strip = 가운 밑 옷·신발을 감춘다 (옷 속에 몸이 있는 모델만:
+   * 무릎 아래로 맨다리·맨발이 보인다). 머리카락은 수건 속으로 넣어 감추고, 모자·안경·가방도 잠깐 벗는다.
+   */
+  setRobe(on: boolean, strip: boolean) {
+    if (this.robeOn === on && this.robeStrip === (on && strip)) return;
+    if (on && !this.robe && this.m) {
+      try {
+        this.robe = buildBathrobe(this.vrm, this.rest, this.m, (g) => {
+          const size = new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3());
+          addOutline(g, 0.0045 / Math.max(0.05, Math.max(size.x, size.y, size.z)));
+          keepFieldOutline(g);
+        });
+      } catch (e) {
+        console.warn('샤워 가운 만들기 실패:', e);
+        this.robe = [];
+      }
+    }
+    if (on && !this.robe) return;
+    this.robeOn = on;
+    this.robeStrip = on && strip;
+    for (const o of this.robe ?? []) o.visible = on;
+    if (!this.hairMeshes) {
+      const hair: THREE.Object3D[] = [];
+      const geos = new Set<THREE.BufferGeometry>();
+      this.vrm.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || mesh.userData.isOutline) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        // 머리카락(수건 속) · 장신구(넥타이·리본 등, 가운 속)
+        if (mats.length && mats.every((mt) => matName(mt).startsWith('Hair_') || matName(mt).startsWith('Accessory_'))) {
+          hair.push(mesh);
+          geos.add(mesh.geometry);
+        }
+      });
+      this.vrm.scene.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh && mesh.userData.isOutline && geos.has(mesh.geometry)) hair.push(mesh);
+      });
+      this.hairMeshes = hair;
+    }
+    for (const o of this.hairMeshes) o.visible = !on;
+    for (const { obj } of this.acc.values()) obj.visible = !on;
+    this.syncCloth();
+    this.syncSkin();
+  }
   /** 진짜 신발을 신었다 (기본 신발을 감춘다) */
   private shoesOn = false;
   /** 긴바지: 다리에 칠할 바지 색 (null = 없음) */
@@ -375,8 +430,8 @@ export class OutfitDresser {
 
   /** 기본 옷: 비키니나 갈아입는 옷을 입으면 감춘다 */
   private syncCloth() {
-    for (const o of this.clothMeshes) o.visible = !this.swim && !this.garmentOn;
-    for (const o of this.shoeMeshes) o.visible = !this.shoesOn;
+    for (const o of this.clothMeshes) o.visible = !this.swim && !this.garmentOn && !this.robeStrip;
+    for (const o of this.shoeMeshes) o.visible = !this.shoesOn && !this.robeStrip;
   }
 
   /** 갈아입는 옷을 입었나 (캐릭터가 옷 파일을 다 불러와 붙인 뒤에 부른다) */
@@ -438,7 +493,7 @@ export class OutfitDresser {
    */
   private syncSkin() {
     for (const k of this.skin) {
-      const cover = this.swimColor === null && this.garmentOn;
+      const cover = this.swimColor === null && (this.garmentOn || this.robeStrip);
       if ((this.swimColor === null && !cover) || !this.m || !k.origMap?.image) {
         if (k.origMap) k.mat.map = k.origMap;
         if (k.origShade) k.mat.shadeMultiplyTexture = k.origShade;
@@ -490,7 +545,10 @@ export class OutfitDresser {
       }
       if (c && this.m) {
         const obj = buildAccessory(c, this.m);
-        if (obj) this.acc.set(slot, { id: c.id, obj });
+        if (obj) {
+          obj.visible = !this.robeOn;
+          this.acc.set(slot, { id: c.id, obj });
+        }
       }
     }
   }
@@ -498,6 +556,11 @@ export class OutfitDresser {
   dispose() {
     for (const { obj } of this.acc.values()) disposeTree(obj);
     this.acc.clear();
+    for (const o of this.robe ?? []) {
+      o.removeFromParent();
+      disposeTree(o);
+    }
+    this.robe = null;
     for (const t of this.own) t.dispose();
   }
 

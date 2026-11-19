@@ -12,7 +12,7 @@ import { FACE_KEYS, MOOD_FACE, eyesBusy, type FaceKey } from './moodFace';
 import { sleepBreath, sleepMotion } from './sleepMotion';
 import { sharedNow } from '../city/worldClock';
 import { Garment } from './garmentKit';
-import { garmentPieces } from '../data/fashion';
+import { garmentPieces, hasBodyUnderClothes } from '../data/fashion';
 import { BODY_TYPES } from './looks';
 import type { PlayerMood } from '../data/npcs';
 import {
@@ -862,6 +862,10 @@ export class VrmCharacter implements CharacterView {
 
   /** 집안일 자세: 팔·상체·고개를 단계 표(chorePose)대로. 단계 사이는 부드럽게 이어진다 */
   private applyChore(vrm: VRM, dt: number) {
+    // 샤워하는 동안은 목욕 가운 + 머리 수건 (갈아입은 옷 파일은 감춘다)
+    const robe = this.chore?.kind === 'shower';
+    this.dresser?.setRobe(robe, hasBodyUnderClothes(this.bodyId));
+    for (const g of this.garments) g.root.visible = !robe;
     const want = this.chore ? chorePose(this.chore.kind, this.chore.t) : null;
     this.choreW += ((want ? 1 : 0) - this.choreW) * smooth(0.2, dt);
     if (want) {

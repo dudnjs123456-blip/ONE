@@ -256,6 +256,11 @@ export const MALE_BODIES: readonly string[] = ['male', 'silverboy'];
 /** VRoid 에서 내보낼 때 옷에 가려진 몸을 지운 모델 (옷을 감추면 몸통이 비어 보인다) */
 const NO_BODY_UNDER_CLOTHES: readonly string[] = ['pink'];
 
+/** 옷을 감춰도 속에 몸이 있는 모델 (샤워 가운 밑 옷을 벗길 수 있다) */
+export function hasBodyUnderClothes(body: string): boolean {
+  return !NO_BODY_UNDER_CLOTHES.includes(body);
+}
+
 /** 이 캐릭터가 못 입는 이유 (입을 수 있으면 null). 비키니는 여자 캐릭터만, 옷 속 몸이 있는 모델만 */
 export function wearBlock(p: PlayerProfile, c: CosmeticDef): string | null {
   if (c.garment && !c.garment[p.body ?? 'female']) return '아직 이 캐릭터에 맞는 옷이 없어요';
