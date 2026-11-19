@@ -23,7 +23,7 @@ interface Shown {
 
 /**
  * 큰기술 컷인: 캐릭터 스킬을 쓰면 왼쪽에서 비스듬한 띠와 함께 그 캐릭터가 그 기술을 쓰는 공격 그림이
- * 휙 들어왔다 나간다 (그림이 없는 몸은 3D 캐릭터를 실시간으로 찍어서). 같은 곳의 친구가 쓰면 친구 이름을 달고 작게 뜬다.
+ * 화면 왼쪽 아래에 작게 휙 들어왔다 나간다 (그림이 없는 몸은 3D 캐릭터를 실시간으로 찍어서). 같은 곳의 친구가 쓰면 친구 이름을 달고 더 작게 뜬다.
  */
 export default function SkillCutIn({ world, live }: { world: CityWorld | null; live?: RefObject<CutInLive | null> }) {
   const [shown, setShown] = useState<Shown | null>(null);
@@ -75,7 +75,7 @@ export default function SkillCutIn({ world, live }: { world: CityWorld | null; l
   return (
     <div
       key={shown.id}
-      className={`pointer-events-none absolute left-0 z-30 ${mine ? 'top-[18%] h-[46vh] max-h-[420px] w-[78vw] max-w-[620px]' : 'top-[22%] h-[30vh] max-h-[260px] w-[60vw] max-w-[400px]'}`}
+      className={`pointer-events-none absolute left-0 z-30 ${mine ? 'bottom-[12%] h-[24vh] max-h-[210px] w-[42vw] max-w-[320px]' : 'bottom-[12%] h-[17vh] max-h-[150px] w-[32vw] max-w-[230px]'}`}
       style={{ animation: `cutin-life ${CUTIN_MS}ms ease-out forwards` }}
     >
       <style>{`
