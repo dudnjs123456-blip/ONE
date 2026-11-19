@@ -972,11 +972,12 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
  * 외곽선 굵기는 미터 단위라 카메라가 가까울수록(대전·동네·코디 창) 화면에서 두꺼워 보인다.
  * 필드 카메라(약 12m, 시야 45°)에서 보이는 굵기를 기준으로, 그보다 가까우면 그만큼 가늘게 해서
  * 어디서 보든 화면 속 선 굵기가 필드와 비슷하게 한다. 더 멀 때는 지금처럼 둔다.
- * 거의 검정이던 선은 진해 보여서, 색은 부드러운 짙은 장밋빛으로 바꾸고 굵기도 절반으로 줄인다.
+ * 색은 짙은 밤색(검정보다 부드럽지만 어두운 거리에서도 윤곽이 보이게), 굵기는 원래의 80%.
+ * (2026-11-07 에 연한 장밋빛·절반 굵기로 바꿨더니 캐릭터가 배경에 묻혀 흐릿해 보였다)
  */
-const SOFT_OUTLINE = 0x7a6070;
-const OUTLINE_SCALE = 0.5;
-const FIELD_VIEW = Math.hypot(8.5, 9) * Math.tan(THREE.MathUtils.degToRad(45 / 2));
+const SOFT_OUTLINE = 0x352630;
+/** 외곽선의 화면 속 굵기 (화면 높이 900px 기준 약 1.5px). 카메라가 멀어도 가까워도 같은 굵기로 보인다 */
+const OUTLINE_PX = (2 * 1.5) / 900;
 export function keepFieldOutline(root: THREE.Object3D) {
   const mats = new Set<THREE.Material>();
   root.traverse((o) => {
@@ -992,7 +993,7 @@ export function keepFieldOutline(root: THREE.Object3D) {
         'transformed += normalize(normal) * outlineWidth;',
         // 화면 속 크기 ∝ 1 / (거리 × tan(시야/2)), projectionMatrix[1][1] = 1 / tan(시야/2)
         `float olView = length((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz) / projectionMatrix[1][1];
-  transformed += normalize(normal) * outlineWidth * ${OUTLINE_SCALE.toFixed(2)} * clamp(olView / ${FIELD_VIEW.toFixed(3)}, 0.15, 1.0);`,
+  transformed += normalize(normal) * max(outlineWidth * 0.5, olView * ${OUTLINE_PX.toFixed(5)});`,
       );
     };
     mat.needsUpdate = true;

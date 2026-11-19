@@ -104,16 +104,20 @@ export function updateRim(night: number, dusk: number, indoor: boolean) {
   else RIM.color.value.setRGB(1, 0.95, 0.86).lerp(_rimDusk, Math.min(1, dusk)).lerp(_rimNight, night);
   RIM.strength.value = indoor ? 0.22 : 0.3 + night * 0.12;
   // 캐릭터 보정광: 밤 거리에선 푸른 달빛만 받아 머리·피부가 남색으로 묻히므로 흰빛을 조금 더 받게 한다
-  CHAR_LIGHT.lift.value = indoor ? 0.05 : 0.07 + night * 0.16;
+  // (흰빛을 너무 더하면 색이 바래 연해 보인다: 밤에만 조금)
+  CHAR_LIGHT.lift.value = indoor ? 0.02 : 0.03 + night * 0.08;
 }
 
 /**
  * 캐릭터(VRM)만 받는 보정광 (게임 엔진의 '캐릭터 조명' 같은 것).
- * 거리·건물 밝기는 그대로 두고, 캐릭터는 제 색(머리·피부·옷)이 또렷이 보이게 바탕색에 비례한 흰빛을 더한다
+ * 거리·건물 밝기는 그대로 두고, 캐릭터는 제 색(머리·피부·옷)이 또렷이 보이게 바탕색에 비례한 흰빛을 조금 더하고,
+ * 화면 색 변환(ACES)에서 빠지는 채도를 미리 올려 둔다 (saturation 1 = 그대로)
  */
-export const CHAR_LIGHT = { lift: { value: 0.07 } };
+export const CHAR_LIGHT = { lift: { value: 0.03 }, saturation: { value: 1.2 } };
 const _rimDusk = new THREE.Color(1, 0.62, 0.38);
 const _rimNight = new THREE.Color(0.45, 0.62, 1);
+const _rimChar = new THREE.Color();
+const _white = new THREE.Color(1, 1, 1);
 
 /** 툰 재질에 림 라이트를 넣는다 (행인 모델). 경계가 또렷한 애니메이션식 테두리 빛 */
 export function addRim(mat: THREE.MeshToonMaterial) {
@@ -157,7 +161,8 @@ export function setupMToonRim(root: THREE.Object3D): MToonRim[] {
       };
       if (!mt.isMToonMaterial || mt.isOutline || seen.has(m)) continue;
       seen.add(m);
-      mt.parametricRimFresnelPowerFactor = 4.5;
+      // 얇고 또렷한 테두리 빛 (낮을수록 넓게 번져 뿌옇다)
+      mt.parametricRimFresnelPowerFactor = 6;
       mt.parametricRimLiftFactor = 0;
       mt.rimLightingMixFactor = 0.35;
       addCharLight(mt);
@@ -168,7 +173,9 @@ export function setupMToonRim(root: THREE.Object3D): MToonRim[] {
 }
 export function updateMToonRim(list: MToonRim[]) {
   // 림 라이트는 윤곽만 살짝 (세면 밤에 푸른 빛이 캐릭터를 뿌옇게 덮는다)
-  for (const r of list) r.mat.parametricRimColorFactor.copy(RIM.color.value).multiplyScalar(RIM.strength.value * 0.9).add(r.base);
+  // 색은 흰빛 쪽으로 (밤의 푸른 림은 캐릭터를 남색으로 덮는다), 대신 얇게 해서 윤곽만 밝힌다
+  const c = _rimChar.copy(RIM.color.value).lerp(_white, 0.6).multiplyScalar(RIM.strength.value * 1.5);
+  for (const r of list) r.mat.parametricRimColorFactor.copy(c).add(r.base);
 }
 
 /** MToon 셰이더에 캐릭터 보정광을 끼워 넣는다 (three-vrm 의 원래 셰이더 손질 뒤에 이어서) */
@@ -180,9 +187,13 @@ function addCharLight(mt: THREE.Material) {
   mt.onBeforeCompile = (sh, r) => {
     prev(sh, r);
     sh.uniforms.charLift = CHAR_LIGHT.lift;
+    sh.uniforms.charSat = CHAR_LIGHT.saturation;
     sh.fragmentShader = sh.fragmentShader
-      .replace('uniform vec3 litFactor;', 'uniform vec3 litFactor;\nuniform float charLift;')
-      .replace('col += totalEmissiveRadiance;', 'col += diffuseColor.rgb * charLift;\n  col += totalEmissiveRadiance;');
+      .replace('uniform vec3 litFactor;', 'uniform vec3 litFactor;\nuniform float charLift;\nuniform float charSat;')
+      .replace(
+        'col += totalEmissiveRadiance;',
+        'col += diffuseColor.rgb * charLift;\n  { float cl = dot(col, vec3(0.2126, 0.7152, 0.0722)); col = max(mix(vec3(cl), col, charSat), 0.0); }\n  col += totalEmissiveRadiance;',
+      );
   };
   mt.customProgramCacheKey = () => prevKey() + '|charLight';
   mt.needsUpdate = true;
