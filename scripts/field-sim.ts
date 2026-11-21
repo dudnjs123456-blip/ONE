@@ -162,3 +162,24 @@ if (w.profile.kills === 0) process.exitCode = 1;
   console.log(`${ok ? 'PASS' : 'FAIL'}  respawn in village (${w.player.x.toFixed(1)}, ${w.player.z.toFixed(1)})`);
   if (!ok) process.exitCode = 1;
 }
+
+// 마을 안: 방향키만 = 걷기, Shift(run) = 달리기 (서울과 같이). 사냥터: 늘 달린다
+{
+  const dist = (run: boolean, inField: boolean) => {
+    const w = new FieldWorld({ read: () => ({ move: { x: 1, z: 0 }, run, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile());
+    if (inField) {
+      w.player.x = -15;
+      w.player.z = -15;
+    } else w.player.x = -4;
+    for (let i = 0; i < 20; i++) w.step();
+    const x0 = w.player.x;
+    for (let i = 0; i < 30; i++) w.step();
+    return w.player.x - x0;
+  };
+  const walk = dist(false, false);
+  const run = dist(true, false);
+  const field = dist(false, true);
+  const ok = walk > 0.5 && run > walk * 1.8 && field > walk * 1.3;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  village walk/run (30프레임: 걷기 ${walk.toFixed(2)}m, Shift 달리기 ${run.toFixed(2)}m, 사냥터 ${field.toFixed(2)}m)`);
+  if (!ok) process.exitCode = 1;
+}

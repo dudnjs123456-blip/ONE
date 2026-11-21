@@ -47,7 +47,7 @@ export class AutoHuntController implements PlayerController {
     if (!t || !p.isActionable) return { move: null, input: NEUTRAL_INPUT };
 
     // 마을 안이면 먼저 북문으로 나간다 (담장을 따라 미끄러져 문으로 들어선다)
-    if (p.z > FIELD_HALF - 0.3 && t.z < FIELD_HALF) return { move: { x: VILLAGE_GATE_OUT.x - p.x, z: VILLAGE_GATE_OUT.z - p.z }, input: NEUTRAL_INPUT };
+    if (p.z > FIELD_HALF - 0.3 && t.z < FIELD_HALF) return { move: { x: VILLAGE_GATE_OUT.x - p.x, z: VILLAGE_GATE_OUT.z - p.z }, run: true, input: NEUTRAL_INPUT };
     const dx = t.x - p.x;
     const dz = t.z - p.z;
     if (Math.hypot(dx, dz) > ENGAGE_RANGE) return { move: { x: dx, z: dz }, input: NEUTRAL_INPUT };
@@ -79,9 +79,13 @@ export class FieldKeyboardController implements PlayerController {
 
   read(w: FieldWorld): FieldCommand {
     const raw = this.padIndex === undefined ? this.kb.read(this.map) : mergeRaw(this.kb.read(this.map), readGamepad(this.padIndex));
-    const crouch = bindCodes('run').some((k) => this.kb.has(k)) || bindCodes('crouch').some((k) => this.kb.has(k)) || (this.padIndex !== undefined && padHeld(4, this.padIndex));
+    const runKey = bindCodes('run').some((k) => this.kb.has(k));
+    const duckKey = bindCodes('crouch').some((k) => this.kb.has(k)) || (this.padIndex !== undefined && padHeld(4, this.padIndex));
     const mx = (raw.right ? 1 : 0) - (raw.left ? 1 : 0);
     const mz = (raw.down ? 1 : 0) - (raw.up ? 1 : 0);
+    const anyButton = raw.buttons.some(Boolean);
+    // 서울과 같이: Shift + 방향키 = 달리기. Shift 만 누르거나 Shift + 기술 버튼이면 '아래' (Shift+앞+W = 어퍼)
+    const crouch = duckKey || (runKey && (!(mx || mz) || anyButton));
     const p = w.player;
 
     let h: -1 | 0 | 1 = 0;
@@ -89,8 +93,7 @@ export class FieldKeyboardController implements PlayerController {
       const d = (mx * p.fx + mz * p.fz) / Math.hypot(mx, mz);
       h = d > 0.5 ? 1 : d < -0.5 ? -1 : 0;
     }
-    const anyButton = raw.buttons.some(Boolean);
     const move = !crouch && !anyButton && (mx || mz) ? { x: mx, z: mz } : null;
-    return { move, input: { dir: dirFrom(h, crouch ? -1 : 0), buttons: raw.buttons, jump: raw.jump } };
+    return { move, run: runKey, input: { dir: dirFrom(h, crouch ? -1 : 0), buttons: raw.buttons, jump: raw.jump } };
   }
 }

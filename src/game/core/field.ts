@@ -83,6 +83,9 @@ const FIELD_HITSTOP_MAX = 6;
 const CORPSE_FRAMES = 90;
 const PLAYER_RESPAWN_FRAMES = 180;
 const REGEN_DELAY = 300;
+/** 마을 안 걷기·달리기 속도 (서울과 같다) */
+const VILLAGE_WALK = 0.045;
+const VILLAGE_RUN = 0.1;
 /** 플레이어를 바라보는 거리 (이 안에서는 서로 정면을 유지) */
 const FACE_RANGE = 3.5;
 /** 이만큼(프레임) 소식이 없는 사람은 같이 있는 걸로 치지 않는다 (창을 내려 둔 사람 등) */
@@ -96,6 +99,8 @@ const HUNTER_INDEX = 100000;
 export interface FieldCommand {
   /** 월드 기준 이동 방향. null 이면 제자리 (철권식 입력만) */
   move: { x: number; z: number } | null;
+  /** 달리기 (Shift). 마을 안에선 안 누르면 걷는다 */
+  run?: boolean;
   input: RelInput;
 }
 
@@ -325,6 +330,8 @@ export class FieldWorld {
   target: Monster | null = null;
   /** 경계 마을 사람들 */
   readonly npcs: VillageNpc[];
+  /** 사냥터에서 달리는 속도 (마을 밖) */
+  private baseRun: number;
   /** 대화 중 (내 캐릭터는 멈춰 선다) */
   talking: VillageNpc | null = null;
   playerDeadFrames = 0;
@@ -369,6 +376,7 @@ export class FieldWorld {
     this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     // 접속하면 경계 마을 포탈 앞에서 시작한다 (자동사냥은 꺼 둔 채로, 켜면 북문을 나가 사냥)
     this.player.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
+    this.baseRun = this.player.runSpeed;
     this.npcs = VILLAGE_NPCS.map((def, i) => {
       const f = new Fighter(HUNTER_INDEX - 1 - i, def.name, { maxHp: 1, power: 0, canBlock: false });
       f.reset(def.x, def.z, def.fx, def.fz);
@@ -522,6 +530,8 @@ export class FieldWorld {
       p.moveScale = life.slow * (life.canRun ? 1 : 0.8);
       if (life.warn) this.addLog(LIFE_WARNING[life.warn]);
       const cmd = this.talking ? idle() : (this.auto ? this.autoCtl : this.manual).read(this);
+      // 마을 안: 방향키 = 걷기, Shift = 달리기 (서울처럼). 사냥터: 늘 달린다
+      p.runSpeed = inVillage(p.x, p.z) ? (cmd.run ? VILLAGE_RUN : VILLAGE_WALK) : this.baseRun;
       p.freeMove = cmd.move;
       p.feed(cmd.input);
     } else {
