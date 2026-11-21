@@ -27,7 +27,8 @@
     "test:share": "tsx scripts/share-sim.ts",
     "test:fish": "tsx scripts/fish-sim.ts",
     "test:karaoke": "tsx scripts/karaoke-sim.ts",
-    "test:park": "tsx scripts/park-sim.ts"
+    "test:park": "tsx scripts/park-sim.ts",
+    "test:prologue": "tsx scripts/prologue-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

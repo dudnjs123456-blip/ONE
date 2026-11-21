@@ -10,6 +10,7 @@ import { playerLook, type BodyType } from './looks';
 import { wornList } from '../data/fashion';
 import type { Appearance, CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
+import { headshot } from './portraitShot';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playCoin, playHit, playLevelUp } from './sfx';
 import { PersonView } from './personView';
@@ -126,6 +127,16 @@ export class FieldRenderer {
 
     this.updateCamera(world.player, clock);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * 대화창 초상화: 이 캐릭터(나·NPC·몬스터) 얼굴을 찍은 그림. 모델을 아직 다 불러오지 못했으면 null (조금 뒤 다시 부른다)
+   */
+  portraitOf(f: Fighter): string | null {
+    const a = this.actors.get(f);
+    if (!a || (a.mannequin as { loaded?: boolean }).loaded === false) return null;
+    const others = [...this.actors.values()].map((o) => o.mannequin.root).filter((r) => r !== a.mannequin.root);
+    return headshot(this.renderer, this.scene, a.mannequin.root, { x: f.fx, z: f.fz }, { hide: others });
   }
 
   dispose() {

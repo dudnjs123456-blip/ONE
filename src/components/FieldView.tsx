@@ -22,6 +22,11 @@ import { DimensionLink } from '@/game/net/dimension';
 import type { Account } from '@/game/net/auth';
 import { bindCodes } from '@/game/core/keybinds';
 import VillageTalk, { type TalkState } from './VillageTalk';
+import DimensionPrologue from './DimensionPrologue';
+import StoryDialog, { type DialogLine } from './StoryDialog';
+import { RESCUE_SCRIPT, type ScriptLine } from '@/game/data/prologueScript';
+import { VILLAGE_NPCS } from '@/game/data/village';
+import { playerPortrait } from '@/game/data/portraits';
 
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
@@ -30,7 +35,31 @@ const WARP_MS = 1600;
  * 다른 차원: 서울 집 컴퓨터로 접속하는 사냥터. 로그인했으면 같은 차원에 들어온 사람들과 같은 몬스터를 본다.
  * 로그아웃하면 서울 집 컴퓨터 앞으로 돌아간다.
  */
-export default function FieldView({ profile, account = null, onExit }: { profile: PlayerProfile; account?: Account | null; onExit: () => void }) {
+/**
+ * 차원 들어가기: 처음이면 프롤로그(게임을 켰더니 컴퓨터 속으로 → 안개 숲 → 그림자에게 쫓겨 벼랑에서 뛰어내림)를 먼저 보고,
+ * 벼랑 밑에서 구해진 채 경계 마을에서 깨어난다. 그다음부턴 바로 마을 포탈 앞.
+ */
+export default function FieldView(props: { profile: PlayerProfile; account?: Account | null; onExit: () => void }) {
+  const { profile } = props;
+  const [prologue, setPrologue] = useState(() => !profile.dimension?.prologue);
+  const [intro, setIntro] = useState(false);
+  if (prologue)
+    return (
+      <DimensionPrologue
+        profile={profile}
+        onExit={props.onExit}
+        onDone={() => {
+          profile.dimension = { visits: profile.dimension?.visits ?? 0, ...profile.dimension, prologue: true };
+          saveProfile(profile);
+          setIntro(true);
+          setPrologue(false);
+        }}
+      />
+    );
+  return <DimensionField {...props} intro={intro} />;
+}
+
+function DimensionField({ profile, account = null, onExit, intro = false }: { profile: PlayerProfile; account?: Account | null; onExit: () => void; intro?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<FieldWorld | null>(null);
   const [hud, setHud] = useState<FieldHudState | null>(null);
@@ -45,7 +74,14 @@ export default function FieldView({ profile, account = null, onExit }: { profile
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
   const portrait = usePortrait();
-  const talkApi = useRef<{ start: () => void; next: () => void; close: () => void } | null>(null);
+  const talkApi = useRef<{ start: () => void; next: () => void; close: () => void; story: () => void } | null>(null);
+  /** 이야기 장면 대사 (여러 사람이 번갈아 말한다) */
+  const [story, setStory] = useState<{ lines: ScriptLine[]; idx: number } | null>(null);
+  const storyRef = useRef(story);
+  storyRef.current = story;
+  /** 찍어 둔 얼굴 ('me' · NPC id → 그림) */
+  const [faces, setFaces] = useState<Record<string, string>>({});
+  const facesRef = useRef(faces);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
@@ -60,9 +96,21 @@ export default function FieldView({ profile, account = null, onExit }: { profile
     // 로그인했으면 같은 차원에 접속 (서울 동네 접속은 서울 화면을 나오면서 끊겨, 서울에선 내가 사라진다)
     const link = account ? new DimensionLink(world, account) : null;
     link?.start();
-    profile.dimension = { visits: (profile.dimension?.visits ?? 0) + 1 };
+    // 접속 횟수만 늘린다 (만난 NPC · 프롤로그 기록은 그대로)
+    profile.dimension = { ...profile.dimension, visits: (profile.dimension?.visits ?? 0) + 1 };
     saveProfile(profile);
-    const warpTimer = window.setTimeout(() => setWarp(false), WARP_MS);
+    const warpTimer = window.setTimeout(() => setWarp(false), intro ? 0 : WARP_MS);
+    let storyTimer = 0;
+    if (intro) {
+      // 프롤로그에서 벼랑 아래로 떨어진 뒤: 여관 앞에서 달래가 지켜보는 가운데 깨어난다
+      const dallae = world.npcs.find((n) => n.def.id === 'dallae');
+      world.player.reset(-6.7, 31.3, -1, -0.25);
+      if (dallae) {
+        world.talking = dallae;
+        dallae.fighter.faceToward(world.player);
+      }
+      storyTimer = window.setTimeout(() => setStory({ lines: RESCUE_SCRIPT, idx: 0 }), 1500);
+    }
 
     const renderer = new FieldRenderer(canvas);
     const detachZoom = attachZoomControls(renderer, 0.2, 2.2);
@@ -74,6 +122,10 @@ export default function FieldView({ profile, account = null, onExit }: { profile
       // 대화 중: E · Enter · Space 다음 줄, Esc 닫기 (게임 키는 대화창이 먹는다)
       const t = talkRef.current;
       const interact = bindCodes('interact').includes(e.code);
+      if (storyRef.current) {
+        if (!e.repeat && (interact || e.code === 'Enter' || e.code === 'Space')) nextStory();
+        return;
+      }
       if (t) {
         if (e.repeat) return;
         if (e.code === 'Escape') closeTalk();
@@ -96,7 +148,28 @@ export default function FieldView({ profile, account = null, onExit }: { profile
 
     function startTalk() {
       const r = world.talk();
-      if (r) setTalk({ npc: r.npc, lines: r.lines, idx: 0, first: r.first });
+      if (r) setTalk({ npc: r.npc, lines: r.lines, idx: 0, first: r.first, portrait: face(r.npc.id) });
+    }
+    /** 대사창 초상화: 나 · 마을 사람 얼굴을 장면에서 찍어 둔다 (한 번 찍으면 다시 쓴다) */
+    function face(who: string): string | null {
+      const got = facesRef.current[who];
+      if (got) return got;
+      const f = who === 'me' ? world.player : world.npcs.find((n) => n.def.id === who)?.fighter;
+      const shot = f ? renderer.portraitOf(f) : null;
+      if (shot) {
+        facesRef.current = { ...facesRef.current, [who]: shot };
+        setFaces(facesRef.current);
+      }
+      return shot;
+    }
+    function nextStory() {
+      const s = storyRef.current;
+      if (!s) return;
+      if (s.idx + 1 < s.lines.length) return setStory({ ...s, idx: s.idx + 1 });
+      // 구해 준 사람과 인사한 것으로 친다 (여관 주인이면 차 한 잔으로 기운도 차린다)
+      world.endTalk();
+      saveProfile(profile);
+      setStory(null);
     }
     function closeTalk() {
       world.endTalk();
@@ -109,7 +182,7 @@ export default function FieldView({ profile, account = null, onExit }: { profile
       if (t.idx + 1 < t.lines.length) setTalk({ ...t, idx: t.idx + 1 });
       else closeTalk();
     }
-    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk };
+    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory };
 
     let raf = 0;
     let last = performance.now();
@@ -132,6 +205,16 @@ export default function FieldView({ profile, account = null, onExit }: { profile
 
       link?.tick(now);
       renderer.sync(world, makeClock(world.frame, acc / FRAME_MS, world.hitstop > 0, dt));
+      // 대사 중인데 아직 얼굴을 못 찍었으면 (모델을 불러오는 중) 조금씩 다시 찍어 본다
+      if (world.frame % 15 === 0) {
+        const s = storyRef.current;
+        const t = talkRef.current;
+        if (s) for (const who of new Set(s.lines.map((l) => l.who))) if (!facesRef.current[who]) face(who);
+        if (t && !t.portrait) {
+          const shot = face(t.npc.id);
+          if (shot) setTalk({ ...t, portrait: shot });
+        }
+      }
       const h = world.hud();
       const key = JSON.stringify(h);
       if (key !== lastHudKey) {
@@ -145,6 +228,7 @@ export default function FieldView({ profile, account = null, onExit }: { profile
       cancelAnimationFrame(raf);
       window.clearInterval(autosave);
       window.clearTimeout(warpTimer);
+      window.clearTimeout(storyTimer);
       link?.stop();
       saveProfile(profile);
       window.removeEventListener('resize', resize);
@@ -157,7 +241,7 @@ export default function FieldView({ profile, account = null, onExit }: { profile
       renderer.dispose();
       worldRef.current = null;
     };
-  }, [profile, kb, account]);
+  }, [profile, kb, account, intro]);
 
   // 패드로 일시정지 메뉴: A 계속, B 메인 메뉴 (뜬 직후 0.7초는 무시)
   useEffect(() => {
@@ -176,7 +260,7 @@ export default function FieldView({ profile, account = null, onExit }: { profile
       {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && !talk && <TouchControls kb={kb} map={P1_KEYS} />}
 
       {/* NPC 가까이: 말 걸기 */}
-      {hud?.npc && !talk && !paused && (
+      {hud?.npc && !talk && !story && !paused && (
         <button
           onClick={() => talkApi.current?.start()}
           className="absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border border-amber-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg hover:bg-black/85"
@@ -185,6 +269,17 @@ export default function FieldView({ profile, account = null, onExit }: { profile
           {!hud.npc.met && <span className="ml-1 text-amber-300">❗</span>} 대화하기{!touch && ' · E'}
         </button>
       )}
+      {story && (() => {
+        const l = story.lines[story.idx];
+        const npc = VILLAGE_NPCS.find((n) => n.id === l.who);
+        const line: DialogLine =
+          l.who === 'me'
+            ? { who: 'me', name: '나', text: l.text, portrait: playerPortrait(profile.body, l.mood) ?? faces.me ?? null }
+            : { who: l.who, name: npc?.name ?? l.who, title: npc?.title, text: l.text, portrait: faces[l.who] ?? null };
+        return <StoryDialog line={line} idx={story.idx} total={story.lines.length} onNext={() => talkApi.current?.story()} touch={touch} nextLabel="일어나기" />;
+      })()}
+      {/* 벼랑에서 떨어진 뒤: 검은 화면이 걷히며 눈을 뜬다 */}
+      {intro && <div className="wake-open pointer-events-none absolute inset-0 z-50 bg-black" />}
       {talk && <VillageTalk talk={talk} onNext={() => talkApi.current?.next()} onClose={() => talkApi.current?.close()} touch={touch} />}
 
       <div className={`absolute right-4 top-4 flex gap-2 whitespace-nowrap text-xs ${touch && portrait ? 'flex-col items-end' : ''}`}>

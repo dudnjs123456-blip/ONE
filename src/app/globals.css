@@ -260,3 +260,42 @@ body {
   80% { transform: scale(1.15); filter: brightness(2.4) blur(2px); opacity: 0.7; }
   100% { transform: scale(1.4); filter: brightness(4) blur(6px); opacity: 0; }
 }
+
+/* 차원 프롤로그: 게임을 켜자 모니터 속으로 빨려 들어간다 (화면이 다가오다 하얗게 번쩍) */
+.prologue-suck {
+  animation: prologue-suck 2.6s ease-in forwards;
+}
+.prologue-monitor {
+  animation: prologue-monitor 2.6s cubic-bezier(0.7, 0, 0.9, 0.4) forwards;
+}
+@keyframes prologue-suck {
+  0%, 82% { opacity: 1; background: #000; }
+  90% { opacity: 1; background: #f4f0ff; }
+  100% { opacity: 0; background: #f4f0ff; }
+}
+@keyframes prologue-monitor {
+  0% { transform: scale(1) rotate(0deg); filter: none; }
+  35% { transform: scale(1.05) rotate(-1deg); filter: hue-rotate(40deg); }
+  55% { transform: scale(1.4) rotate(2deg); filter: hue-rotate(120deg) saturate(2); }
+  80% { transform: scale(4.5) rotate(-6deg); filter: brightness(2) blur(2px); }
+  100% { transform: scale(9) rotate(10deg); filter: brightness(4) blur(8px); opacity: 0; }
+}
+/* 벼랑에서 떨어진 뒤 서서히 암전 */
+.prologue-black {
+  animation: prologue-black 2.4s ease-in forwards;
+}
+@keyframes prologue-black {
+  0% { opacity: 0; }
+  40%, 100% { opacity: 1; }
+}
+/* 마을에서 깨어날 때: 검은 화면이 천천히 걷힌다 (눈을 뜨듯 두 번 깜빡) */
+.wake-open {
+  animation: wake-open 2.6s ease-out forwards;
+}
+@keyframes wake-open {
+  0% { opacity: 1; }
+  30% { opacity: 0.55; }
+  42% { opacity: 0.9; }
+  70% { opacity: 0.25; }
+  100% { opacity: 0; }
+}
