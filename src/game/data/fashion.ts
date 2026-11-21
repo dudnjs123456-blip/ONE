@@ -220,7 +220,18 @@ export const OPTICAL_GLASSES: CosmeticDef[] = [
   C({ id: 'sun-gold', name: '골드 보잉 선글라스', icon: '🕶️', slot: 'glasses', price: 300, color: 0xb8963e, style: 'sunglasses', desc: '영화 주인공처럼.' }),
 ];
 
-const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries([...COSMETICS, ...OPTICAL_GLASSES].map((c) => [c.id, c]));
+/**
+ * 잠옷: 가게에서 팔지 않는다. 침대에 누우려고 하면 저절로 갈아입고, 다 일어나면 원래 코디로 돌아온다.
+ * 잠옷 두 벌만 입은 목록이라 모자·안경·가방도 벗는다. 친구 화면에서도 자는 사람은 잠옷 차림
+ */
+export const PAJAMAS: CosmeticDef[] = [
+  C({ id: 'pj-top', name: '하늘색 줄무늬 잠옷 상의', icon: '🛌', slot: 'top', price: 0, color: 0xa9cdee, color2: 0xf6f8fc, pattern: 'stripe', desc: '포근한 면 잠옷.' }),
+  C({ id: 'pj-bottom', name: '하늘색 줄무늬 잠옷 바지', icon: '🛌', slot: 'bottom', price: 0, color: 0xa9cdee, color2: 0xf6f8fc, pattern: 'stripe', desc: '발목까지 오는 긴 잠옷 바지.' }),
+];
+/** 잘 때 입는 코디 목록 */
+export const SLEEPWEAR: readonly string[] = PAJAMAS.map((c) => c.id);
+
+const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries([...COSMETICS, ...OPTICAL_GLASSES, ...PAJAMAS].map((c) => [c.id, c]));
 const dailyCache = new Map<string, CosmeticDef | undefined>();
 
 /** 옷 id → 옷 (기본 옷 + 지난 신상까지 id 로 다시 만들어 찾는다) */

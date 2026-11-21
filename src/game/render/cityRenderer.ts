@@ -26,7 +26,7 @@ import { WEEKDAYS, dateOfDay, dayOfDate, daysInMonth } from '../city/calendar';
 import { smooth, type FrameClock } from './clock';
 import { FloatingTexts, Nameplate, SparkSystem } from './effects';
 import { bodyUrl, playerLook } from './looks';
-import { wornList } from '../data/fashion';
+import { SLEEPWEAR, wornList } from '../data/fashion';
 import { HEROINE, type CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { MOOD_LINE_MS } from '../data/moodLines';
@@ -909,7 +909,9 @@ export class CityRenderer {
       const r = world.remotes.get(who);
       return r && r.room === world.roomKey ? r.fighter : null;
     });
-    const worn = world.outfitPreview ?? wornList(world.profile.wardrobe);
+    // 침대에 누우려고 하면 잠옷으로 갈아입는다 (친구 화면과 같은 기준: 집에서 눕기 시작한 뒤 · 다 일어날 때까지)
+    const inBed = world.location === 'home' && (world.sleepView?.rest ?? 0) > 0;
+    const worn = inBed ? [...SLEEPWEAR] : (world.outfitPreview ?? wornList(world.profile.wardrobe));
     if (worn.join(',') !== this.outfitKey) {
       this.outfitKey = worn.join(',');
       this.player.setOutfit?.(worn);
@@ -1232,10 +1234,12 @@ export class CityRenderer {
         if (v.fish?.group.visible) v.fish.update(null, clock, null);
         continue;
       }
-      const ok = (r.outfit ?? []).join(',');
+      // 자는 친구는 잠옷 차림
+      const rOutfit = r.sleep && r.sleep.rest > 0 ? [...SLEEPWEAR] : (r.outfit ?? []);
+      const ok = rOutfit.join(',');
       if (v.outfit !== ok) {
         v.outfit = ok;
-        v.view.setOutfit?.(r.outfit ?? []);
+        v.view.setOutfit?.(rOutfit);
       }
       const f = r.fighter;
       // 친구가 경비 데스크에 앉아 있거나 소파에 누워 있으면 그 자세로

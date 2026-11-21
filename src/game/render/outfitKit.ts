@@ -431,7 +431,15 @@ export class OutfitDresser {
   /** 기본 옷: 비키니나 갈아입는 옷을 입으면 감춘다 */
   private syncCloth() {
     for (const o of this.clothMeshes) o.visible = !this.swim && !this.garmentOn && !this.robeStrip;
-    for (const o of this.shoeMeshes) o.visible = !this.shoesOn && !this.robeStrip;
+    for (const o of this.shoeMeshes) o.visible = !this.shoesOn && !this.robeStrip && !this.barefoot;
+  }
+
+  /** 맨발 (잠옷 차림): 신발을 감춘다. 신발 속에 발이 있는 모델만 부른다 */
+  private barefoot = false;
+  setBarefoot(on: boolean) {
+    if (this.barefoot === on) return;
+    this.barefoot = on;
+    this.syncCloth();
   }
 
   /** 갈아입는 옷을 입었나 (캐릭터가 옷 파일을 다 불러와 붙인 뒤에 부른다) */

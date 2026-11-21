@@ -279,8 +279,8 @@ const SIT_FRAMES = 30;
 const SOFA_FRAMES = 45;
 
 /** 잠자기 단계별 길이 (프레임) */
-const SLEEP_LIE = 90;
-const SLEEP_WAKE = 75;
+const SLEEP_LIE = 220;
+const SLEEP_WAKE = 170;
 /** 이만큼 자면 저절로 깬다 (실제 시간) */
 export const SLEEP_MAX_MS = 12 * 3_600_000;
 /** 자는 동안: 2시간이면 피로 100 이 풀리고, 30분이면 체력이 다 차고, 배고픔은 12시간에 100 오른다 */

@@ -12,7 +12,7 @@ import { FACE_KEYS, MOOD_FACE, eyesBusy, type FaceKey } from './moodFace';
 import { sleepBreath, sleepMotion } from './sleepMotion';
 import { sharedNow } from '../city/worldClock';
 import { Garment } from './garmentKit';
-import { garmentPieces, hasBodyUnderClothes } from '../data/fashion';
+import { SLEEPWEAR, garmentPieces, hasBodyUnderClothes } from '../data/fashion';
 import { BODY_TYPES } from './looks';
 import type { PlayerMood } from '../data/npcs';
 import {
@@ -118,6 +118,14 @@ const _axR = new THREE.Vector3();
 const _qRoll = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
 const _fwd = new THREE.Vector3(0, 0, 1);
+const _qA = new THREE.Quaternion();
+const _qB = new THREE.Quaternion();
+const _qC = new THREE.Quaternion();
+const _eA = new THREE.Euler();
+const _vA = new THREE.Vector3();
+const _vB = new THREE.Vector3();
+/** 침대에 눕다가 옆으로 기울어 팔꿈치를 짚는 각도 (라디안, 약 60°) */
+const LEAN_ANGLE = 1.05;
 
 /** 절차적 포즈가 직접 움직이지 않는 뼈. 매 프레임 기본 자세로 돌려서 클립이 끝난 뒤 자세가 남지 않게 */
 const UNDRIVEN: VRMHumanBoneName[] = ['upperChest', 'neck', 'leftShoulder', 'rightShoulder', 'leftHand', 'rightHand', 'leftToes', 'rightToes'];
@@ -697,28 +705,47 @@ export class VrmCharacter implements CharacterView {
     const standY = hips.position.y;
     const SEAT = r.seatY ?? 0.66; // 걸터앉은 골반 높이 (매트리스 위)
     const SIT_LEG = r.sitLeg ?? 1.1; // 걸터앉을 때 허벅지를 앞으로 든 각도 (종아리는 수직)
-    let px: number, py: number, pz: number, ry: number, rx: number, sit: number, hy: number;
+    const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+    let px: number, pz: number, ry: number, sit: number, hy: number;
+    /** 옆으로 기울어 팔꿈치를 짚은 정도 (0~1) · 다리를 올리며 바로 눕는 정도 (0~1) */
+    let lean = 0;
+    let roll = 0;
     if (r.t < 0.35) {
-      const u = ease(r.t / 0.35);
-      px = lerp(lp.x, r.sit.x, u);
-      py = lerp(lp.y, 0, u);
-      pz = lerp(lp.z, r.sit.z, u);
-      ry = lerpAng(yaw, r.sit.yaw, Math.min(1, u * 1.6));
-      rx = 0;
-      sit = u;
-      hy = lerp(standY, SEAT, u);
+      // 먼저 침대를 등지게 돌아서고 → 뒤로 반 걸음 → 천천히 엉덩이를 내린다
+      const u = r.t / 0.35;
+      const turn = ease(clamp01(u * 1.8));
+      const back = ease(clamp01((u - 0.2) / 0.8));
+      const down = ease(clamp01((u - 0.3) / 0.7));
+      px = lerp(lp.x, r.sit.x, back);
+      pz = lerp(lp.z, r.sit.z, back);
+      ry = lerpAng(yaw, r.sit.yaw, turn);
+      sit = down;
+      hy = lerp(standY, SEAT, down);
+      vrm.scene.position.set(px, lerp(lp.y, 0, back), pz);
+      vrm.scene.rotation.set(0, ry, 0, 'YXZ');
     } else {
-      const u = ease((r.t - 0.35) / 0.65);
-      px = lerp(r.sit.x, r.lie.x, u);
-      py = lerp(0, r.lie.y, u);
-      pz = lerp(r.sit.z, r.lie.z, u);
-      ry = lerpAng(r.sit.yaw, r.lie.yaw, u);
-      rx = (-Math.PI / 2) * u;
-      sit = 1 - u;
-      hy = lerp(SEAT, this.rig.hipsY, u);
+      // 걸터앉은 채 베개 쪽으로 옆으로 기울어 팔꿈치를 짚고 → 다리를 침대 위로 올리며 바로 돌아눕는다.
+      // 골반을 축으로 돌린다 (발밑을 축으로 몸 전체를 젖히면 골반이 공중에 뜨거나 침대에 묻힌다)
+      lean = ease(clamp01((r.t - 0.37) / 0.28));
+      roll = ease(clamp01((r.t - 0.56) / 0.32));
+      sit = 1 - roll;
+      hy = lerp(SEAT, this.rig.hipsY, roll);
+      const qSit = _qA.setFromEuler(_eA.set(0, r.sit.yaw, 0, 'YXZ'));
+      const qSide = _qB.copy(qSit).multiply(_qRoll.setFromAxisAngle(_fwd, LEAN_ANGLE));
+      const qLie = _qC.setFromEuler(_eA.set(-Math.PI / 2, r.lie.yaw, 0, 'YXZ'));
+      const qq = vrm.scene.quaternion.copy(qSit).slerp(qSide, lean).slerp(qLie, roll);
+      // 골반 자리: 앉은 자리 → (기울며 조금) → 누운 자리. 다리를 올릴 때 살짝 들린다
+      const hLie = _vA.set(0, this.rig.hipsY, 0).applyQuaternion(qLie).add(_vB.set(r.lie.x, r.lie.y, r.lie.z));
+      const k = 0.25 * lean + 0.75 * roll;
+      const hx = lerp(r.sit.x, hLie.x, k);
+      const hyW = lerp(SEAT, hLie.y, k) + 0.06 * Math.sin(Math.PI * roll);
+      const hz = lerp(r.sit.z, hLie.z, k);
+      const off = _vA.set(0, hy, 0).applyQuaternion(qq);
+      vrm.scene.position.set(hx - off.x, hyW - off.y, hz - off.z);
+      px = hx;
+      pz = hz;
+      ry = r.sit.yaw;
     }
-    vrm.scene.position.set(px, py, pz);
-    vrm.scene.rotation.set(rx, ry, 0, 'YXZ');
 
     // 골반·다리: 걷던 자세에서 앉은/누운 자세로 (처음 몇 프레임에 걸쳐 섞음)
     const w = Math.min(1, r.t / 0.12);
@@ -734,6 +761,21 @@ export class VrmCharacter implements CharacterView {
     set('leftFoot', 0.8 * (1 - sit));
     set('rightFoot', 0.8 * (1 - sit));
     set('spine', 0.08 * sit);
+    // 옆으로 기운 동안: 다리는 침대 밖으로 늘어뜨린 채 (몸이 기운 만큼 허벅지를 되돌린다),
+    // 베개 쪽 팔은 매트리스를 짚고, 고개는 덜 기울어 세상을 바로 본다. 다리를 올리면서 풀린다
+    const tilt = LEAN_ANGLE * lean * (1 - roll);
+    if (tilt > 0.001) {
+      const hang = (n: VRMHumanBoneName, ab: number) => bone(n)?.quaternion.copy(q.setFromEuler(_eA.set(-SIT_LEG * sit, 0, ab - tilt, 'ZYX')));
+      hang('leftUpperLeg', 0.04);
+      hang('rightUpperLeg', -0.04);
+      const k = lean * (1 - roll);
+      const prop = ARM_HANG - 0.75;
+      bone('rightUpperArm')?.quaternion.slerp(q.setFromEuler(_eA.set(-0.35, 0, prop, 'XYZ')), k);
+      bone('rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(_axR.set(Math.cos(prop), -Math.sin(prop), 0), -0.9), k);
+      bone('leftUpperArm')?.quaternion.slerp(q.setFromEuler(_eA.set(-0.25, 0, -(ARM_HANG - 0.1), 'XYZ')), k);
+      bone('spine')?.quaternion.slerp(q.setFromEuler(_eA.set(0.12, 0, -0.12, 'XYZ')), k);
+      bone('head')?.quaternion.slerp(q.setFromEuler(_eA.set(0.05, 0, -0.45, 'XYZ')), k);
+    }
     const lying = Math.max(0, (r.t - 0.85) / 0.15);
     this.applySleep(vrm, r, ease(lying), w);
 
@@ -987,6 +1029,8 @@ export class VrmCharacter implements CharacterView {
   setOutfit(ids: string[]) {
     this.outfit = ids;
     this.dresser?.apply(ids);
+    // 잠옷 차림이면 신발을 벗는다 (침대에 신발 신고 눕지 않게)
+    this.dresser?.setBarefoot(ids.includes(SLEEPWEAR[1]) && hasBodyUnderClothes(this.bodyId));
     this.syncGarment();
   }
 
@@ -1121,7 +1165,10 @@ export class VrmCharacter implements CharacterView {
     keepFieldOutline(vrm.scene);
     this.rims = this.baseRims = setupMToonRim(vrm.scene);
     this.dresser = new OutfitDresser(vrm);
-    if (this.outfit.length) this.dresser.apply(this.outfit);
+    if (this.outfit.length) {
+      this.dresser.apply(this.outfit);
+      this.dresser.setBarefoot(this.outfit.includes(SLEEPWEAR[1]) && hasBodyUnderClothes(this.bodyId));
+    }
     this.root.remove(this.fallback.root);
     this.root.add(vrm.scene);
     this.vrm = vrm;
