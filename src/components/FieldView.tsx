@@ -20,6 +20,7 @@ import InventoryPanel from './InventoryPanel';
 import { attachZoomControls } from './zoomControls';
 import { DimensionLink } from '@/game/net/dimension';
 import type { Account } from '@/game/net/auth';
+import { bindCodes } from '@/game/core/keybinds';
 import VillageTalk, { type TalkState } from './VillageTalk';
 
 /** 접속 연출 시간 (ms) */
@@ -72,13 +73,19 @@ export default function FieldView({ profile, account = null, onExit }: { profile
     const onKey = (e: KeyboardEvent) => {
       // 대화 중: E · Enter · Space 다음 줄, Esc 닫기 (게임 키는 대화창이 먹는다)
       const t = talkRef.current;
+      const interact = bindCodes('interact').includes(e.code);
       if (t) {
         if (e.repeat) return;
         if (e.code === 'Escape') closeTalk();
-        else if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') nextLine();
+        else if (interact || e.code === 'Enter' || e.code === 'Space') nextLine();
         return;
       }
-      if (e.code === 'KeyE' && !e.repeat) startTalk();
+      // 서울과 같은 키: 상호작용(E) = 말 걸기, R · X · Y = 작은은발소녀 전용 기술
+      if (interact && !e.repeat) startTalk();
+      if (!e.repeat && (e.code === 'KeyR' || e.code === 'KeyX' || e.code === 'KeyY')) {
+        e.preventDefault();
+        world.useSkill(e.code === 'KeyR' ? 'flyingKick' : e.code === 'KeyX' ? 'tornadoKick' : 'backTurnKick');
+      }
       if (e.code === 'Escape') setPaused((p) => !p);
       if (e.code === 'KeyZ' && !e.repeat) world.toggleAuto();
       if (e.code === 'KeyI' && !e.repeat) setInventory((v) => !v);

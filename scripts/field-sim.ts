@@ -179,7 +179,25 @@ if (w.profile.kills === 0) process.exitCode = 1;
   const walk = dist(false, false);
   const run = dist(true, false);
   const field = dist(false, true);
-  const ok = walk > 0.5 && run > walk * 1.8 && field > walk * 1.3;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  village walk/run (30프레임: 걷기 ${walk.toFixed(2)}m, Shift 달리기 ${run.toFixed(2)}m, 사냥터 ${field.toFixed(2)}m)`);
+  const fieldRun = dist(true, true);
+  // 서울과 같이 마을·사냥터 모두 방향키 = 걷기, Shift = 달리기
+  const ok = walk > 0.5 && run > walk * 1.8 && Math.abs(field - walk) < 0.05 && Math.abs(fieldRun - run) < 0.05;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  walk/run like Seoul (30프레임: 마을 걷기 ${walk.toFixed(2)}m · 달리기 ${run.toFixed(2)}m, 사냥터 걷기 ${field.toFixed(2)}m · 달리기 ${fieldRun.toFixed(2)}m)`);
+  if (!ok) process.exitCode = 1;
+}
+
+// 서울과 같은 전용 기술 키 (R·X·Y): 작은은발소녀만 쓸 수 있다
+{
+  const pa = newProfile();
+  pa.body = 'smallSilverGirl';
+  const wa = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), pa);
+  for (let i = 0; i < 5; i++) wa.step();
+  const used = wa.useSkill('flyingKick');
+  wa.step();
+  const attacking = wa.player.state === 'attack';
+  const wb = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile());
+  const denied = !wb.useSkill('flyingKick') && wb.log.some((l) => l.text.includes('전용 스킬'));
+  const ok = used && attacking && denied;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  skill keys like Seoul (작은은발소녀 ${used}/${wa.player.state}, 다른 캐릭터 막힘 ${denied})`);
   if (!ok) process.exitCode = 1;
 }

@@ -50,7 +50,7 @@ export class AutoHuntController implements PlayerController {
     if (p.z > FIELD_HALF - 0.3 && t.z < FIELD_HALF) return { move: { x: VILLAGE_GATE_OUT.x - p.x, z: VILLAGE_GATE_OUT.z - p.z }, run: true, input: NEUTRAL_INPUT };
     const dx = t.x - p.x;
     const dz = t.z - p.z;
-    if (Math.hypot(dx, dz) > ENGAGE_RANGE) return { move: { x: dx, z: dz }, input: NEUTRAL_INPUT };
+    if (Math.hypot(dx, dz) > ENGAGE_RANGE) return { move: { x: dx, z: dz }, run: true, input: NEUTRAL_INPUT };
     if (t.isInvulnerable()) return { move: null, input: NEUTRAL_INPUT }; // 다운 중엔 기다린다
 
     if (t.isAirborne()) {
@@ -84,8 +84,9 @@ export class FieldKeyboardController implements PlayerController {
     const mx = (raw.right ? 1 : 0) - (raw.left ? 1 : 0);
     const mz = (raw.down ? 1 : 0) - (raw.up ? 1 : 0);
     const anyButton = raw.buttons.some(Boolean);
-    // 서울과 같이: Shift + 방향키 = 달리기. Shift 만 누르거나 Shift + 기술 버튼이면 '아래' (Shift+앞+W = 어퍼)
-    const crouch = duckKey || (runKey && (!(mx || mz) || anyButton));
+    // 서울과 같은 규칙: 방향키 = 걷기, Shift + 방향키 = 달리기, Shift + 기술 버튼 = '아래' 기술 (Shift+앞+W = 어퍼),
+    // C(숙이기 키) = 숙이기. Shift 만 누르고 있으면 아무 일도 없다
+    const crouch = duckKey || (runKey && anyButton);
     const p = w.player;
 
     let h: -1 | 0 | 1 = 0;

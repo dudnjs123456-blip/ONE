@@ -114,7 +114,7 @@ export default function FieldHud({
       {!hud.auto && !touch && (
         <div className="absolute bottom-6 right-4 rounded bg-black/50 px-3 py-2 text-xs leading-5 text-white/80">
           <div>방향키 이동 · {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리</div>
-          <div>{bindLabel('run')}+방향키 = 달리기 · {bindLabel('run')}만 = 아래 ({bindLabel('run')}+앞+{bindLabel('b2')} = 어퍼)</div>
+          <div>방향키 걷기 · {bindLabel('run')}+방향키 달리기 · {bindLabel('run')}+기술 = 아래 기술 ({bindLabel('run')}+앞+{bindLabel('b2')} = 어퍼) · {bindLabel('crouch')} 숙이기</div>
           <div>방향키 두 번 톡 = 대시 (대시 중 {bindLabel('b2')}/{bindLabel('b4')} = 대시기) · {bindLabel('jump')} 점프 · Ctrl+휠 줌</div>
         </div>
       )}

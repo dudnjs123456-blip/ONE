@@ -83,9 +83,9 @@ const FIELD_HITSTOP_MAX = 6;
 const CORPSE_FRAMES = 90;
 const PLAYER_RESPAWN_FRAMES = 180;
 const REGEN_DELAY = 300;
-/** 마을 안 걷기·달리기 속도 (서울과 같다) */
-const VILLAGE_WALK = 0.045;
-const VILLAGE_RUN = 0.1;
+/** 걷기·달리기 속도 (서울과 같다: 방향키 걷기, Shift 달리기) */
+const WALK_SPEED = 0.045;
+const DASH_RUN_SPEED = 0.1;
 /** 플레이어를 바라보는 거리 (이 안에서는 서로 정면을 유지) */
 const FACE_RANGE = 3.5;
 /** 이만큼(프레임) 소식이 없는 사람은 같이 있는 걸로 치지 않는다 (창을 내려 둔 사람 등) */
@@ -330,8 +330,6 @@ export class FieldWorld {
   target: Monster | null = null;
   /** 경계 마을 사람들 */
   readonly npcs: VillageNpc[];
-  /** 사냥터에서 달리는 속도 (마을 밖) */
-  private baseRun: number;
   /** 대화 중 (내 캐릭터는 멈춰 선다) */
   talking: VillageNpc | null = null;
   playerDeadFrames = 0;
@@ -376,7 +374,6 @@ export class FieldWorld {
     this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     // 접속하면 경계 마을 포탈 앞에서 시작한다 (자동사냥은 꺼 둔 채로, 켜면 북문을 나가 사냥)
     this.player.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
-    this.baseRun = this.player.runSpeed;
     this.npcs = VILLAGE_NPCS.map((def, i) => {
       const f = new Fighter(HUNTER_INDEX - 1 - i, def.name, { maxHp: 1, power: 0, canBlock: false });
       f.reset(def.x, def.z, def.fx, def.fz);
@@ -466,6 +463,23 @@ export class FieldWorld {
     return { npc: n.def, lines, first };
   }
 
+  /**
+   * 작은은발소녀 전용 기술 (서울과 같은 R · X · Y). 쓸 수 있으면 true, 다른 캐릭터면 안내만
+   */
+  useSkill(skill: 'flyingKick' | 'tornadoKick' | 'backTurnKick'): boolean {
+    const p = this.player;
+    if (this.profile.body !== 'smallSilverGirl') {
+      this.addLog('작은은발소녀 전용 스킬이에요');
+      return false;
+    }
+    if (p.hp <= 0 || this.talking || !p.isActionable) return false;
+    const id = skill === 'flyingKick' ? 'smallSilverFlyingKick' : skill === 'tornadoKick' ? 'smallSilverTornadoKick' : 'smallSilverBackTurnKick';
+    const t = this.target?.fighter;
+    if (t && this.distTo(t) < FACE_RANGE * 1.5) p.faceToward(t);
+    p.queueMove(MOVES[id]);
+    return true;
+  }
+
   /** 대화를 마쳤다: 처음 만난 사람으로 기록하고, 여관이면 쉬어 간다 */
   endTalk() {
     const n = this.talking;
@@ -530,8 +544,8 @@ export class FieldWorld {
       p.moveScale = life.slow * (life.canRun ? 1 : 0.8);
       if (life.warn) this.addLog(LIFE_WARNING[life.warn]);
       const cmd = this.talking ? idle() : (this.auto ? this.autoCtl : this.manual).read(this);
-      // 마을 안: 방향키 = 걷기, Shift = 달리기 (서울처럼). 사냥터: 늘 달린다
-      p.runSpeed = inVillage(p.x, p.z) ? (cmd.run ? VILLAGE_RUN : VILLAGE_WALK) : this.baseRun;
+      // 서울과 같이: 방향키 = 걷기, Shift = 달리기 (자동사냥은 늘 달린다)
+      p.runSpeed = cmd.run ? DASH_RUN_SPEED : WALK_SPEED;
       p.freeMove = cmd.move;
       p.feed(cmd.input);
     } else {
