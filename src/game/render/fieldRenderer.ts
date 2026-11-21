@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { pixelRatioFor } from './graphics';
 import { mulberry32 } from '../core/controllers';
-import { FIELD_HALF, type FieldWorld, type FloatText } from '../core/field';
+import { FIELD_HALF, inVillage, type FieldWorld, type FloatText } from '../core/field';
 import type { Fighter } from '../core/fighter';
 import { FIELD_SPAWNS } from '../data/monsters';
 import { smooth, type FrameClock } from './clock';
@@ -174,6 +174,8 @@ export class FieldRenderer {
 
     const p = world.player;
     const pa = ensure(p, playerLook(wornList(world.profile.wardrobe), world.profile.body), 1, false);
+    // 경계 마을 안에선 서울처럼 편한 자세 (전투 자세는 사냥터에서만)
+    pa.mannequin.casual = inVillage(p.x, p.z);
     pa.mannequin.update(p, clock);
     pa.plate.draw(`Lv.${world.level} 나`, p.hp, p.maxHp);
     const pp = p.lerped(clock.alpha);
@@ -183,6 +185,7 @@ export class FieldRenderer {
     for (const h of hunters) {
       const f = h.fighter;
       const a = ensure(f, playerLook(h.outfit, h.body as BodyType | undefined), 1, false);
+      a.mannequin.casual = inVillage(f.x, f.z);
       a.mannequin.update(f, clock);
       a.plate.draw(`Lv.${h.level} ${h.name}`, f.hp, f.maxHp);
       const fp = f.lerped(clock.alpha);
