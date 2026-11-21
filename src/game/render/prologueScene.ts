@@ -8,7 +8,7 @@ import { wornList } from '../data/fashion';
 import type { CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
-import { playHit } from './sfx';
+import { playHit, playWhoosh } from './sfx';
 import { headshot } from './portraitShot';
 import { CLIFF_Z, PATH, PATH_HALF, type PrologueWorld } from '../story/prologue';
 import { BEAST_NAME } from '../data/prologueScript';
@@ -30,6 +30,9 @@ export class PrologueRenderer {
   private eyes = new THREE.Group();
   private eyesPlaced = false;
   private darkened = false;
+  private wind: THREE.LineSegments;
+  private dust: THREE.Mesh;
+  private lastWhoosh = 0;
   private _pivot = new THREE.Vector3();
   private _rot = new THREE.Vector3();
   private aura: THREE.Points;
@@ -99,6 +102,39 @@ export class PrologueRenderer {
     mg.setAttribute('position', new THREE.BufferAttribute(mp, 3));
     this.mist = new THREE.Points(mg, new THREE.PointsMaterial({ color: 0xc8b8ff, size: 0.12, map: softDot(), transparent: true, opacity: 0.45, depthWrite: false }));
     this.scene.add(this.mist);
+
+    // 바람 줄기 (떨어질 때만): 몸 둘레 원통 안에 짧은 선들
+    const w = 150;
+    const wp = new Float32Array(w * 6);
+    for (let i = 0; i < w; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = 1.2 + rng() * 5;
+      const y = (rng() - 0.5) * 24;
+      wp.set([Math.cos(a) * r, y, Math.sin(a) * r, Math.cos(a) * r, y - 1.5, Math.sin(a) * r], i * 6);
+    }
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute('position', new THREE.BufferAttribute(wp, 3));
+    this.wind = new THREE.LineSegments(wg, new THREE.LineBasicMaterial({ color: 0xe6deff, transparent: true, opacity: 0.4, depthWrite: false, fog: false }));
+    this.wind.frustumCulled = false;
+    this.wind.visible = false;
+    this.scene.add(this.wind);
+
+    // 하늘의 구름층 (떨어지며 뚫고 지나간다)
+    const cloudTex = softDot();
+    for (let i = 0; i < 16; i++) {
+      const c = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, color: 0xd9ccff, transparent: true, opacity: 0.55, depthWrite: false, fog: false }));
+      const a = rng() * Math.PI * 2;
+      const r = 2 + rng() * 14;
+      c.position.set(Math.cos(a) * r, 34 + rng() * 26, Math.sin(a) * r);
+      c.scale.setScalar(9 + rng() * 12);
+      this.scene.add(c);
+    }
+
+    // 땅에 처박힐 때 퍼지는 흙먼지 고리
+    this.dust = new THREE.Mesh(new THREE.RingGeometry(0.6, 1.4, 40), new THREE.MeshBasicMaterial({ color: 0xb9aacc, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+    this.dust.rotation.x = -Math.PI / 2;
+    this.dust.visible = false;
+    this.scene.add(this.dust);
   }
 
   resize(width: number, height: number) {
@@ -123,13 +159,18 @@ export class PrologueRenderer {
   sync(world: PrologueWorld, clock: FrameClock) {
     const p = world.player;
     const b = world.beast;
+    // 허공에선 편한 대기 동작(걷기·서기 동작 파일)을 끄고 허우적거리는 자세를 그대로 보여 준다
+    this.player.casual = p.freefall === 0;
     this.player.update(p, clock);
     if (world.phase === 'fall') {
-      // 떨어지는 동안 몸이 허공에서 빙글 돈다
-      this.player.root.rotation.z = Math.sin(world.fallSpin) * 0.7;
-      this.player.root.rotation.x = Math.cos(world.fallSpin * 0.7) * 0.4;
-    } else if (world.phase === 'jump' && p.y < -0.5) {
-      this.player.root.rotation.x = Math.min(1.2, -p.y * 0.08);
+      // 허공에서 몸이 천천히 뒤집히며 돈다. 땅에 가까워지면 등이 아래로 오게 (등부터 처박힌다)
+      const near = Math.min(1, Math.max(0, (p.y - 3) / 14));
+      const sp = world.fallSpin;
+      this.player.root.rotation.set(-1.25 * (1 - near) + near * Math.sin(sp * 0.8) * 1.1, sp * 0.6 * near, Math.sin(sp * 0.5) * 0.6 * near);
+    } else if (world.phase === 'jump' && p.y < -0.3) {
+      // 벼랑에서 몸을 던진 뒤: 앞으로 고꾸라지며 빙글
+      const sp = world.fallSpin;
+      this.player.root.rotation.set(Math.min(1.4, -p.y * 0.1) + Math.sin(sp) * 0.3, 0, Math.sin(sp * 0.7) * 0.5);
     } else {
       this.player.root.rotation.x = this.player.root.rotation.z = 0;
     }
@@ -193,8 +234,59 @@ export class PrologueRenderer {
     this.villageGlow.material.opacity = 0.55 + Math.sin(clock.t * 0.03) * 0.15;
     this.mist.rotation.y = Math.sin(clock.t * 0.002) * 0.05;
 
+    this.updateWind(world, clock);
     this.updateCamera(world, clock);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** 떨어지는 동안: 몸 둘레로 위로 솟구치는 바람 줄기, 바람 소리, 땅에 처박히는 순간 흙먼지 */
+  private updateWind(world: PrologueWorld, clock: FrameClock) {
+    const p = world.player.lerped(clock.alpha);
+    const falling = world.player.freefall > 0;
+    this.wind.visible = falling;
+    // 시야가 넓어지며 속도감이 난다
+    const fovWant = (this.camera.aspect < 1 ? 66 : 48) + (falling ? 14 : 0);
+    if (Math.abs(this.camera.fov - fovWant) > 0.05) {
+      this.camera.fov += (fovWant - this.camera.fov) * smooth(0.08, clock.dt);
+      this.camera.updateProjectionMatrix();
+    }
+    if (falling) {
+      const pos = this.wind.geometry.attributes.position as THREE.BufferAttribute;
+      const arr = pos.array as Float32Array;
+      // 떨어지는 빠르기만큼 줄기가 위로 스친다 (몸 기준 위아래 12m 안에서 돌고 돈다)
+      const speed = 0.9 + (world.phase === 'fall' ? world.fallT * 2.2 : 1.6);
+      for (let i = 0; i < arr.length; i += 6) {
+        let y = arr[i + 1] + speed * clock.dt * 60 * 0.35;
+        if (y > 12) y -= 24;
+        arr[i + 1] = y;
+        arr[i + 4] = y - 1.2 - speed * 0.6;
+      }
+      pos.needsUpdate = true;
+      this.wind.position.set(p.x, p.y, p.z);
+      (this.wind.material as THREE.LineBasicMaterial).opacity = 0.25 + 0.25 * Math.min(1, speed / 3);
+      if (performance.now() - this.lastWhoosh > 420) {
+        this.lastWhoosh = performance.now();
+        playWhoosh(world.phase === 'fall' && world.fallT > 0.5);
+      }
+    }
+    if (world.impact) {
+      // 쾅: 흙먼지 고리 + 묵직한 소리 + 큰 흔들림
+      const { x, z } = world.impact;
+      world.impact = null;
+      playHit('counter', true, 1);
+      for (let i = 0; i < 3; i++) this.sparks.spawn({ kind: 'counter', x: x + (i - 1) * 0.5, y: 0.25, z, heavy: true });
+      this.dust.position.set(x, 0.05, z);
+      this.dust.scale.setScalar(0.3);
+      (this.dust.material as THREE.MeshBasicMaterial).opacity = 0.75;
+      this.dust.visible = true;
+      this.shake = Math.max(this.shake, 1.4);
+    }
+    if (this.dust.visible) {
+      const m = this.dust.material as THREE.MeshBasicMaterial;
+      this.dust.scale.multiplyScalar(1 + 2.2 * clock.dt);
+      m.opacity -= 0.6 * clock.dt;
+      if (m.opacity <= 0) this.dust.visible = false;
+    }
   }
 
   private updateCamera(world: PrologueWorld, clock: FrameClock) {
@@ -205,10 +297,23 @@ export class PrologueRenderer {
     let k = 0.06;
     switch (world.phase) {
       case 'fall':
-        // 위에서 같이 떨어지며 내려다본다
-        wantPos.set(p.x + 1.5, p.y + 7, p.z + 7.5);
-        wantLook.set(p.x, p.y, p.z);
-        k = 0.2;
+        if (p.y > 16) {
+          // 함께 떨어지며 아래에서 올려다본다: 허우적거리는 몸 뒤로 하늘과 구름이 솟구친다
+          wantPos.set(p.x + 2, p.y - 2.3, p.z + 2.8);
+          wantLook.set(p.x, p.y + 0.7, p.z);
+          k = 0.35;
+        } else {
+          // 땅에서 기다리는 카메라: 떨어져 처박히는 순간을 옆에서
+          wantPos.set(p.x + 5.5, 1.4, p.z + 6.5);
+          wantLook.set(p.x, Math.max(0.4, p.y * 0.7), p.z);
+          k = 0.3;
+        }
+        break;
+      case 'landed':
+        // 뻗어 있는 나를 내려다보다가 일어나면 평소 자리로
+        wantPos.set(p.x + 2.2, 3.4, p.z + 4.2);
+        wantLook.set(p.x, 0.3, p.z);
+        k = 0.05;
         break;
       case 'encounter': {
         // 뒤를 돌아본다: 내 어깨 너머로 그림자
@@ -227,10 +332,17 @@ export class PrologueRenderer {
         break;
       case 'jump':
       case 'done':
-        // 낭떠러지 위 허공에서 떨어지는 나를 내려다본다
-        wantPos.set(3, 5, CLIFF_Z - 3);
-        wantLook.set(p.x, Math.max(p.y, -30), p.z);
-        k = 0.12;
+        k = 0.3;
+        if (p.y > -1) {
+          // 벼랑 끝으로 달려가 몸을 던지는 순간
+          wantPos.set(p.x + 3, 3.5, p.z + 4);
+          wantLook.set(p.x, 0.5, p.z - 2);
+        } else {
+          // 같이 떨어지며 위에서 내려다본다: 아래로 빨려 들어가는 몸, 멀어지는 벼랑
+          // (카메라는 낭떠러지 쪽 허공에: 벼랑 쪽에 두면 바위벽 속에 묻힌다)
+          wantPos.set(p.x + 1.8, p.y + 3.4, p.z - 2.2);
+          wantLook.set(p.x, p.y - 0.8, p.z + 0.3);
+        }
         break;
       default:
         // 평소: 등 뒤 위에서 길 앞쪽을 보는 추적 카메라 (쫓길 땐 조금 더 낮고 멀리)

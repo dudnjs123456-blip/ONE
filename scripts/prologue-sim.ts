@@ -23,8 +23,12 @@ const run = (n: number, until?: () => boolean) => {
 
 // 하늘에서 떨어져 땅에 닿으면 정신 차리는 대사
 check('starts falling from the sky', w.phase === 'fall' && w.player.y > 10);
+run(30);
+check('flails arms and legs while falling', w.player.freefall === 1 && w.player.y > 50);
 run(400, () => w.phase !== 'fall');
-check('lands and wakes up (talk)', w.phase === 'wake' && w.player.y === 0 && w.talking);
+check('crashes into the ground and lies there', w.phase === 'landed' && w.player.y === 0 && w.player.state === 'knockdown' && w.player.freefall === 0 && !!w.impact);
+run(400, () => w.phase === 'wake');
+check('gets up, then wakes up (talk)', w.phase === 'wake' && w.player.y === 0 && w.talking && w.player.state !== 'knockdown');
 // 대사 중엔 움직이지 않는다
 cmd = { move: { x: 0, z: -1 }, run: true, input: NEUTRAL_INPUT };
 const z0 = w.player.z;
@@ -60,9 +64,10 @@ check('fighting back does nothing → cornered again', w.phase === 'cornered' &&
 w.choose(true);
 run(60 * 10, () => w.phase === 'done');
 check('jumps off the cliff and falls into the dark', w.phase === 'done' && w.player.z < CLIFF_Z && w.player.y < -50);
-check('every phase was played', (['fall', 'wake', 'explore', 'encounter', 'chase', 'cliff', 'fight', 'cornered', 'jump', 'done'] as ProloguePhase[]).every((p) => seen.has(p)), [...seen].join('→'));
+check('every phase was played', (['fall', 'landed', 'wake', 'explore', 'encounter', 'chase', 'cliff', 'fight', 'cornered', 'jump', 'done'] as ProloguePhase[]).every((p) => seen.has(p)), [...seen].join('→'));
 
 // 대사: 말하는 사람이 모두 초상화를 가질 수 있는 사람 (나 · 그림자 · 마을 사람)
 const speakers = new Set([...Object.values(PROLOGUE_SCRIPT).flat(), ...RESCUE_SCRIPT].map((l) => l.who));
 check('every speaker is me, the shadow, or a villager (portrait rule)', [...speakers].every((s) => s === 'me' || s === 'beast' || VILLAGE_NPCS.some((n) => n.id === s)), [...speakers].join(','));
+check('the first waking lines use the new hurt face', PROLOGUE_SCRIPT.wake[0].face === 'hurt' && RESCUE_SCRIPT.some((l) => l.who === 'me' && l.face === 'hurt'));
 check('a villager rescues you below the cliff', RESCUE_SCRIPT[0].who !== 'me' && RESCUE_SCRIPT.some((l) => l.text.includes('벼랑')));

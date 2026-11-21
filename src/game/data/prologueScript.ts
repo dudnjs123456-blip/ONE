@@ -9,12 +9,15 @@ export interface ScriptLine {
   who: string;
   text: string;
   mood?: PlayerMood;
+  /** 이야기 장면 전용 표정 그림 (data/portraits STORY_FACES). 예: hurt = 떨어져 처박힌 직후 */
+  face?: string;
 }
 
 export const PROLOGUE_SCRIPT = {
   /** 숲속 빈터에 떨어져 정신을 차린다 */
   wake: [
-    { who: 'me', mood: '울음', text: '으윽… 아파라…' },
+    { who: 'me', mood: '울음', face: 'hurt', text: '으윽… 아야야… 온몸이 다 쑤셔…' },
+    { who: 'me', mood: '울음', face: 'hurt', text: '하늘에서 떨어졌는데… 살아 있어? 나 진짜 살아 있는 거 맞지…?' },
     { who: 'me', mood: '놀람', text: '…잠깐. 여기 어디야? 방금까지 분명 내 방에서 게임을 켰는데.' },
     { who: 'me', mood: '고민', text: '모니터가 갑자기 번쩍하더니… 화면 속으로 빨려 들어가서… 그대로 하늘에서 떨어졌어.' },
     { who: 'me', mood: '놀람', text: '하늘이 보라색이야. 나무도 이상하게 생겼고… 이거 설마, 진짜 게임 속에 들어온 거야?' },
@@ -46,7 +49,7 @@ export const PROLOGUE_SCRIPT = {
 /** 벼랑 밑에서 구해 준 뒤 경계 마을 여관 앞에서 깨어난다 (FieldView 에서) */
 export const RESCUE_SCRIPT: ScriptLine[] = [
   { who: 'dallae', text: '어머, 눈 떴다! 다행이야… 정말 다행이야.' },
-  { who: 'me', mood: '울음', text: '으… 여기는…? 나 분명 벼랑에서 떨어졌는데.' },
+  { who: 'me', mood: '울음', face: 'hurt', text: '으… 여기는…? 나 분명 벼랑에서 떨어졌는데.' },
   { who: 'dallae', text: '여긴 경계 마을이야. 강가에 빨래하러 갔다가, 벼랑 밑 물웅덩이에 쓰러져 있는 너를 업어 왔어.' },
   { who: 'dallae', text: '그 높은 데서 떨어졌는데 멀쩡하다니… 너 혹시, 하늘 너머 "저편"에서 온 사람이야?' },
   { who: 'me', mood: '고민', text: '저편…? 난 그냥 서울에서 요즘 유행한다는 게임을 켰을 뿐인데…' },

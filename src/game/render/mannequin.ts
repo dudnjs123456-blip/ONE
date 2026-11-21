@@ -542,6 +542,34 @@ function crouchPose(t: number): Pose {
 }
 
 /**
+ * 허공에서 떨어지는 몸: 등을 젖힌 채 두 팔은 머리 위로 허우적, 다리는 자전거 타듯 버둥거린다.
+ * 왼쪽·오른쪽 박자를 어긋나게 해서 기계처럼 똑같이 움직이지 않게
+ */
+function freefallPose(t: number): Pose {
+  const s = Math.sin;
+  return {
+    ...GUARD,
+    lean: -0.3 + 0.08 * s(t * 0.21),
+    twist: 0.18 * s(t * 0.17),
+    tilt: 0,
+    drop: 0,
+    rise: 0,
+    shL: -2.45 + 0.55 * s(t * 0.43),
+    elL: -0.45 - 0.35 * s(t * 0.52 + 1),
+    arL: 0.95 + 0.3 * s(t * 0.61),
+    shR: -2.3 + 0.55 * s(t * 0.47 + 2.2),
+    elR: -0.5 - 0.35 * s(t * 0.5 + 2),
+    arR: 0.85 + 0.3 * s(t * 0.57 + 1.5),
+    hpL: -0.55 + 0.45 * s(t * 0.33),
+    knL: 0.85 + 0.5 * s(t * 0.33 + 1),
+    hpR: -0.55 + 0.45 * s(t * 0.33 + 3.1),
+    knR: 0.85 + 0.5 * s(t * 0.33 + 4.1),
+    abL: 0.22,
+    abR: 0.22,
+  };
+}
+
+/**
  * 상태 → 목표 포즈.
  * @param t 연속 시간 (사이클 애니메이션용)
  * @param sub 기술 진행을 프레임 사이로 보간하기 위한 오프셋 (FrameClock.sub)
@@ -552,6 +580,7 @@ export function poseFor(f: Fighter, t: number, sub = 0, loco?: Locomotion): Pose
   const fr = Math.max(0, f.frame + sub);
   const L = loco ?? new Locomotion();
   const moving = (p: Pose): Pose => ({ ...p, lean: p.lean + inertiaLean(L) });
+  if (f.freefall > 0) return mix(GUARD, freefallPose(t), f.freefall);
   switch (f.state) {
     case 'idle':
       return moving(stance(t));

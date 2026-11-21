@@ -147,6 +147,8 @@ export class Fighter {
   private tempoMoves = new Map<string, MoveDef>();
   /** 필드 자유 이동 방향 (월드 기준). null 이면 1:1 대전식 이동 */
   freeMove: { x: number; z: number } | null = null;
+  /** 허공에서 떨어지는 중 (0~1): 팔다리를 허우적거리는 자세 (이야기 장면용, 물리는 그쪽에서 직접) */
+  freefall = 0;
   state: FighterState = 'idle';
   /** 현재 상태에 들어온 뒤 지난 프레임 수. 공격은 입력 프레임이 1. */
   frame = 0;

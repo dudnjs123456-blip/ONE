@@ -18,6 +18,20 @@ export const PLAYER_PORTRAITS: Record<string, Partial<Record<PlayerMood, string>
   },
 };
 
+/**
+ * 이야기 장면에만 쓰는 특별한 표정 그림 (몸별). 예: hurt = 하늘에서 떨어져 처박힌 직후 (헝클어진 머리·흙먼지·글썽한 눈).
+ * 없는 몸은 기분(mood) 그림 → 그것도 없으면 3D 모델 얼굴
+ */
+export const STORY_FACES: Record<string, Record<string, string>> = {
+  smallSilverGirl: { hurt: '/portraits/smallSilverGirl/hurt.webp' },
+};
+
+/** 이야기 대사의 내 초상화: 특별 표정 → 기분 그림 → null */
+export function storyPortrait(body: string | undefined, face: string | undefined, mood?: PlayerMood): string | null {
+  const special = body && face ? STORY_FACES[body]?.[face] : undefined;
+  return special ?? playerPortrait(body, mood);
+}
+
 /** 이 몸의 상반신 그림 (없으면 null) */
 export function playerPortrait(body: string | undefined, mood: PlayerMood = '기본'): string | null {
   const p = body ? PLAYER_PORTRAITS[body] : undefined;

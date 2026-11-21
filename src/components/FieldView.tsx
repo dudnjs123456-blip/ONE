@@ -26,7 +26,7 @@ import DimensionPrologue from './DimensionPrologue';
 import StoryDialog, { type DialogLine } from './StoryDialog';
 import { RESCUE_SCRIPT, type ScriptLine } from '@/game/data/prologueScript';
 import { VILLAGE_NPCS } from '@/game/data/village';
-import { playerPortrait } from '@/game/data/portraits';
+import { storyPortrait } from '@/game/data/portraits';
 
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
@@ -274,7 +274,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         const npc = VILLAGE_NPCS.find((n) => n.id === l.who);
         const line: DialogLine =
           l.who === 'me'
-            ? { who: 'me', name: '나', text: l.text, portrait: playerPortrait(profile.body, l.mood) ?? faces.me ?? null }
+            ? { who: 'me', name: '나', text: l.text, portrait: storyPortrait(profile.body, l.face, l.mood) ?? faces.me ?? null }
             : { who: l.who, name: npc?.name ?? l.who, title: npc?.title, text: l.text, portrait: faces[l.who] ?? null };
         return <StoryDialog line={line} idx={story.idx} total={story.lines.length} onNext={() => talkApi.current?.story()} touch={touch} nextLabel="일어나기" />;
       })()}

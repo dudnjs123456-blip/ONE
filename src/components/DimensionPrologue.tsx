@@ -9,7 +9,7 @@ import type { PlayerProfile } from '@/game/core/profile';
 import { PrologueWorld, type ProloguePhase } from '@/game/story/prologue';
 import { PrologueRenderer } from '@/game/render/prologueScene';
 import { BEAST_NAME, PROLOGUE_SCRIPT, type ScriptLine } from '@/game/data/prologueScript';
-import { playerPortrait } from '@/game/data/portraits';
+import { storyPortrait } from '@/game/data/portraits';
 import { startBgm, stopBgm } from '@/game/render/bgm';
 import { playWhoosh, unlockAudioOnInput } from '@/game/render/sfx';
 import StoryDialog, { type DialogChoice, type DialogLine } from './StoryDialog';
@@ -157,7 +157,7 @@ export default function DimensionPrologue({ profile, onDone, onExit }: { profile
     ? (() => {
         const l = talk.lines[talk.idx];
         if (l.who === 'beast') return { who: 'beast', name: BEAST_NAME, title: '정체 모를 그림자', text: l.text, portrait: faces.beast, tone: 'danger' as const };
-        return { who: 'me', name: '나', text: l.text, portrait: playerPortrait(profile.body, l.mood) ?? faces.me };
+        return { who: 'me', name: '나', text: l.text, portrait: storyPortrait(profile.body, l.face, l.mood) ?? faces.me };
       })()
     : null;
   const choices: DialogChoice[] | null =

@@ -77,7 +77,7 @@ export default function StoryDialog({
         >
           {line.portrait ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={line.portrait} src={line.portrait} alt={line.name} draggable={false} className="h-full w-full select-none object-cover" />
+            <img key={line.portrait} src={line.portrait} alt={line.name} draggable={false} className="h-full w-full select-none object-cover object-[50%_3%]" />
           ) : (
             // 아직 얼굴을 못 찍었을 때: 그 사람 실루엣 틀 (빈 대사창은 띄우지 않는다)
             <div className="flex h-full w-full items-end justify-center">

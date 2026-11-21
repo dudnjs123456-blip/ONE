@@ -37,8 +37,10 @@ const ENCOUNTER_Z = -9;
 /** 여기까지 오면 막다른 벼랑 */
 const CLIFF_REACH_Z = CLIFF_Z + 3.2;
 /** 하늘에서 떨어지는 시간 (프레임) */
-const FALL_FRAMES = 150;
-const FALL_HEIGHT = 26;
+const FALL_FRAMES = 240;
+const FALL_HEIGHT = 75;
+/** 땅에 처박힌 뒤 누워 있다가 일어나기까지 (프레임) */
+const LANDED_FRAMES = 130;
 /** 그림자가 쫓아오는 속도: 걸으면 따라잡히고, 달리면(Shift) 겨우 벌어진다 */
 const BEAST_SPEED = 0.072;
 const WALK = 0.045;
@@ -47,6 +49,8 @@ const RUN = 0.1;
 export type ProloguePhase =
   /** 하늘에서 떨어지는 중 */
   | 'fall'
+  /** 땅에 처박혀 누워 있다가 비틀비틀 일어난다 */
+  | 'landed'
   /** 정신 차리는 대사 */
   | 'wake'
   /** 숲길 걷기 (조작) */
@@ -80,6 +84,8 @@ export class PrologueWorld {
   beastOut = false;
   /** 화면 흔들림 요청 (렌더러가 가져간다) */
   shake = 0;
+  /** 방금 땅에 쾅 떨어졌다 (렌더러가 흙먼지·소리를 내고 지운다) */
+  impact: { x: number; z: number } | null = null;
   /** "효과 없음" 같은 떠오르는 글자 */
   private texts: { x: number; y: number; z: number; text: string }[] = [];
   private events: CombatEvent[] = [];
@@ -149,16 +155,36 @@ export class PrologueWorld {
 
     switch (this.phase) {
       case 'fall': {
-        // 점점 빨라지며 떨어진다 (몸이 천천히 돈다). 땅에 닿으면 쿵
+        // 중력처럼 점점 빨라지며 떨어진다: 팔다리를 허우적거리며 몸이 천천히 뒤집힌다. 땅에 닿으면 쾅
         const u = Math.min(1, t / FALL_FRAMES);
-        p.y = FALL_HEIGHT * (1 - u * u);
-        this.spin += 0.05 * (1 - u);
+        p.y = FALL_HEIGHT * (1 - Math.pow(u, 1.8));
+        p.freefall = 1;
+        this.spin += 0.045;
         if (u >= 1) {
           p.y = 0;
-          this.spin = 0;
-          this.shake = 0.6;
-          this.go('wake');
+          p.freefall = 0;
+          // 등부터 처박혀 그대로 뻗는다
+          p.state = 'knockdown';
+          p.frame = 0;
+          this.shake = 1.5;
+          this.impact = { x: p.x, z: p.z };
+          this.go('landed');
         }
+        return;
+      }
+      case 'landed': {
+        // 한동안 뻗어 있다가 끙 하고 일어난다
+        p.freeMove = null;
+        if (t < LANDED_FRAMES - 40) {
+          p.state = 'knockdown';
+          p.frame = Math.min(p.frame, 1);
+        } else if (p.state === 'knockdown') {
+          p.state = 'getup';
+          p.frame = 0;
+        }
+        p.feed(NEUTRAL_INPUT);
+        p.tick({ opponent: p, awayX: 0, awayZ: -1 });
+        if (t >= LANDED_FRAMES) this.go('wake');
         return;
       }
       case 'jump': {
@@ -170,9 +196,15 @@ export class PrologueWorld {
           p.tick({ opponent: b, awayX: 0, awayZ: -1 });
           this.clampPath(p, true);
         } else {
+          // 벼랑 너머 허공: 앞으로 조금 날아가다 중력으로 점점 빨리 떨어진다
           p.freeMove = null;
-          p.z -= 0.06;
-          p.y -= 0.02 + t * 0.004;
+          // 몸을 던지는 순간 살짝 뛰어오른다
+          if (p.freefall === 0) p.vy = 0.12;
+          p.freefall = Math.min(1, p.freefall + 0.08);
+          this.spin += 0.04;
+          p.z -= 0.05;
+          p.vy -= 0.012;
+          p.y += p.vy;
           if (p.y < -60) this.go('done');
         }
         this.stepBeast(false, 2.2);
