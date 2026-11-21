@@ -41,7 +41,7 @@ export interface PlayerProfile {
   /** 행복빌라 내 집 호수와 받은 시각 (친구와 겹치면 늦게 받은 쪽이 다른 집으로 옮긴다) */
   home?: { unit: string; claimedAt: number };
   /** 다른 차원 (집 컴퓨터로 접속) 접속 횟수 */
-  dimension?: { visits: number };
+  dimension?: { visits: number; /** 경계 마을에서 인사한 NPC id */ met?: string[] };
   /** 키우는 애완동물 (펫샵) */
   pets?: import('../data/pets').PetState;
   /** 펫샵: 그날(게임 날짜) 이미 분양된 아이들 */

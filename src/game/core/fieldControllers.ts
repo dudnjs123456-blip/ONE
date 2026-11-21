@@ -1,4 +1,6 @@
 import { mulberry32 } from './controllers';
+import { FIELD_HALF } from './field';
+import { VILLAGE_GATE_OUT } from '../data/village';
 import type { FieldCommand, FieldWorld, PlayerController } from './field';
 import { Keyboard, NEUTRAL_INPUT, P1_KEYS, dirFrom, makeInput, mergeRaw, padHeld, readGamepad, type KeyMap, type RelInput } from './input';
 import { bindCodes } from './keybinds';
@@ -44,6 +46,8 @@ export class AutoHuntController implements PlayerController {
     if (this.queue.length) return { move: null, input: this.queue.shift()! };
     if (!t || !p.isActionable) return { move: null, input: NEUTRAL_INPUT };
 
+    // 마을 안이면 먼저 북문으로 나간다 (담장을 따라 미끄러져 문으로 들어선다)
+    if (p.z > FIELD_HALF - 0.3 && t.z < FIELD_HALF) return { move: { x: VILLAGE_GATE_OUT.x - p.x, z: VILLAGE_GATE_OUT.z - p.z }, input: NEUTRAL_INPUT };
     const dx = t.x - p.x;
     const dz = t.z - p.z;
     if (Math.hypot(dx, dz) > ENGAGE_RANGE) return { move: { x: dx, z: dz }, input: NEUTRAL_INPUT };

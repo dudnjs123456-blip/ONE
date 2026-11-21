@@ -64,6 +64,7 @@ export default function HomePcPanel({ profile, onConnect, onClose }: { profile: 
               <div className="font-mono text-xl font-black tracking-widest text-cyan-300">DIMENSION.exe</div>
               <div className="mt-1 text-xs text-white/50">{visits > 0 ? `접속 기록 ${visits}회` : '처음 실행'}</div>
               <ul className="mt-3 space-y-1 text-left text-xs leading-5 text-white/70">
+                <li>· 접속하면 차원 틈 가장자리의 경계 마을에 먼저 도착해요</li>
                 <li>· 같은 차원에 접속한 사람들은 모두 같은 몬스터를 보고 같이 싸워요</li>
                 <li>· 접속해 있는 동안 서울에서는 내 모습이 사라져요</li>
                 <li>· 자동사냥(Z)으로 쉬지 않고 사냥할 수 있어요</li>

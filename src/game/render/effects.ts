@@ -209,6 +209,12 @@ export class Nameplate {
     ctx.fillStyle = this.hostile ? '#ffb8a6' : '#ffffff';
     ctx.fillText(label, PW / 2, 88);
 
+    // maxHp 0 = 이름만 (마을 NPC 등)
+    if (maxHp <= 0) {
+      (this.sprite.material.map as THREE.CanvasTexture).needsUpdate = true;
+      return;
+    }
+
     // HP 바: 검은 테두리 + 어두운 칸 + 채움 (위쪽 밝은 줄로 입체감)
     const bw = 460;
     const bx = (PW - bw) / 2;

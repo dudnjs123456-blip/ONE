@@ -1,11 +1,13 @@
 // 필드 자동사냥 헤드리스 검증: npx tsx scripts/field-sim.ts [분]
-import { FieldWorld } from '../src/game/core/field';
+import { FieldWorld, inVillage } from '../src/game/core/field';
+import { VILLAGE_NPCS } from '../src/game/data/village';
 import { AutoHuntController } from '../src/game/core/fieldControllers';
 import { NEUTRAL_INPUT } from '../src/game/core/input';
 import { newProfile } from '../src/game/core/profile';
 
 const minutes = Number(process.argv[2] ?? 5);
 const w = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile());
+w.auto = true;
 let deaths = 0;
 let wasDead = false;
 for (let f = 0; f < minutes * 60 * 60; f++) {
@@ -41,6 +43,7 @@ if (w.profile.kills === 0) process.exitCode = 1;
   const prof = newProfile();
   prof.level = 9;
   const w2 = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), prof);
+  w2.auto = true;
   const seen = new Set<number>();
   let knights = 0, goblins = 0, died = false;
   for (let f = 0; f < 8 * 3600; f++) {
@@ -58,6 +61,7 @@ if (w.profile.kills === 0) process.exitCode = 1;
 {
   const mk = (id: string, at: number) => {
     const w = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile(), at, true);
+    w.auto = true;
     w.netId = id;
     w.joinedAt = at;
     return w;
@@ -105,5 +109,56 @@ if (w.profile.kills === 0) process.exitCode = 1;
   for (let f = 0; f < 5; f++) w.step();
   const ok = waited && w.monsters.length > 0;
   console.log(`${ok ? 'PASS' : 'FAIL'}  wait for presence before spawning (기다리는 동안 ${waited ? '0' : '있음'}, 확인 후 ${w.monsters.length})`);
+  if (!ok) process.exitCode = 1;
+}
+
+// 경계 마을: 포탈 앞에서 시작하고, 몬스터는 마을에 들어오지 못하며 마을 안 사람은 쫓지 않는다.
+// NPC 에게 말을 걸면 처음엔 첫 인사, 대화를 마치면 만난 사람으로 남고, 여관 주인은 HP 를 채워 준다.
+{
+  const prof = newProfile();
+  const w = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), prof);
+  const startIn = inVillage(w.player.x, w.player.z) && !w.auto;
+  let intrude = false;
+  let hurt = false;
+  for (let f = 0; f < 3 * 3600; f++) {
+    w.step();
+    if (w.monsters.some((m) => inVillage(m.fighter.x, m.fighter.z))) intrude = true;
+    if (w.player.hp < w.player.maxHp) hurt = true;
+  }
+  const noa = VILLAGE_NPCS.find((n) => n.id === 'noa')!;
+  w.player.x = noa.x;
+  w.player.z = noa.z + 1.2;
+  w.step();
+  const near = w.hud().npc?.id === 'noa' && w.hud().npc?.met === false;
+  const t1 = w.talk();
+  w.endTalk();
+  const t2 = w.talk();
+  w.endTalk();
+  const dallae = VILLAGE_NPCS.find((n) => n.id === 'dallae')!;
+  w.player.x = dallae.x + 1.2;
+  w.player.z = dallae.z;
+  w.player.hp = 10;
+  w.step();
+  w.talk();
+  w.endTalk();
+  const ok =
+    startIn && !intrude && !hurt && near &&
+    t1?.first === true && t1.lines.length === noa.first.length &&
+    t2?.first === false && t2.lines.length === 1 &&
+    w.player.hp === w.player.maxHp && prof.dimension?.met?.includes('noa') === true && prof.dimension?.met?.includes('dallae') === true;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  village (시작 ${startIn}, 몬스터 침입 ${intrude}, 마을에서 다침 ${hurt}, 노아 근처 ${near}, 첫 인사 ${t1?.lines.length}줄, 다시 ${t2?.lines.length}줄, 여관 HP ${w.player.hp}/${w.player.maxHp}, 만남 ${prof.dimension?.met})`);
+  if (!ok) process.exitCode = 1;
+}
+
+// 쓰러지면 마을 포탈 앞에서 깨어난다
+{
+  const w = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), newProfile());
+  w.player.x = 0;
+  w.player.z = 0;
+  w.player.hp = 0;
+  w.player.state = 'ko';
+  for (let f = 0; f < 400 && !(w.player.hp > 0); f++) w.step();
+  const ok = w.player.hp > 0 && inVillage(w.player.x, w.player.z);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  respawn in village (${w.player.x.toFixed(1)}, ${w.player.z.toFixed(1)})`);
   if (!ok) process.exitCode = 1;
 }

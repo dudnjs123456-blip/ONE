@@ -20,6 +20,7 @@ import InventoryPanel from './InventoryPanel';
 import { attachZoomControls } from './zoomControls';
 import { DimensionLink } from '@/game/net/dimension';
 import type { Account } from '@/game/net/auth';
+import VillageTalk, { type TalkState } from './VillageTalk';
 
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
@@ -35,10 +36,15 @@ export default function FieldView({ profile, account = null, onExit }: { profile
   const [paused, setPaused] = useState(false);
   const [inventory, setInventory] = useState(false);
   const [warp, setWarp] = useState(true);
+  /** 경계 마을 NPC 와 대화 중 */
+  const [talk, setTalk] = useState<TalkState | null>(null);
+  const talkRef = useRef(talk);
+  talkRef.current = talk;
   // 키보드와 화면 터치 버튼이 같은 입력을 쓴다
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
   const portrait = usePortrait();
+  const talkApi = useRef<{ start: () => void; next: () => void; close: () => void } | null>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
@@ -64,6 +70,15 @@ export default function FieldView({ profile, account = null, onExit }: { profile
     window.addEventListener('resize', resize);
 
     const onKey = (e: KeyboardEvent) => {
+      // 대화 중: E · Enter · Space 다음 줄, Esc 닫기 (게임 키는 대화창이 먹는다)
+      const t = talkRef.current;
+      if (t) {
+        if (e.repeat) return;
+        if (e.code === 'Escape') closeTalk();
+        else if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') nextLine();
+        return;
+      }
+      if (e.code === 'KeyE' && !e.repeat) startTalk();
       if (e.code === 'Escape') setPaused((p) => !p);
       if (e.code === 'KeyZ' && !e.repeat) world.toggleAuto();
       if (e.code === 'KeyI' && !e.repeat) setInventory((v) => !v);
@@ -71,6 +86,23 @@ export default function FieldView({ profile, account = null, onExit }: { profile
     window.addEventListener('keydown', onKey);
     // 패드: Start = 일시정지, Back = 자동사냥
     const unwatchPad = watchPadButtons({ start: () => setPaused((p) => !p), select: () => world.toggleAuto() });
+
+    function startTalk() {
+      const r = world.talk();
+      if (r) setTalk({ npc: r.npc, lines: r.lines, idx: 0, first: r.first });
+    }
+    function closeTalk() {
+      world.endTalk();
+      saveProfile(profile);
+      setTalk(null);
+    }
+    function nextLine() {
+      const t = talkRef.current;
+      if (!t) return;
+      if (t.idx + 1 < t.lines.length) setTalk({ ...t, idx: t.idx + 1 });
+      else closeTalk();
+    }
+    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk };
 
     let raf = 0;
     let last = performance.now();
@@ -134,7 +166,19 @@ export default function FieldView({ profile, account = null, onExit }: { profile
       {hud && <FieldHud hud={hud} onToggleAuto={() => worldRef.current?.toggleAuto()} touch={touch} portrait={portrait} />}
 
       {/* 수동 조작일 때만 터치 버튼 (자동사냥 중엔 필요 없음) */}
-      {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && <TouchControls kb={kb} map={P1_KEYS} />}
+      {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && !talk && <TouchControls kb={kb} map={P1_KEYS} />}
+
+      {/* NPC 가까이: 말 걸기 */}
+      {hud?.npc && !talk && !paused && (
+        <button
+          onClick={() => talkApi.current?.start()}
+          className="absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border border-amber-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg hover:bg-black/85"
+        >
+          💬 {hud.npc.name} <span className="font-normal text-white/60">({hud.npc.title})</span>
+          {!hud.npc.met && <span className="ml-1 text-amber-300">❗</span>} 대화하기{!touch && ' · E'}
+        </button>
+      )}
+      {talk && <VillageTalk talk={talk} onNext={() => talkApi.current?.next()} onClose={() => talkApi.current?.close()} touch={touch} />}
 
       <div className={`absolute right-4 top-4 flex gap-2 whitespace-nowrap text-xs ${touch && portrait ? 'flex-col items-end' : ''}`}>
         <SoundToggle compact={touch} className="!bg-black/50 hover:!bg-black/70" />

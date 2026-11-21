@@ -49,7 +49,10 @@ export default function FieldHud({
           <Bar value={hud.exp} max={hud.expNext} color="bg-lime-400" height="h-2" />
           <span className="w-16 text-right tabular-nums">{Math.floor((hud.exp / hud.expNext) * 100)}%</span>
         </div>
-        <div className="mt-1 text-xs text-white/60">처치 {hud.kills}</div>
+        <div className="mt-1 flex justify-between text-xs text-white/60">
+          <span>처치 {hud.kills}</span>
+          {hud.inVillage ? <span className="text-amber-200">🏘️ 경계 마을 · 안전</span> : <span className="text-violet-200">⚔️ 사냥터</span>}
+        </div>
         {hud.others.length > 0 && (
           <div className="mt-1 truncate text-[11px] text-cyan-200/90" title={hud.others.map((o) => `Lv.${o.level} ${o.name}`).join(', ')}>
             🌀 같은 차원 {hud.others.length}명 · {hud.others.map((o) => o.name).join(', ')}

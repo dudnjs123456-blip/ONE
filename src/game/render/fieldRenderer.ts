@@ -8,10 +8,13 @@ import { smooth, type FrameClock } from './clock';
 import { FloatingTexts, Nameplate, SparkSystem } from './effects';
 import { playerLook, type BodyType } from './looks';
 import { wornList } from '../data/fashion';
-import type { Appearance } from './mannequin';
+import type { Appearance, CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playCoin, playHit, playLevelUp } from './sfx';
+import { PersonView } from './personView';
+import { buildVillage } from './villageScene';
+import { VILLAGE } from '../data/village';
 
 /** 16:10 화면에서 45° 일 때 보이는 옆 시야각 — 세로 화면도 이만큼은 보이게 */
 const WIDE_HFOV = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(45) / 2) * 1.6);
@@ -19,7 +22,7 @@ const CAM_OFFSET = new THREE.Vector3(0, 8.5, 9);
 const TEXT_COLORS: Record<FloatText['kind'], string> = { exp: '#b8f36b', gold: '#ffd54a', level: '#ffe066' };
 
 interface Actor {
-  mannequin: ReturnType<typeof createCharacter>;
+  mannequin: CharacterView & { dispose?(): void };
   plate: Nameplate;
   height: number;
 }
@@ -116,7 +119,7 @@ export class FieldRenderer {
     }
 
     if (this.portal) {
-      this.portal.rotation.y = clock.t * 0.01;
+      // 포탈은 돌리지 않고 숨 쉬듯 커졌다 작아졌다만 (돌리면 화면 앞을 크게 가린다)
       const ring = this.portal.children[0];
       ring.scale.setScalar(1 + Math.sin(clock.t * 0.05) * 0.04);
     }
@@ -145,7 +148,7 @@ export class FieldRenderer {
 
   private syncActors(world: FieldWorld, clock: FrameClock) {
     const hunters = [...world.hunters.values()].filter((h) => h.target);
-    const present = new Set<Fighter>([world.player, ...world.monsters.map((m) => m.fighter), ...hunters.map((h) => h.fighter)]);
+    const present = new Set<Fighter>([world.player, ...world.monsters.map((m) => m.fighter), ...hunters.map((h) => h.fighter), ...world.npcs.map((n) => n.fighter)]);
     for (const [f, a] of this.actors) {
       if (present.has(f)) continue;
       this.scene.remove(a.mannequin.root, a.plate.sprite);
@@ -184,6 +187,23 @@ export class FieldRenderer {
       a.plate.draw(`Lv.${h.level} ${h.name}`, f.hp, f.maxHp);
       const fp = f.lerped(clock.alpha);
       a.plate.sprite.position.set(fp.x, fp.y + a.height, fp.z);
+    }
+
+    // 경계 마을 사람들: 아직 인사하지 않은 사람은 이름 앞에 ❗ (말을 걸어 보라는 표시)
+    for (const n of world.npcs) {
+      const f = n.fighter;
+      let a = this.actors.get(f);
+      if (!a) {
+        const view = new PersonView(n.def.id.length, { skin: n.def.skin, tint: n.def.tint });
+        const plate = new Nameplate(false);
+        plate.sprite.scale.multiplyScalar(1.7);
+        this.scene.add(view.root, plate.sprite);
+        a = { mannequin: view, plate, height: 2.05 };
+        this.actors.set(f, a);
+      }
+      a.mannequin.update(f, clock);
+      a.plate.draw(`${world.hasMet(n.def.id) ? '' : '❗ '}${n.def.name} · ${n.def.title}`, 0, 0);
+      a.plate.sprite.position.set(f.x, a.height, f.z);
     }
 
     for (const m of world.monsters) {
@@ -243,34 +263,8 @@ export class FieldRenderer {
     field.receiveShadow = true;
     s.add(field);
 
-    // 접속 지점 (귀환 포탈이 서 있는 바닥)
-    const plaza = new THREE.Mesh(
-      new THREE.CircleGeometry(3.6, 48),
-      new THREE.MeshStandardMaterial({ color: 0x6d6a8c, roughness: 0.8 }),
-    );
-    plaza.rotation.x = -Math.PI / 2;
-    plaza.position.y = 0.01;
-    plaza.receiveShadow = true;
-    s.add(plaza);
-
-    // 귀환 포탈: 여기로 들어왔고, 로그아웃하면 여기서 서울 집 컴퓨터 앞으로 돌아간다
-    const portal = new THREE.Group();
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.3, 0.12, 16, 64),
-      new THREE.MeshStandardMaterial({ color: 0x7ef3ff, emissive: 0x38d8ff, emissiveIntensity: 2.2, roughness: 0.3 }),
-    );
-    ring.position.y = 1.6;
-    const veil = new THREE.Mesh(
-      new THREE.CircleGeometry(1.2, 48),
-      new THREE.MeshBasicMaterial({ color: 0x9a7bff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
-    );
-    veil.position.y = 1.6;
-    portal.add(ring, veil);
-    portal.position.set(0, 0, -2.6);
-    const glow = new THREE.PointLight(0x6fdcff, 6, 9, 2);
-    glow.position.set(0, 1.6, -2.4);
-    s.add(portal, glow);
-    this.portal = portal;
+    // 경계 마을 (접속하면 도착하는 곳, 사냥터 남쪽)
+    this.portal = buildVillage(s).portal;
 
     // 떠 있는 차원 수정
     const crystalMat = new THREE.MeshStandardMaterial({ color: 0xb48cff, emissive: 0x6a3cff, emissiveIntensity: 0.9, roughness: 0.25, metalness: 0.1 });
@@ -287,7 +281,9 @@ export class FieldRenderer {
     const postGeo = new THREE.BoxGeometry(0.15, 0.9, 0.15);
     const posts: THREE.Vector3[] = [];
     for (let i = -FIELD_HALF; i <= FIELD_HALF; i += 2) {
-      posts.push(new THREE.Vector3(i, 0.45, -FIELD_HALF), new THREE.Vector3(i, 0.45, FIELD_HALF));
+      posts.push(new THREE.Vector3(i, 0.45, -FIELD_HALF));
+      // 남쪽 울타리는 북문(마을로 가는 길)만 비운다
+      if (Math.abs(i) > VILLAGE.gate) posts.push(new THREE.Vector3(i, 0.45, FIELD_HALF));
       posts.push(new THREE.Vector3(-FIELD_HALF, 0.45, i), new THREE.Vector3(FIELD_HALF, 0.45, i));
     }
     const fence = new THREE.InstancedMesh(postGeo, postMat, posts.length);
@@ -298,13 +294,14 @@ export class FieldRenderer {
 
     // 나무: 스폰 지점과 마을은 피해서 배치
     const clear = (x: number, z: number) =>
-      Math.hypot(x, z) > 7 && FIELD_SPAWNS.every((sp) => Math.hypot(sp.x - x, sp.z - z) > 3.5);
+      Math.hypot(x, z) > 3 && FIELD_SPAWNS.every((sp) => Math.hypot(sp.x - x, sp.z - z) > 3.5);
     const trees: { x: number; z: number; s: number }[] = [];
     while (trees.length < 140) {
       const x = (rng() - 0.5) * 110;
       const z = (rng() - 0.5) * 110;
       const inside = Math.abs(x) < FIELD_HALF && Math.abs(z) < FIELD_HALF;
       if (inside && (rng() > 0.25 || !clear(x, z))) continue; // 사냥터 안은 듬성듬성
+      if (x > VILLAGE.x0 - 2 && x < VILLAGE.x1 + 2 && z > FIELD_HALF - 1 && z < VILLAGE.z1 + 1.5) continue; // 마을 자리
       trees.push({ x, z, s: 0.8 + rng() * 0.8 });
     }
     const trunk = new THREE.InstancedMesh(

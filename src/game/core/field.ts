@@ -10,9 +10,72 @@ import { FIELD_SPAWNS, MONSTERS, MONSTER_RESPAWN_FRAMES, type MonsterType } from
 import { DIR_OF_KEY, MOVES, totalFrames } from '../data/moves';
 import { expToNext } from '../data/progression';
 import { playerStats } from '../data/equipment';
+import { TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, type VillageNpcDef } from '../data/village';
 
 /** 필드는 [-FIELD_HALF, FIELD_HALF] 정사각형 */
 export const FIELD_HALF = 22;
+
+/** 걸어 다닐 수 있는 곳: 사냥터 · 경계 마을 · 둘을 잇는 북문 (사각형 세 개) */
+const WALK_RECTS = (() => {
+  const r = FIGHTER_RADIUS;
+  const h = FIELD_HALF - r;
+  return [
+    { x0: -h, x1: h, z0: -h, z1: h },
+    { x0: VILLAGE.x0 + r, x1: VILLAGE.x1 - r, z0: VILLAGE.z0 + r, z1: VILLAGE.z1 - r },
+    { x0: -VILLAGE.gate + r, x1: VILLAGE.gate - r, z0: FIELD_HALF - 1, z1: VILLAGE.z0 + 1 },
+  ];
+})();
+
+/** 마을 담장 안(북문 포함)에 있나. 몬스터는 여기 있는 사람을 쫓지 않는다 */
+export function inVillage(x: number, z: number): boolean {
+  return z > FIELD_HALF && x > VILLAGE.x0 && x < VILLAGE.x1 && z < VILLAGE.z1;
+}
+
+/** 걸을 수 있는 곳 밖으로 나가면 가장 가까운 걸을 수 있는 자리로 (벽을 따라 미끄러진다) */
+export function clampWalk(f: { x: number; z: number }, monster = false) {
+  let bx = f.x;
+  let bz = f.z;
+  let bd = Infinity;
+  for (const rc of monster ? WALK_RECTS.slice(0, 1) : WALK_RECTS) {
+    const x = Math.max(rc.x0, Math.min(rc.x1, f.x));
+    const z = Math.max(rc.z0, Math.min(rc.z1, f.z));
+    const d = (x - f.x) ** 2 + (z - f.z) ** 2;
+    if (d === 0) {
+      bd = 0;
+      bx = f.x;
+      bz = f.z;
+      break;
+    }
+    if (d < bd) {
+      bd = d;
+      bx = x;
+      bz = z;
+    }
+  }
+  f.x = bx;
+  f.z = bz;
+  if (!monster) pushOutOfHouses(f);
+}
+
+/** 마을 건물 안으로 들어가지 않게 가장 가까운 벽 바깥으로 민다 */
+function pushOutOfHouses(f: { x: number; z: number }) {
+  const r = FIGHTER_RADIUS;
+  for (const h of VILLAGE_HOUSES) {
+    const hw = h.w / 2 + r;
+    const hd = h.d / 2 + r;
+    const dx = f.x - h.x;
+    const dz = f.z - h.z;
+    if (Math.abs(dx) >= hw || Math.abs(dz) >= hd) continue;
+    if (hw - Math.abs(dx) < hd - Math.abs(dz)) f.x = h.x + Math.sign(dx || 1) * hw;
+    else f.z = h.z + Math.sign(dz || 1) * hd;
+  }
+}
+
+/** 마을 NPC (서 있기만 한다, 모두에게 같은 자리) */
+export interface VillageNpc {
+  def: VillageNpcDef;
+  fighter: Fighter;
+}
 /** 몬스터가 스폰 지점에서 이만큼 멀어지면 추적을 포기하고 돌아간다 */
 const LEASH = 12;
 /** 필드는 다수 전투라 히트스톱을 짧게 */
@@ -160,6 +223,10 @@ export interface FieldHudState {
   others: { name: string; level: number }[];
   /** 이번 사냥(필드에 들어온 뒤) 성과 */
   session: { seconds: number; kills: number; exp: number; gold: number; deaths: number };
+  /** 경계 마을 안에 있나 */
+  inVillage: boolean;
+  /** 말을 걸 수 있는 가까운 NPC */
+  npc: { id: string; name: string; title: string; met: boolean } | null;
 }
 
 const idle = (): FieldCommand => ({ move: null, input: NEUTRAL_INPUT });
@@ -182,7 +249,8 @@ export class MonsterBrain {
 
   think(m: Monster, w: FieldWorld): FieldCommand {
     const f = m.fighter;
-    const p = w.nearestHunter(f.x, f.z);
+    // 마을(담장 안)에 들어간 사람은 쫓지 않는다
+    const p = w.nearestHunter(f.x, f.z, true);
     const dist = p ? Math.hypot(p.x - f.x, p.z - f.z) : Infinity;
     const home = Math.hypot(m.homeX - f.x, m.homeZ - f.z);
 
@@ -252,9 +320,13 @@ export class FieldWorld {
   private session = { kills: 0, exp: 0, gold: 0, deaths: 0 };
   hitstop = 0;
   readonly player: Fighter;
-  auto = true;
+  auto = false;
   monsters: Monster[] = [];
   target: Monster | null = null;
+  /** 경계 마을 사람들 */
+  readonly npcs: VillageNpc[];
+  /** 대화 중 (내 캐릭터는 멈춰 선다) */
+  talking: VillageNpc | null = null;
   playerDeadFrames = 0;
   log: { id: number; text: string }[] = [];
 
@@ -295,14 +367,21 @@ export class FieldWorld {
   ) {
     this.rng = mulberry32(seed);
     this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
-    this.player.reset(0, 0, 0, -1);
+    // 접속하면 경계 마을 포탈 앞에서 시작한다 (자동사냥은 꺼 둔 채로, 켜면 북문을 나가 사냥)
+    this.player.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
+    this.npcs = VILLAGE_NPCS.map((def, i) => {
+      const f = new Fighter(HUNTER_INDEX - 1 - i, def.name, { maxHp: 1, power: 0, canBlock: false });
+      f.reset(def.x, def.z, def.fx, def.fz);
+      return { def, fighter: f };
+    });
     this.spawnTimers = FIELD_SPAWNS.map(() => 0);
     if (online) this.netReady = false;
     else {
       this.wasHost = true;
       this.updateSpawns();
     }
-    this.addLog('차원에 접속했습니다. 자동사냥 ON');
+    this.addLog(`차원에 접속했습니다. 여기는 ${VILLAGE.name}`);
+    this.addLog('북문을 나서면 사냥터 · 자동사냥은 Z');
   }
 
   get level() {
@@ -340,6 +419,62 @@ export class FieldWorld {
     this.addLog(`자동사냥 ${this.auto ? 'ON' : 'OFF'}`);
   }
 
+  // ───────────────────────── 경계 마을 ─────────────────────────
+
+  /** 말을 걸 수 있는 가장 가까운 NPC */
+  nearbyNpc(): VillageNpc | null {
+    const p = this.player;
+    if (p.hp <= 0) return null;
+    let best: VillageNpc | null = null;
+    let bd = TALK_RANGE;
+    for (const n of this.npcs) {
+      const d = Math.hypot(n.fighter.x - p.x, n.fighter.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  hasMet(id: string): boolean {
+    return !!this.profile.dimension?.met?.includes(id);
+  }
+
+  /**
+   * 가까운 NPC 에게 말을 건다. 대사 목록을 돌려준다 (처음 만나면 첫 인사, 아니면 평소 대사 한 줄).
+   * 자동사냥 중이면 끈다 (말하는 동안 멈춰 선다)
+   */
+  talk(): { npc: VillageNpcDef; lines: string[]; first: boolean } | null {
+    const n = this.nearbyNpc();
+    if (!n) return null;
+    const first = !this.hasMet(n.def.id);
+    this.talking = n;
+    if (this.auto) this.toggleAuto();
+    const p = this.player;
+    p.faceToward(n.fighter);
+    n.fighter.faceToward(p);
+    const lines = first ? n.def.first : [n.def.again[Math.floor(this.rng() * n.def.again.length)]];
+    return { npc: n.def, lines, first };
+  }
+
+  /** 대화를 마쳤다: 처음 만난 사람으로 기록하고, 여관이면 쉬어 간다 */
+  endTalk() {
+    const n = this.talking;
+    this.talking = null;
+    if (!n) return;
+    const d = (this.profile.dimension ??= { visits: 0 });
+    d.met ??= [];
+    if (!d.met.includes(n.def.id)) d.met.push(n.def.id);
+    if (n.def.service === 'rest') {
+      const p = this.player;
+      p.hp = p.maxHp;
+      this.texts.push({ x: p.x, y: 2.4, z: p.z, text: 'HP 회복', kind: 'exp' });
+      this.addLog(`${n.def.name}의 차를 마시고 기운을 차렸습니다 (HP 가득)`);
+    }
+    n.fighter.reset(n.def.x, n.def.z, n.def.fx, n.def.fz);
+  }
+
   drainCombatEvents(): CombatEvent[] {
     const e = this.combatEvents;
     this.combatEvents = [];
@@ -352,11 +487,12 @@ export class FieldWorld {
     return t;
   }
 
-  /** 살아 있는 사람 중 (x, z) 에서 가장 가까운 사람 (나 포함) */
-  nearestHunter(x: number, z: number): Fighter | null {
+  /** 살아 있는 사람 중 (x, z) 에서 가장 가까운 사람 (나 포함). outside = 마을 안 사람은 빼고 */
+  nearestHunter(x: number, z: number, outside = false): Fighter | null {
     let best: Fighter | null = null;
     let bd = Infinity;
     for (const f of this.aliveHunters()) {
+      if (outside && inVillage(f.x, f.z)) continue;
       const d = Math.hypot(f.x - x, f.z - z);
       if (d < bd) {
         bd = d;
@@ -375,6 +511,8 @@ export class FieldWorld {
     const p = this.player;
     p.snapshot();
     for (const m of this.monsters) m.fighter.snapshot();
+    for (const n of this.npcs) n.fighter.snapshot();
+    if (this.talking && (p.hp <= 0 || Math.hypot(this.talking.fighter.x - p.x, this.talking.fighter.z - p.z) > TALK_RANGE + 1.5)) this.talking = null;
     this.stepHunters();
     this.updateTarget();
 
@@ -383,7 +521,7 @@ export class FieldWorld {
       const life = this.life.tick(this.profile.life, { running: p.state === 'run' || p.state === 'dash', attackSerial: p.moveSerial });
       p.moveScale = life.slow * (life.canRun ? 1 : 0.8);
       if (life.warn) this.addLog(LIFE_WARNING[life.warn]);
-      const cmd = (this.auto ? this.autoCtl : this.manual).read(this);
+      const cmd = this.talking ? idle() : (this.auto ? this.autoCtl : this.manual).read(this);
       p.freeMove = cmd.move;
       p.feed(cmd.input);
     } else {
@@ -443,6 +581,11 @@ export class FieldWorld {
       log: this.log.slice(-6),
       others: [...this.hunters.values()].filter((h) => this.fresh(h)).map((h) => ({ name: h.name, level: h.level })),
       session: { seconds: Math.floor(this.frame / FPS), ...this.session },
+      inVillage: inVillage(p.x, p.z),
+      npc: (() => {
+        const n = this.nearbyNpc();
+        return n && { id: n.def.id, name: n.def.name, title: n.def.title, met: this.hasMet(n.def.id) };
+      })(),
     };
   }
 
@@ -690,11 +833,18 @@ export class FieldWorld {
         }
       }
     }
-    const lim = FIELD_HALF - FIGHTER_RADIUS;
-    for (const { f, local } of all) {
-      if (!local) continue;
-      f.x = Math.max(-lim, Math.min(lim, f.x));
-      f.z = Math.max(-lim, Math.min(lim, f.z));
+    for (const { f, local } of all) if (local) clampWalk(f, f !== this.player);
+    // NPC 와 겹치지 않게 (NPC 는 움직이지 않는다)
+    if (this.player.state !== 'ko') {
+      for (const n of this.npcs) {
+        const dx = this.player.x - n.fighter.x;
+        const dz = this.player.z - n.fighter.z;
+        const d = Math.hypot(dx, dz);
+        if (d < min && d > 1e-6) {
+          this.player.x = n.fighter.x + (dx / d) * min;
+          this.player.z = n.fighter.z + (dz / d) * min;
+        }
+      }
     }
   }
 
@@ -782,9 +932,9 @@ export class FieldWorld {
       if (++this.playerDeadFrames >= PLAYER_RESPAWN_FRAMES) {
         this.playerDeadFrames = 0;
         this.session.deaths++;
-        p.reset(0, 0, 0, -1);
+        p.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
         this.target = null;
-        this.addLog('접속 지점에서 다시 깨어났습니다');
+        this.addLog(`${VILLAGE.name} 포탈 앞에서 다시 깨어났습니다`);
       }
     }
   }
