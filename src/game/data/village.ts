@@ -33,9 +33,10 @@ export interface VillageNpcDef {
   /** 바라보는 방향 */
   fx: number;
   fz: number;
-  /** 사람 모델 옷 (personView PERSON_SKINS) */
-  skin: string;
-  tint?: number;
+  /** 애니풍 3D 캐릭터 몸 (looks BODY_TYPES id) · 입은 판타지 옷 (fashion NPC_COSTUMES) · 키 배율 (아이는 작게) */
+  body: string;
+  outfit: string[];
+  scale?: number;
   /** 처음 만났을 때 대사 (한 줄씩 넘긴다) */
   first: string[];
   /** 다시 말을 걸면 */
@@ -48,12 +49,13 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
   {
     id: 'noa',
     name: '노아',
-    title: '포탈 안내인',
+    title: '차원 마법사',
     x: 1.8,
     z: 35.3,
     fx: -0.6,
     fz: -0.8,
-    skin: 'cyborgFemaleA',
+    body: 'silver',
+    outfit: ['npc-noa-hat', 'npc-noa-top', 'npc-noa-bottom', 'npc-noa-cape'],
     first: [
       '어서 와요, "저편" 사람. 달래 언니가 벼랑 밑에서 업어 왔다는 게 당신이군요.',
       '당신이 켠 그 게임, DIMENSION… 그건 게임이 아니에요. 이 세계로 들어오는 문이에요.',
@@ -67,13 +69,13 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
   {
     id: 'maru',
     name: '마루',
-    title: '촌장',
+    title: '촌장 · 길드 마스터',
     x: 8.5,
     z: 30.2,
     fx: -1,
     fz: 0,
-    skin: 'survivorFemaleA',
-    tint: 0xd9cfc0,
+    body: 'silverboy',
+    outfit: ['npc-maru-hat', 'npc-maru-top', 'npc-maru-bottom', 'npc-maru-cape'],
     first: [
       '오, 저편에서 온 손님이구먼. 반갑네. 이 마을 촌장 마루라네.',
       '이 세계는 원래 서울을 비추는 거울 같은 곳이었지. 조용하고, 아무 일도 없던 곳이야.',
@@ -87,13 +89,13 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
   {
     id: 'bawi',
     name: '바위',
-    title: '북문 문지기',
+    title: '북문 기사',
     x: 4.2,
     z: 25.2,
     fx: -0.5,
     fz: -0.85,
-    skin: 'survivorMaleB',
-    tint: 0xb9c4d6,
+    body: 'male',
+    outfit: ['npc-bawi-top', 'npc-bawi-bottom', 'npc-bawi-shoes', 'npc-bawi-cape', 'npc-bawi-armor'],
     first: [
       '사냥 나가나? 그럼 이것만 알아 둬.',
       '문 바로 앞엔 고블린. 약하지만 떼로 다녀. 조금 더 가면 산적들이 먼저 덤벼들지.',
@@ -110,8 +112,8 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
     z: 30.6,
     fx: 1,
     fz: 0,
-    skin: 'humanFemaleA',
-    tint: 0xffe2c8,
+    body: 'female',
+    outfit: ['npc-dallae-hat', 'npc-dallae-top', 'npc-dallae-bottom', 'npc-dallae-apron'],
     first: [
       '어머, 새 얼굴이네! 여긴 "달빛 여관"이야.',
       '사냥하다 다치면 언제든 들러. 따뜻한 차 한 잔이면 금방 기운이 날 거야.',
@@ -123,13 +125,14 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
   {
     id: 'kong',
     name: '콩이',
-    title: '마을 아이',
+    title: '꼬마 모험가',
     x: -3.2,
     z: 31.4,
     fx: 0.6,
     fz: 0.8,
-    skin: 'skaterMaleA',
-    tint: 0xffd27a,
+    body: 'pink',
+    outfit: ['npc-kong-hat', 'npc-kong-top', 'npc-kong-bottom', 'npc-kong-cape'],
+    scale: 0.8,
     first: [
       '우와! 저편 사람이다! 진짜 포탈에서 나왔어?',
       '저편 세계엔 하늘까지 닿는 건물이 있다는 게 진짜야? 서울이라는 데?',

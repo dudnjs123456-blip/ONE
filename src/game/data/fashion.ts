@@ -28,7 +28,10 @@ export type Fabric = 'knit' | 'suede' | 'denim' | 'tweed' | 'leather';
 export const FABRICS: Fabric[] = ['knit', 'suede', 'denim', 'tweed', 'leather'];
 
 /** 소품 모양 */
-export type AccStyle = 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini' | 'bunny' | 'bunnyTail' | 'bikini';
+export type AccStyle =
+  | 'cap' | 'beanie' | 'bucket' | 'sunglasses' | 'round' | 'backpack' | 'mini' | 'bunny' | 'bunnyTail' | 'bikini'
+  // 다른 차원 마을 사람들의 판타지 옷차림 (가게에서 팔지 않는다)
+  | 'witchHat' | 'beret' | 'bandana' | 'cape' | 'shortCape' | 'pauldron' | 'apron';
 
 export interface CosmeticDef {
   id: string;
@@ -231,7 +234,40 @@ export const PAJAMAS: CosmeticDef[] = [
 /** 잘 때 입는 코디 목록 */
 export const SLEEPWEAR: readonly string[] = PAJAMAS.map((c) => c.id);
 
-const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries([...COSMETICS, ...OPTICAL_GLASSES, ...PAJAMAS].map((c) => [c.id, c]));
+/**
+ * 다른 차원 경계 마을 사람들의 판타지 옷 (가게에서 팔지 않는다, VILLAGE_NPCS 의 outfit).
+ * 망토·어깨 갑옷은 가방 칸·꼬리 칸을 빌려 쓴다 (칸마다 하나라서)
+ */
+export const NPC_COSTUMES: CosmeticDef[] = [
+  // 노아: 차원 마법사 (보랏빛 로브 + 별 장식 뾰족 모자 + 남색 망토)
+  C({ id: 'npc-noa-hat', name: '차원 마법사 모자', icon: '🧙', slot: 'hat', price: 0, color: 0x3b2a6e, color2: 0xf2c94c, style: 'witchHat', desc: '' }),
+  C({ id: 'npc-noa-top', name: '보랏빛 로브', icon: '🧙', slot: 'top', price: 0, color: 0x5b3fa0, color2: 0x3b2a6e, pattern: 'solid', fabric: 'suede', desc: '' }),
+  C({ id: 'npc-noa-bottom', name: '밤하늘 치마', icon: '🧙', slot: 'bottom', price: 0, color: 0x2a2150, desc: '' }),
+  C({ id: 'npc-noa-cape', name: '별빛 망토', icon: '🧙', slot: 'bag', price: 0, color: 0x1f2a5c, color2: 0xf2c94c, style: 'cape', desc: '' }),
+  // 마루: 촌장 겸 길드 마스터 (진홍 망토 + 깃털 베레모 + 금빛 조끼)
+  C({ id: 'npc-maru-hat', name: '깃털 베레모', icon: '🪶', slot: 'hat', price: 0, color: 0x7a1f2b, color2: 0xf4efe2, style: 'beret', desc: '' }),
+  C({ id: 'npc-maru-top', name: '금실 조끼', icon: '🪶', slot: 'top', price: 0, color: 0xc89b3c, color2: 0x7a1f2b, pattern: 'stripe', fabric: 'tweed', desc: '' }),
+  C({ id: 'npc-maru-bottom', name: '갈색 승마 바지', icon: '🪶', slot: 'bottom', price: 0, color: 0x4a3426, fabric: 'leather', desc: '' }),
+  C({ id: 'npc-maru-cape', name: '진홍 망토', icon: '🪶', slot: 'bag', price: 0, color: 0xa3202f, color2: 0xe8c76a, style: 'cape', desc: '' }),
+  // 바위: 북문 기사 (은빛 어깨 갑옷 + 파란 망토 + 사슬 갑옷 색 상의)
+  C({ id: 'npc-bawi-top', name: '사슬 갑옷', icon: '🛡️', slot: 'top', price: 0, color: 0x8d96a6, color2: 0x5d6677, pattern: 'check', desc: '' }),
+  C({ id: 'npc-bawi-bottom', name: '가죽 각반', icon: '🛡️', slot: 'bottom', price: 0, color: 0x3a3029, fabric: 'leather', desc: '' }),
+  C({ id: 'npc-bawi-shoes', name: '철 장화', icon: '🛡️', slot: 'shoes', price: 0, color: 0x6e7684, desc: '' }),
+  C({ id: 'npc-bawi-cape', name: '파수꾼 망토', icon: '🛡️', slot: 'bag', price: 0, color: 0x23488f, color2: 0xd8dde6, style: 'cape', desc: '' }),
+  C({ id: 'npc-bawi-armor', name: '은빛 어깨 갑옷', icon: '🛡️', slot: 'tail', price: 0, color: 0xc9d0dc, color2: 0xd9b25a, style: 'pauldron', desc: '' }),
+  // 달래: 달빛 여관 주인 (빨간 두건 + 흰 앞치마 + 크림 블라우스)
+  C({ id: 'npc-dallae-hat', name: '빨간 두건', icon: '🍵', slot: 'hat', price: 0, color: 0xc8343f, color2: 0xf6f1e4, style: 'bandana', desc: '' }),
+  C({ id: 'npc-dallae-top', name: '크림 블라우스', icon: '🍵', slot: 'top', price: 0, color: 0xf3e7cf, desc: '' }),
+  C({ id: 'npc-dallae-bottom', name: '갈색 긴 치마', icon: '🍵', slot: 'bottom', price: 0, color: 0x7a4a2e, fabric: 'suede', desc: '' }),
+  C({ id: 'npc-dallae-apron', name: '여관 앞치마', icon: '🍵', slot: 'tail', price: 0, color: 0xfbf8f1, color2: 0xc8343f, style: 'apron', desc: '' }),
+  // 콩이: 꼬마 모험가 (짧은 초록 망토 + 주황 상의 + 볼캡)
+  C({ id: 'npc-kong-hat', name: '모험가 모자', icon: '🗡️', slot: 'hat', price: 0, color: 0x2f7d4a, style: 'cap', desc: '' }),
+  C({ id: 'npc-kong-top', name: '주황 튜닉', icon: '🗡️', slot: 'top', price: 0, color: 0xf08a2c, color2: 0xffd27a, pattern: 'stripe', desc: '' }),
+  C({ id: 'npc-kong-bottom', name: '모험가 반바지', icon: '🗡️', slot: 'bottom', price: 0, color: 0x5a4632, desc: '' }),
+  C({ id: 'npc-kong-cape', name: '짧은 초록 망토', icon: '🗡️', slot: 'bag', price: 0, color: 0x2f9d5a, color2: 0xffd27a, style: 'shortCape', desc: '' }),
+];
+
+const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries([...COSMETICS, ...OPTICAL_GLASSES, ...PAJAMAS, ...NPC_COSTUMES].map((c) => [c.id, c]));
 const dailyCache = new Map<string, CosmeticDef | undefined>();
 
 /** 옷 id → 옷 (기본 옷 + 지난 신상까지 id 로 다시 만들어 찾는다) */

@@ -13,7 +13,6 @@ import { createCharacter } from './vrmCharacter';
 import { headshot } from './portraitShot';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playCoin, playHit, playLevelUp } from './sfx';
-import { PersonView } from './personView';
 import { buildVillage, type VillageScene } from './villageScene';
 import { VILLAGE } from '../data/village';
 
@@ -205,11 +204,15 @@ export class FieldRenderer {
       const f = n.fighter;
       let a = this.actors.get(f);
       if (!a) {
-        const view = new PersonView(n.def.id.length, { skin: n.def.skin, tint: n.def.tint });
+        // 주인공처럼 애니풍 3D 캐릭터 + 판타지 옷 (마법사 모자 · 망토 · 갑옷 · 앞치마)
+        const view = createCharacter(playerLook(n.def.outfit, n.def.body));
+        const sc = n.def.scale ?? 1;
+        view.root.scale.setScalar(sc);
+        view.casual = true;
         const plate = new Nameplate(false);
         plate.sprite.scale.multiplyScalar(1.7);
         this.scene.add(view.root, plate.sprite);
-        a = { mannequin: view, plate, height: 2.05 };
+        a = { mannequin: view, plate, height: 2.05 * sc + (n.def.outfit.some((id) => id.endsWith('-hat')) ? 0.25 : 0) };
         this.actors.set(f, a);
       }
       a.mannequin.update(f, clock);

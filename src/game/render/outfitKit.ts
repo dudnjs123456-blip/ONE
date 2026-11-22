@@ -789,6 +789,21 @@ function measure(vrm: VRM): Metrics {
   return { bust, head, headPos, top, eyeY, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, rx: (x1 - x0) / 2, rz: (z1 - z0) / 2, faceZ, eyeX, eyeR, sideX, chest, chestPos, body, tops: new Float32Array(vertsOf(vrm, ['Tops_'])), v0: vrm.meta?.metaVersion === '0', hips: node('hips')!, hipsPos: node('hips')!.getWorldPosition(new THREE.Vector3()), legY: (node('leftUpperLeg') ?? node('hips')!).getWorldPosition(new THREE.Vector3()).y, ankleY: node('leftFoot')?.getWorldPosition(new THREE.Vector3()).y ?? 0.08, lower: new Float32Array(vertsOf(vrm, ['Body_', 'Bottoms_', 'Onepiece_', 'Tops_'])) };
 }
 
+/** 어깨 높이 (가슴 뼈 위, 목 아래) */
+function shoulderY(m: Metrics) {
+  return m.chestPos.y + Math.min(0.14, Math.max(0.07, (m.eyeY - m.chestPos.y) * 0.42));
+}
+
+/** 어깨 반폭: 어깨 높이 근처 상의(없으면 몸) 정점의 가장 바깥 */
+function shoulderHalf(m: Metrics, y: number) {
+  let w = 0;
+  for (const list of [m.tops, m.body]) {
+    for (let i = 0; i < list.length; i += 3) if (Math.abs(list[i + 1] - (y - 0.04)) < 0.03) w = Math.max(w, Math.abs(list[i] - m.cx));
+    if (w > 0.08) break;
+  }
+  return Math.min(0.24, Math.max(0.12, w || 0.17));
+}
+
 /** 몸 표면 z: (x, y) 근처 정점 중 가장 앞(dir 1) 또는 뒤(dir -1) */
 function surfaceZ(m: Metrics, x: number, y: number, dir: 1 | -1, r = 0.035) {
   let best = dir > 0 ? -Infinity : Infinity;
@@ -958,6 +973,147 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
         add(new THREE.IcosahedronGeometry(r * 0.55, 1), fluff, m.cx + Math.cos(a) * r * 0.62, ty + Math.sin(a) * r * 0.62, z - r * 0.15);
       }
       add(new THREE.IcosahedronGeometry(r * 0.6, 1), fluff, m.cx, ty + r * 0.1, z - r * 0.55);
+      break;
+    }
+    case 'witchHat': {
+      // 넓은 챙 + 위로 갈수록 가늘어지다 끝이 뒤로 꺾인 뾰족 모자, 금빛 띠와 별 장식
+      const trim = mat(c.color2 ?? 0xf2c94c);
+      add(new THREE.CylinderGeometry(R * 2.05, R * 2.15, 0.014, 36), mat(c.color, { side: THREE.DoubleSide }), m.cx, base - 0.004, m.cz);
+      const h1 = Math.max(0.16, crownH * 1.6);
+      add(new THREE.CylinderGeometry(R * 0.52, R * 1.02, h1, 28, 1, true), mat(c.color, { side: THREE.DoubleSide }), m.cx, base + h1 / 2, m.cz);
+      add(new THREE.CylinderGeometry(R * 1.04, R * 1.05, 0.04, 28, 1, true), trim, m.cx, base + 0.024, m.cz);
+      const tip = new THREE.Group();
+      tip.position.set(m.cx, base + h1 - 0.004, m.cz);
+      tip.rotation.x = -0.75;
+      g.add(tip);
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(R * 0.52, 0.2, 24), main);
+      cone.position.y = 0.095;
+      cone.castShadow = true;
+      tip.add(cone);
+      // 띠에 붙은 별 (앞쪽)
+      const star = new THREE.Shape();
+      for (let k = 0; k < 10; k++) {
+        const r = k % 2 ? 0.014 : 0.032;
+        const a = (k / 10) * Math.PI * 2 + Math.PI / 2;
+        if (k) star.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        else star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      const glow = c.color2 ?? 0xf2c94c;
+      add(new THREE.ExtrudeGeometry(star, { depth: 0.008, bevelEnabled: false }), mat(glow, { emissive: glow, emissiveIntensity: 0.6 }), m.cx, base + 0.04, m.cz + R * 1.04);
+      break;
+    }
+    case 'beret': {
+      // 한쪽으로 기울어진 납작한 베레모 + 옆에 꽂은 긴 깃털
+      const cap = add(new THREE.SphereGeometry(1, 28, 12), main, m.cx + R * 0.12, base + crownH * 0.72, m.cz - R * 0.05);
+      cap.scale.set(R * 1.2, crownH * 0.42, R * 1.15);
+      cap.rotation.z = -0.22;
+      add(new THREE.CylinderGeometry(R * 1.0, R * 1.02, 0.03, 28, 1, true), mat(new THREE.Color(c.color).multiplyScalar(0.7).getHex(), { side: THREE.DoubleSide }), m.cx, base + crownH * 0.5, m.cz);
+      const quill = new THREE.Group();
+      quill.position.set(m.cx - R * 0.85, base + crownH * 0.7, m.cz - R * 0.2);
+      quill.rotation.set(0.5, 0, 0.55);
+      g.add(quill);
+      const feather = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), mat(c.color2 ?? 0xffffff));
+      feather.scale.set(0.022, 0.14, 0.008);
+      feather.position.y = 0.12;
+      quill.add(feather);
+      break;
+    }
+    case 'bandana': {
+      // 머리를 감싼 두건 + 뒤통수 매듭과 늘어진 두 자락
+      const cloth = add(new THREE.SphereGeometry(1, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.56), main, m.cx, base - 0.01, m.cz - m.rz * 0.04);
+      cloth.scale.set(R * 1.03, crownH * 1.0, R * 1.04);
+      // 이마 쪽 단 테두리
+      add(new THREE.CylinderGeometry(R * 1.04, R * 1.05, 0.018, 28, 1, true), mat(c.color2 ?? 0xffffff, { side: THREE.DoubleSide }), m.cx, base + 0.004, m.cz - m.rz * 0.04);
+      const backZ = m.cz - m.rz * 1.02;
+      add(new THREE.SphereGeometry(0.03, 12, 8), main, m.cx, base + 0.01, backZ);
+      for (const s of [-1, 1]) {
+        const tail = add(new THREE.BoxGeometry(0.05, 0.13, 0.008), main, m.cx + s * 0.03, base - 0.06, backZ - 0.012);
+        tail.rotation.z = s * 0.3;
+        tail.rotation.x = -0.25;
+      }
+      break;
+    }
+    case 'cape':
+    case 'shortCape': {
+      // 어깨에서 늘어진 망토: 등 뒤를 감싸는 원뿔 조각 (아래로 갈수록 벌어진다) + 안감 + 목 칼라 + 금빛 브로치
+      parent = m.chest;
+      origin = m.chestPos;
+      const short = c.style === 'shortCape';
+      const shY = shoulderY(m);
+      const sw = shoulderHalf(m, shY);
+      const back = surfaceZ(m, m.cx, shY - 0.06, -1, 0.06);
+      const bottom = short ? m.hipsPos.y - 0.02 : Math.max(m.ankleY + 0.18, m.legY - (m.legY - m.ankleY) * 0.72);
+      const h = shY - bottom;
+      const rTop = sw * 1.05;
+      const rBot = sw * (short ? 1.45 : 1.55);
+      const cz = back + rTop * 0.82;
+      const arc = short ? 2.6 : 2.9;
+      const capeGeo = new THREE.CylinderGeometry(rTop, rBot, h, 30, 8, true, Math.PI - arc / 2, arc);
+      // 아래 자락은 살짝 물결치고 뒤로 늘어지게
+      const cp = capeGeo.attributes.position;
+      for (let i = 0; i < cp.count; i++) {
+        const t = (h / 2 - cp.getY(i)) / h;
+        const a = Math.atan2(cp.getX(i), cp.getZ(i));
+        const wob = 1 + Math.sin(a * 7) * 0.05 * t * t;
+        cp.setX(i, cp.getX(i) * wob);
+        cp.setZ(i, cp.getZ(i) * wob - t * t * 0.05);
+      }
+      capeGeo.computeVertexNormals();
+      add(capeGeo, mat(c.color, { side: THREE.DoubleSide }), m.cx, shY - h / 2, cz);
+      // 칼라: 목 뒤를 감싸는 둥근 깃
+      const collar = add(new THREE.TorusGeometry(sw * 0.62, 0.022, 8, 24, Math.PI * 1.25), mat(c.color2 ?? c.color), m.cx, shY + 0.015, m.chestPos.z + (back - m.chestPos.z) * 0.15);
+      collar.rotation.set(Math.PI / 2, 0, Math.PI * 1.125);
+      // 어깨 앞 브로치 둘 (망토를 여민 자리)
+      const pin = c.color2 ?? 0xe8c76a;
+      for (const s of [-1, 1]) {
+        const front = surfaceZ(m, m.cx + s * sw * 0.55, shY - 0.04, 1, 0.04);
+        add(new THREE.SphereGeometry(0.02, 12, 8), mat(pin, { emissive: pin, emissiveIntensity: 0.35 }), m.cx + s * sw * 0.55, shY - 0.04, front + 0.01);
+      }
+      break;
+    }
+    case 'pauldron': {
+      // 은빛 어깨 갑옷 둘 (겹친 판 두 장 + 금선) + 가슴판 가운데 금빛 문장
+      parent = m.chest;
+      origin = m.chestPos;
+      const metal = mat(c.color, { emissive: 0x20242c, emissiveIntensity: 0.2 });
+      const gold = mat(c.color2 ?? 0xd9b25a);
+      const shY = shoulderY(m);
+      const sw = shoulderHalf(m, shY);
+      for (const s of [-1, 1]) {
+        const x = m.cx + s * sw * 0.92;
+        const z = m.chestPos.z - 0.005;
+        const p1 = add(new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), metal, x, shY - 0.02, z);
+        p1.scale.set(0.085, 0.07, 0.095);
+        p1.rotation.z = -s * 0.45;
+        const p2 = add(new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.45), metal, x + s * 0.035, shY - 0.065, z);
+        p2.scale.set(0.075, 0.055, 0.09);
+        p2.rotation.z = -s * 0.75;
+      }
+      const cy = m.chestPos.y + 0.02;
+      const fz = surfaceZ(m, m.cx, cy, 1, 0.05);
+      const plate = add(new THREE.SphereGeometry(1, 24, 14, -Math.PI / 2, Math.PI, Math.PI * 0.18, Math.PI * 0.64), metal, m.cx, cy, fz - 0.06);
+      plate.scale.set(sw * 0.82, 0.15, 0.08);
+      add(new THREE.OctahedronGeometry(0.026), gold, m.cx, cy + 0.01, fz + 0.022).scale.set(1, 1.3, 0.5);
+      break;
+    }
+    case 'apron': {
+      // 허리에서 무릎 아래까지 오는 앞치마 (몸 앞을 감싼 조각) + 허리끈 + 주머니
+      parent = m.hips;
+      origin = m.hipsPos;
+      const waist = m.hipsPos.y + 0.1;
+      const hem = Math.max(m.ankleY + 0.25, m.legY - (m.legY - m.ankleY) * 0.55);
+      let front = -Infinity;
+      const b = m.lower;
+      for (let i = 0; i < b.length; i += 3) if (Math.abs(b[i] - m.cx) < 0.08 && Math.abs(b[i + 1] - waist) < 0.05) front = Math.max(front, b[i + 2]);
+      if (!Number.isFinite(front)) front = m.hipsPos.z + 0.1;
+      const r = 0.2;
+      const h = waist - hem;
+      add(new THREE.CylinderGeometry(r, r * 1.35, h, 24, 4, true, -0.95, 1.9), mat(c.color, { side: THREE.DoubleSide }), m.cx, waist - h / 2, front + 0.025 - r);
+      const tie = mat(c.color2 ?? 0xc8343f);
+      const band = add(new THREE.TorusGeometry(r * 0.98, 0.012, 6, 32), tie, m.cx, waist, front + 0.02 - r);
+      band.rotation.x = Math.PI / 2;
+      band.scale.set(1, 0.85, 1);
+      add(new THREE.BoxGeometry(0.12, 0.07, 0.01), tie, m.cx, waist - h * 0.45, front + 0.03 + r * 0.08);
       break;
     }
     default:

@@ -94,6 +94,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
 
     const world = new FieldWorld(new FieldKeyboardController(kb, P1_KEYS, 0), new AutoHuntController(), profile, Date.now() & 0xffff, !!account);
     worldRef.current = world;
+    // 개발 중 화면 점검용 (배포판에는 없다)
+    if (process.env.NODE_ENV === 'development') (window as unknown as { __field?: FieldWorld }).__field = world;
     // 로그인했으면 같은 차원에 접속 (서울 동네 접속은 서울 화면을 나오면서 끊겨, 서울에선 내가 사라진다)
     const link = account ? new DimensionLink(world, account) : null;
     link?.start();
@@ -129,6 +131,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     window.addEventListener('pagehide', savePlace);
 
     const renderer = new FieldRenderer(canvas);
+    if (process.env.NODE_ENV === 'development') (window as unknown as { __fr?: FieldRenderer }).__fr = renderer;
     const detachZoom = attachZoomControls(renderer, 0.2, 2.2);
     const resize = () => renderer.resize(canvas.clientWidth, canvas.clientHeight);
     resize();
