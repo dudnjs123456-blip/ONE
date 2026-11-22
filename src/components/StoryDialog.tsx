@@ -54,7 +54,8 @@ export default function StoryDialog({
     setShown(0);
     const id = window.setInterval(() => setShown((n) => (n >= full ? n : n + 1)), TYPE_MS);
     return () => window.clearInterval(id);
-  }, [line, full]);
+    // line 객체는 부모가 다시 그릴 때마다 새로 만들어진다 → 글 내용·순서가 바뀔 때만 처음부터 다시 찍는다
+  }, [line.who, line.text, idx, full]);
   const typing = shown < full;
   const last = idx + 1 >= total;
   const me = line.who === 'me';
