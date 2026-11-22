@@ -18,6 +18,7 @@ import { sessionLock } from '@/game/net/sessionLock';
 import { expToNext } from '@/game/data/progression';
 import type { PcGame } from './PcRoomPanel';
 import { loadRecord, loadStreak, rankOf } from '@/game/core/cpuRecord';
+import { clearDimensionPlace, loadLastScreen, saveLastScreen } from '@/game/core/lastScreen';
 
 // 게임 화면들은 들어갈 때 불러온다 (첫 화면·로그인을 빨리 띄우려고 — 3D·서울 코드가 크다)
 const loadingScreen = () => <div className="flex h-screen w-screen items-center justify-center bg-black text-sm text-white/60">불러오는 중…</div>;
@@ -84,6 +85,13 @@ export default function Game() {
   const [account, setAccount] = useState<Account | null>(null);
   const [pending, setPending] = useState<Account | null>(null);
 
+  /** 새로고침 전에 다른 차원에 있었으면 그대로 차원에서 이어서 (나가면 서울 집 컴퓨터 앞으로) */
+  const resumeScreen = (userId: string | null) => {
+    if (loadLastScreen(userId) !== 'field') return;
+    setFromCity(true);
+    setScreen({ kind: 'field' });
+  };
+
   /**
    * 로그인한 계정의 기록을 서버에서 받아 와 그대로 시작.
    * 한 아이디는 한 창에서만: 다른 창이 접속 중이면 막는다 (force = 그 창을 끊고 여기서)
@@ -106,8 +114,17 @@ export default function Game() {
     preloadModel((l) => l.bodyUrl(p.body));
     setProfile({ ...p });
     setAccount(acc);
+    resumeScreen(acc.userId);
     setGate('ready');
   };
+
+  // 지금 차원에 있는지 이 브라우저에 기억 (차원을 나오면 차원 안 위치도 잊는다 → 다음엔 포탈 앞에서)
+  useEffect(() => {
+    if (gate !== 'ready') return;
+    const userId = account?.userId ?? null;
+    saveLastScreen(userId, screen.kind === 'field' ? 'field' : null);
+    if (screen.kind !== 'field') clearDimensionPlace(userId);
+  }, [gate, screen.kind, account]);
 
   useEffect(() => {
     // 주인공 모델은 메뉴에 있을 때 미리 받아 둔다
@@ -128,6 +145,7 @@ export default function Game() {
     if (!cloudSave.enabled) {
       // 서버 설정이 없으면 (개발용) 로그인 없이 이 브라우저 기록으로
       setProfile(loadProfile());
+      resumeScreen(null);
       setGate('ready');
     } else {
       // 이미 로그인돼 있으면 (새로고침) 바로 이어서, 아니면 로그인 화면
@@ -138,6 +156,8 @@ export default function Game() {
       window.removeEventListener('pagehide', flush);
       sessionLock.onKicked = null;
     };
+    // 처음 한 번만 (새로고침 직후 로그인 확인)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const logout = async () => {

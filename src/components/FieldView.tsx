@@ -27,6 +27,7 @@ import StoryDialog, { type DialogLine } from './StoryDialog';
 import { RESCUE_SCRIPT, type ScriptLine } from '@/game/data/prologueScript';
 import { VILLAGE_NPCS } from '@/game/data/village';
 import { storyPortrait } from '@/game/data/portraits';
+import { loadDimensionPlace, saveDimensionPlace } from '@/game/core/lastScreen';
 
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
@@ -110,7 +111,22 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         dallae.fighter.faceToward(world.player);
       }
       storyTimer = window.setTimeout(() => setStory({ lines: RESCUE_SCRIPT, idx: 0 }), 1500);
+    } else {
+      // 새로고침 전에 차원 안에 있던 자리 · 체력 그대로 (차원을 나왔다 다시 들어오면 기억이 지워져 포탈 앞)
+      const at = loadDimensionPlace(account?.userId ?? null);
+      if (at && at.hp > 0) {
+        world.player.reset(at.x, at.z, at.fx, at.fz);
+        world.player.hp = Math.min(at.hp, world.player.maxHp);
+      }
     }
+    const savePlace = () => {
+      const p = world.player;
+      // 쓰러져 있을 땐 저장하지 않는다 (다시 들어오면 마을에서 일어난 것과 같게)
+      if (p.hp <= 0) return;
+      saveDimensionPlace(account?.userId ?? null, { x: p.x, z: p.z, fx: p.fx, fz: p.fz, hp: p.hp });
+    };
+    const placeTimer = window.setInterval(savePlace, 2000);
+    window.addEventListener('pagehide', savePlace);
 
     const renderer = new FieldRenderer(canvas);
     const detachZoom = attachZoomControls(renderer, 0.2, 2.2);
@@ -227,6 +243,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     return () => {
       cancelAnimationFrame(raf);
       window.clearInterval(autosave);
+      window.clearInterval(placeTimer);
+      window.removeEventListener('pagehide', savePlace);
       window.clearTimeout(warpTimer);
       window.clearTimeout(storyTimer);
       link?.stop();
