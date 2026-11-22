@@ -14,7 +14,7 @@ import { headshot } from './portraitShot';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playCoin, playHit, playLevelUp } from './sfx';
 import { PersonView } from './personView';
-import { buildVillage } from './villageScene';
+import { buildVillage, type VillageScene } from './villageScene';
 import { VILLAGE } from '../data/village';
 
 /** 16:10 화면에서 45° 일 때 보이는 옆 시야각 — 세로 화면도 이만큼은 보이게 */
@@ -41,7 +41,7 @@ export class FieldRenderer {
   private camPos = new THREE.Vector3();
   private shake = 0;
   private initialized = false;
-  private portal: THREE.Group | null = null;
+  private village: VillageScene | null = null;
 
   /** 카메라 거리 배율 (1 = 기본 쿼터뷰, 작을수록 가까이) */
   private camOffset: THREE.Vector3;
@@ -119,11 +119,8 @@ export class FieldRenderer {
       this.targetRing.rotation.z = clock.t * 0.03;
     }
 
-    if (this.portal) {
-      // 포탈은 돌리지 않고 숨 쉬듯 커졌다 작아졌다만 (돌리면 화면 앞을 크게 가린다)
-      const ring = this.portal.children[0];
-      ring.scale.setScalar(1 + Math.sin(clock.t * 0.05) * 0.04);
-    }
+    // 마을: 포탈 소용돌이·깃발·불꽃·연기·반딧불이 (포탈 고리는 돌리지 않는다 — 돌리면 화면 앞을 크게 가린다)
+    this.village?.update(clock.t, world.player.x, world.player.z);
 
     this.updateCamera(world.player, clock);
     this.renderer.render(this.scene, this.camera);
@@ -278,7 +275,7 @@ export class FieldRenderer {
     s.add(field);
 
     // 경계 마을 (접속하면 도착하는 곳, 사냥터 남쪽)
-    this.portal = buildVillage(s).portal;
+    this.village = buildVillage(s);
 
     // 떠 있는 차원 수정
     const crystalMat = new THREE.MeshStandardMaterial({ color: 0xb48cff, emissive: 0x6a3cff, emissiveIntensity: 0.9, roughness: 0.25, metalness: 0.1 });
