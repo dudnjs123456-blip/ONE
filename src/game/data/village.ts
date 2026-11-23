@@ -23,6 +23,17 @@ export const VILLAGE_GATE_OUT = { x: 0, z: 20.5 } as const;
 /** NPC 에게 말을 걸 수 있는 거리 */
 export const TALK_RANGE = 2.2;
 
+/** 0장에서 E 로 살펴보는 곳: 의뢰 게시판 · 우물 · 여관 방명록 (story/chapter0) */
+export const VILLAGE_SPOTS: { id: 'board' | 'well' | 'book'; name: string; x: number; z: number }[] = [
+  { id: 'board', name: '의뢰 게시판', x: 6.9, z: 33.4 },
+  { id: 'well', name: '우물', x: -5.2, z: 30.2 },
+  { id: 'book', name: '여관 방명록', x: -8.25, z: 32.45 },
+];
+/** 살펴볼 수 있는 거리 (우물은 담 둘레까지) */
+export const SPOT_RANGE = 1.9;
+/** 북문 기사 바위 옆 허수아비 (0장: 주먹이 반만 닿는다) */
+export const VILLAGE_DUMMY = { x: 6.5, z: 25.9 } as const;
+
 export interface VillageNpcDef {
   id: string;
   name: string;

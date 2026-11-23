@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { FIELD_HALF } from '../core/field';
-import { VILLAGE, VILLAGE_HOUSES, VILLAGE_PORTAL, type VillageHouse } from '../data/village';
+import { VILLAGE, VILLAGE_DUMMY, VILLAGE_HOUSES, VILLAGE_PORTAL, VILLAGE_SPOTS, type VillageHouse } from '../data/village';
 
 /**
  * 경계 마을 그림: 서울(현대 도시)과 전혀 다른 "판타지 RPG 마을".
@@ -865,6 +865,50 @@ function bench(b: Batch, M: Mats, x: number, z: number, ry: number) {
   b.pop();
 }
 
+/**
+ * 0장 소품: 의뢰 게시판(종이 몇 장), 여관 앞 방명록 받침대(펼친 책), 북문 옆 허수아비(짚 몸통 + 나무 십자)
+ */
+function storyProps(b: Batch, M: Mats) {
+  const paper = M.flags[2];
+  for (const sp of VILLAGE_SPOTS) {
+    if (sp.id === 'board') {
+      // 광장 쪽(서쪽)을 보는 게시판
+      b.push(sp.x, 0, sp.z, -Math.PI / 2);
+      for (const s of [-1, 1]) b.box(M.beam, 0.1, 1.9, 0.1, s * 0.62, 0.95, 0);
+      b.box(M.plank, 1.4, 0.9, 0.06, 0, 1.35, 0.02);
+      b.box(M.beam, 1.55, 0.08, 0.2, 0, 1.86, 0.04);
+      const notes: [number, number, number, number][] = [
+        [-0.42, 1.48, 0.32, 0.4],
+        [0.02, 1.38, 0.34, 0.46],
+        [0.44, 1.52, 0.28, 0.34],
+        [0.38, 1.12, 0.3, 0.22],
+        [-0.38, 1.08, 0.36, 0.24],
+      ];
+      for (const [x, y, w, h] of notes) b.box(paper, w, h, 0.01, x, y, 0.06);
+      b.pop();
+    } else if (sp.id === 'book') {
+      // 여관 문 옆 받침대 위 펼친 방명록
+      b.push(sp.x, 0, sp.z, Math.PI / 2);
+      b.box(M.beam, 0.12, 0.95, 0.12, 0, 0.47, 0);
+      b.box(M.plank, 0.5, 0.05, 0.38, 0, 0.98, 0, 0);
+      for (const s of [-1, 1]) {
+        const page = new THREE.BoxGeometry(0.21, 0.025, 0.3);
+        b.add(page, paper, s * 0.11, 1.02, 0, 0, 0, -s * 0.12);
+      }
+      b.pop();
+    }
+  }
+  // 허수아비: 나무 기둥 + 가로대, 짚 몸통·머리, 천 조각
+  const { x, z } = VILLAGE_DUMMY;
+  b.push(x, 0, z, 0.3);
+  b.add(new THREE.CylinderGeometry(0.05, 0.06, 1.9, 8), M.beam, 0, 0.95, 0);
+  b.add(new THREE.CylinderGeometry(0.04, 0.04, 1.1, 8), M.beam, 0, 1.35, 0, 0, 0, Math.PI / 2);
+  b.add(new THREE.CylinderGeometry(0.22, 0.26, 0.7, 12), M.hay, 0, 1.15, 0);
+  b.add(new THREE.SphereGeometry(0.19, 12, 10), M.hay, 0, 1.72, 0);
+  b.box(M.awningR, 0.5, 0.18, 0.46, 0, 1.4, 0);
+  b.pop();
+}
+
 // ───────────────────────── 마을
 
 export interface VillageScene {
@@ -1193,6 +1237,7 @@ export function buildVillage(s: THREE.Scene): VillageScene {
   b.add(new THREE.CylinderGeometry(0.03, 0.03, 1.2, 5), M.beam, -5.1, 0.45, 26.3, 0, 0.25, Math.PI / 2 - 0.35);
   bench(b, M, 4.1, 30.6, -Math.PI / 2);
   bench(b, M, -3.6, 28.0, 0.5);
+  storyProps(b, M);
   tree(b, M, -11.6, 34.3, false);
   tree(b, M, 11.6, 34.2, true);
   tree(b, M, 11.4, 25.4, false);

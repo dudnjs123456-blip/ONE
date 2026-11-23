@@ -10,7 +10,8 @@ import { FIELD_SPAWNS, MONSTERS, MONSTER_RESPAWN_FRAMES, type MonsterType } from
 import { DIR_OF_KEY, MOVES, totalFrames } from '../data/moves';
 import { expToNext } from '../data/progression';
 import { playerStats } from '../data/equipment';
-import { TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, type VillageNpcDef } from '../data/village';
+import { SPOT_RANGE, TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, VILLAGE_SPOTS, type VillageNpcDef } from '../data/village';
+import { gateLocked } from '../story/chapter0';
 
 /** 필드는 [-FIELD_HALF, FIELD_HALF] 정사각형 */
 export const FIELD_HALF = 22;
@@ -232,6 +233,8 @@ export interface FieldHudState {
   inVillage: boolean;
   /** 말을 걸 수 있는 가까운 NPC */
   npc: { id: string; name: string; title: string; met: boolean } | null;
+  /** 0장: 가까이 있는 살펴볼 곳 (NPC 가 더 가까우면 null) */
+  spot: { id: 'board' | 'well' | 'book'; name: string; seen: boolean } | null;
 }
 
 const idle = (): FieldCommand => ({ move: null, input: NEUTRAL_INPUT });
@@ -333,6 +336,7 @@ export class FieldWorld {
   /** 대화 중 (내 캐릭터는 멈춰 선다) */
   talking: VillageNpc | null = null;
   playerDeadFrames = 0;
+  private gateWarned = -999;
   log: { id: number; text: string }[] = [];
 
   // ── 같이 사냥 (접속했을 때만) ──
@@ -419,7 +423,16 @@ export class FieldWorld {
     return false;
   }
 
+  /** 0장이 끝나기 전 새 사람은 북문을 못 나간다 (바위가 막는다) */
+  get gateLocked(): boolean {
+    return gateLocked(this.profile.dimension?.ch0 ?? null);
+  }
+
   toggleAuto() {
+    if (!this.auto && this.gateLocked) {
+      this.addLog('바위: "문 밖은 아직 안 돼. 마을 사람들부터 만나고 와."');
+      return;
+    }
     this.auto = !this.auto;
     this.addLog(`자동사냥 ${this.auto ? 'ON' : 'OFF'}`);
   }
@@ -440,6 +453,38 @@ export class FieldWorld {
       }
     }
     return best;
+  }
+
+  /** 0장: 살펴볼 수 있는 가장 가까운 곳 (말 걸 NPC 가 있으면 그쪽이 먼저) */
+  nearbySpot(): (typeof VILLAGE_SPOTS)[number] | null {
+    const p = this.player;
+    if (p.hp <= 0 || this.nearbyNpc()) return null;
+    let best: (typeof VILLAGE_SPOTS)[number] | null = null;
+    let bd = SPOT_RANGE;
+    for (const s of VILLAGE_SPOTS) {
+      const d = Math.hypot(s.x - p.x, s.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  /** 0장 장면 동안 NPC 를 붙잡아 둔다 (talk() 처럼 서로 마주 보고, 끝나면 endTalk) */
+  holdNpc(id: string): boolean {
+    const n = this.npcs.find((v) => v.def.id === id);
+    if (!n) return false;
+    this.talking = n;
+    if (this.auto) this.toggleAuto();
+    this.player.faceToward(n.fighter);
+    n.fighter.faceToward(this.player);
+    return true;
+  }
+
+  /** 떠오르는 글자 (장면 연출용) */
+  floatText(x: number, y: number, z: number, text: string) {
+    this.texts.push({ x, y, z, text, kind: 'exp' });
   }
 
   hasMet(id: string): boolean {
@@ -609,6 +654,10 @@ export class FieldWorld {
       npc: (() => {
         const n = this.nearbyNpc();
         return n && { id: n.def.id, name: n.def.name, title: n.def.title, met: this.hasMet(n.def.id) };
+      })(),
+      spot: (() => {
+        const s = this.nearbySpot();
+        return s && { id: s.id, name: s.name, seen: !!this.profile.dimension?.ch0?.clues?.includes(s.id) };
       })(),
     };
   }
@@ -858,6 +907,14 @@ export class FieldWorld {
       }
     }
     for (const { f, local } of all) if (local) clampWalk(f, f !== this.player);
+    // 0장이 끝나기 전엔 북문 앞에서 멈춘다
+    if (this.gateLocked && this.player.z < VILLAGE.z0 + 0.7) {
+      this.player.z = VILLAGE.z0 + 0.7;
+      if (this.frame - this.gateWarned > 240) {
+        this.gateWarned = this.frame;
+        this.addLog('바위: "어딜. 문 밖은 아직 안 돼."');
+      }
+    }
     // NPC 와 겹치지 않게 (NPC 는 움직이지 않는다)
     if (this.player.state !== 'ko') {
       for (const n of this.npcs) {

@@ -47,6 +47,8 @@ export interface PlayerProfile {
     met?: string[];
     /** 첫 접속 프롤로그(안개 숲 → 벼랑 → 마을에서 깨어남)를 봤다 */
     prologue?: boolean;
+    /** 0장 「저편에서 온 사람」: 의문 수첩 · 단서 · 마루에게 고른 마음 (story/chapter0) */
+    ch0?: import('../story/chapter0').Ch0State;
   };
   /** 키우는 애완동물 (펫샵) */
   pets?: import('../data/pets').PetState;

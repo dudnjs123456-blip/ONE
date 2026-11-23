@@ -318,3 +318,20 @@ body {
   70% { opacity: 0.25; }
   100% { opacity: 0; }
 }
+
+/* 0장 의문 수첩: 방금 채운 줄이 반짝 · 위쪽 알림이 떠올랐다 사라진다 */
+.note-flash {
+  animation: note-flash 0.6s ease-in-out 4;
+}
+@keyframes note-flash {
+  0%, 100% { box-shadow: 0 0 0 rgba(252, 211, 77, 0); }
+  50% { box-shadow: 0 0 14px rgba(252, 211, 77, 0.7); }
+}
+.note-toast {
+  animation: note-toast 3.2s ease-out forwards;
+}
+@keyframes note-toast {
+  0% { opacity: 0; transform: translate(-50%, 8px); }
+  10%, 80% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -6px); }
+}
