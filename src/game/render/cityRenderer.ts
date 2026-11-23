@@ -12,6 +12,7 @@ import { makeKitBuilding } from './cityKit';
 import { allLoaded } from './loadTracker';
 import { buildSofa } from './sofaModel';
 import { furnishHome, homeBaseboardMaterial, homeFloorMaterial, homeWallMaterial, sleepDuvet } from './homeFurniture';
+import { BodyQuilt } from './bodyQuilt';
 import { ChoreProps, StinkFx, type ChoreActor } from './choreProps';
 import type { ChoreKind } from '../city/chores';
 import { apartmentSigns, buildVillaEntrance, decorateFacade, swingDoors, type DoorControl } from './signage';
@@ -328,7 +329,7 @@ export class CityRenderer {
   private homeWindow!: { g: CanvasRenderingContext2D; tex: THREE.CanvasTexture; light: THREE.DirectionalLight };
   private homeWindowHour = -1;
   /** 자는 동안 덮는 이불 */
-  private duvet!: THREE.Mesh;
+  private duvet!: BodyQuilt;
   private bedLamp!: THREE.MeshBasicMaterial;
   private sleepDark = 0;
   /** 집 벽 달력 (근무한 날에 빨간 동그라미) */
@@ -930,10 +931,17 @@ export class CityRenderer {
       this.myPlate.sprite.position.set(lp.x, lift + lp.y + (down ? 0.9 : PLATE_Y), lp.z);
     }
     {
-      // 이불: 내가 자거나, 같은 집(친구 집)에서 친구가 자고 있으면
+      // 이불: 내가 자거나, 같은 집(친구 집)에서 친구가 자고 있으면 · 침대에 누운 사람들 몸을 따라 덮는다
       let rb = 0;
-      for (const r of world.remotes.values()) if (r.room === world.roomKey && r.sleep) rb = Math.max(rb, r.sleep.blanket);
-      this.syncSleep(sv, clock.dt, rb);
+      const bodies: CharacterView[] = [];
+      if (sv && sv.rest > 0) bodies.push(this.player);
+      for (const r of world.remotes.values()) {
+        if (r.room !== world.roomKey || !r.sleep) continue;
+        rb = Math.max(rb, r.sleep.blanket);
+        const v = this.remoteViews.get(r.id);
+        if (v) bodies.push(v.view);
+      }
+      this.syncSleep(sv, clock.dt, rb, bodies);
     }
 
     if (view === 'city') {
@@ -1834,19 +1842,11 @@ export class CityRenderer {
   }
 
   /** 잠자기 연출: 이불을 발끝부터 덮고, 불이 꺼진다 */
-  private syncSleep(sv: CityWorld['sleepView'], dt: number, friendBlanket = 0) {
+  private syncSleep(sv: CityWorld['sleepView'], dt: number, friendBlanket = 0, bodies: CharacterView[] = []) {
     this.sleepDark += ((sv?.dark ?? 0) - this.sleepDark) * smooth(0.15, dt);
     const b = Math.max(sv?.blanket ?? 0, friendBlanket);
-    this.duvet.visible = b > 0.01;
-    // 발끝(z 큰 쪽)에서 가슴까지 당겨 덮는다 (이불 상자는 길이 1.8m 로 만들어서 침대 길이에 맞춰 줄인다)
-    const D = 1.55;
-    this.duvet.scale.z = Math.max(0.01, (b * D) / 1.8);
-    this.duvet.position.z = -1.4 - (D * b) / 2;
-    // 옆으로 돌아누우면 몸이 높아지는 만큼 이불도 부풀어 오른다 (침대에 누운 사람 중 가장 많이 돌아누운 쪽)
-    let side = (this.player as { sleepSide?: number }).sleepSide ?? 0;
-    for (const v of this.remoteViews.values()) side = Math.max(side, (v.view as { sleepSide?: number }).sleepSide ?? 0);
-    this.duvet.position.y = 0.86 + 0.06 * side;
-    this.duvet.scale.y = 1 + 0.35 * side;
+    // 발끝에서 어깨까지 당겨 덮고, 누운 몸(뒤척이면 그 모양 그대로)보다 늘 위로 부푼다 → 몸이 이불을 뚫지 않는다
+    this.duvet.update(b, bodies);
     this.bedLamp.color.setRGB(1, 0.88 * (0.55 + 0.45 * (1 - this.sleepDark * 0.5)), 0.66);
   }
 
@@ -2929,11 +2929,14 @@ export class CityRenderer {
       this.wallCal = { g, tex: t, key: '' };
     }
     // 자는 동안 덮는 두툼한 이불 (평소엔 숨김)
-    this.duvet = sleepDuvet();
-    this.duvet.position.set(3.94, 0.86, -1.85);
-    this.duvet.scale.x = 0.73;
-    this.duvet.visible = false;
-    s.add(this.duvet);
+    {
+      // 침대 위 (매트리스 · 낮에 깔린 이불 · 니트 담요 바깥 끝까지) 를 덮는다. 머리는 베개 위로 내놓는다
+      const lie = HOME.bed.lie;
+      const day = sleepDuvet();
+      this.duvet = new BodyQuilt({ x0: 3.0, x1: 4.96, zHem: lie.z - 1.29, zFoot: -1.32, top: 0.78, drape: 0.2, fall: 0.3, uvScale: 0.6 }, day.material as THREE.Material);
+      day.geometry.dispose();
+      s.add(this.duvet.mesh);
+    }
 
     // 천장 조명: 부엌·식탁 · 침실 · 거실 (칸이 나뉘어 세 곳)
     for (const [lx, lz] of [[-2.2, -0.6], [3.4, -2.2], [2.6, 1.8]]) {
