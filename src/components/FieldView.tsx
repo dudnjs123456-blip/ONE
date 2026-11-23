@@ -30,7 +30,7 @@ import { VILLAGE_DUMMY, VILLAGE_NPCS } from '@/game/data/village';
 import { MOVES } from '@/game/data/moves';
 import { playHit } from '@/game/render/sfx';
 import { sharedGameTime } from '@/game/city/worldClock';
-import { finishScene, nextScene, NOTES, scene, sceneForNpc, sceneForSpot, sceneOnArrive, startCh0, wakeScene, type Ch0State, type NoteId, type Scene, type SceneId } from '@/game/story/chapter0';
+import { finishScene, nextObjective, nextScene, NOTES, scene, sceneForNpc, sceneForSpot, sceneOnArrive, startCh0, wakeScene, type Ch0State, type NoteId, type Scene, type SceneId } from '@/game/story/chapter0';
 import { storyPortrait } from '@/game/data/portraits';
 import { loadDimensionPlace, saveDimensionPlace } from '@/game/core/lastScreen';
 
@@ -81,13 +81,17 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
   const portrait = usePortrait();
-  const talkApi = useRef<{ start: () => void; next: () => void; close: () => void; story: () => void; pick: (v: string) => void } | null>(null);
+  const talkApi = useRef<{ start: () => void; next: () => void; close: () => void; story: () => void; pick: (v: string) => void; quest: () => void } | null>(null);
   /** 이야기 장면 대사 (여러 사람이 번갈아 말한다). scene 이 없으면 구조 장면(RESCUE), 있으면 0장 장면 */
   const [story, setStory] = useState<{ lines: ScriptLine[]; idx: number; scene?: SceneId; npc?: string; choices?: { label: string; value: string }[] } | null>(null);
   /** 0장 의문 수첩 (화면 표시용 사본) · 방금 채운 줄 (반짝) · 알림 */
   const [ch0, setCh0] = useState<Ch0State | null>(() => profile.dimension?.ch0 ?? null);
   const [flash, setFlash] = useState<NoteId | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /** 퀘스트 자동진행 (G): 다음 할 일을 하는 사람에게 알아서 걸어가 말을 걸고, 대사도 저절로 넘긴다 */
+  const [questAuto, setQuestAuto] = useState(false);
+  const questAutoRef = useRef(questAuto);
+  questAutoRef.current = questAuto;
   const storyRef = useRef(story);
   storyRef.current = story;
   /** 찍어 둔 얼굴 ('me' · NPC id → 그림) */
@@ -179,6 +183,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         else if (interact || e.code === 'Enter' || e.code === 'Space') nextLine();
         return;
       }
+      if (e.code === 'KeyG' && !e.repeat) toggleQuestAuto();
       // 서울과 같은 키: 상호작용(E) = 말 걸기, R · X · Y = 작은은발소녀 전용 기술
       if (interact && !e.repeat) startTalk();
       if (!e.repeat && (e.code === 'KeyR' || e.code === 'KeyX' || e.code === 'KeyY')) {
@@ -218,6 +223,36 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         setFaces(facesRef.current);
       }
       return shot;
+    }
+    function toggleQuestAuto() {
+      const on = !questAutoRef.current && !!nextObjective(profile.dimension?.ch0 ?? null);
+      questAutoRef.current = on;
+      setQuestAuto(on);
+      if (!on) world.stopQuestWalk();
+      world.addLog(on ? '퀘스트 자동 진행 ON (방향키를 누르면 멈춰요)' : '퀘스트 자동 진행 OFF');
+    }
+    /** 자동진행: 할 일이 없으면 다음 사람에게 걸어가고, 도착하면 말을 건다 */
+    function stepQuestAuto() {
+      if (world.questCancelled) {
+        world.questCancelled = false;
+        questAutoRef.current = false;
+        setQuestAuto(false);
+        return;
+      }
+      if (!questAutoRef.current || storyRef.current || talkRef.current || pausedRef.current) return;
+      if (world.questArrived) {
+        world.questArrived = null;
+        startTalk();
+        return;
+      }
+      if (world.questPath) return;
+      const obj = nextObjective(profile.dimension?.ch0 ?? null);
+      if (!obj) {
+        questAutoRef.current = false;
+        setQuestAuto(false);
+        return;
+      }
+      world.walkToNpc(obj.npc);
     }
     function playScene(sc: Scene, npc?: string) {
       if (npc) world.holdNpc(npc);
@@ -298,7 +333,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (t.idx + 1 < t.lines.length) setTalk({ ...t, idx: t.idx + 1 });
       else closeTalk();
     }
-    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory, pick: pickChoice };
+    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory, pick: pickChoice, quest: toggleQuestAuto };
 
     let raf = 0;
     let last = performance.now();
@@ -322,6 +357,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       link?.tick(now);
       renderer.sync(world, makeClock(world.frame, acc / FRAME_MS, world.hitstop > 0, dt));
       // 대사 중인데 아직 얼굴을 못 찍었으면 (모델을 불러오는 중) 조금씩 다시 찍어 본다
+      if (world.frame % 10 === 0) stepQuestAuto();
       if (world.frame % 15 === 0) {
         const s = storyRef.current;
         const t = talkRef.current;
@@ -361,6 +397,23 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     };
   }, [profile, kb, account, intro]);
 
+  // 퀘스트 자동진행 중엔 대사도 저절로 넘긴다: 글자가 다 찍히고 잠깐 읽을 틈을 준 뒤.
+  // 선택지가 하나뿐이면 그것을 고르고, 여럿이면 (마루의 질문처럼) 직접 고를 때까지 기다린다
+  useEffect(() => {
+    if (!questAuto || !story) return;
+    const l = story.lines[story.idx];
+    const last = story.idx + 1 >= story.lines.length;
+    if (last && story.choices && story.choices.length > 1) return;
+    const id = window.setTimeout(
+      () => {
+        if (last && story.choices?.length === 1) talkApi.current?.pick(story.choices[0].value);
+        else talkApi.current?.story();
+      },
+      l.text.length * 28 + 1500,
+    );
+    return () => window.clearTimeout(id);
+  }, [questAuto, story]);
+
   // 패드로 일시정지 메뉴: A 계속, B 메인 메뉴 (뜬 직후 0.7초는 무시)
   useEffect(() => {
     if (!paused) return;
@@ -397,7 +450,9 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           {!touch && ' · E'}
         </button>
       )}
-      {ch0 && !paused && !inventory && <QuestNotebook ch0={ch0} flash={flash} touch={touch} />}
+      {ch0 && !paused && !inventory && (
+        <QuestNotebook ch0={ch0} flash={flash} touch={touch} next={nextObjective(ch0)?.label ?? null} auto={questAuto} onAuto={() => talkApi.current?.quest()} />
+      )}
       {toast && (
         <div className="note-toast pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-amber-200/50 bg-[#2a1f12]/90 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg">{toast}</div>
       )}

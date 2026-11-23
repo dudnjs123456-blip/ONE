@@ -83,6 +83,18 @@ export function notesComplete(s: Ch0State): boolean {
   return has(s, 'body') && has(s, 'where') && has(s, 'home') && has(s, 'shadow') && has(s, 'fist');
 }
 
+/**
+ * 퀘스트 자동진행: 지금 꼭 해야 할 다음 일 (촌장 마루 → 노아 → 바위). 다 했거나 0장이 끝났으면 null.
+ * 살펴보기 · 콩이 · 서울 다녀오기는 선택이라 자동진행에선 건너뛴다.
+ */
+export function nextObjective(s: Ch0State | null): { npc: 'maru' | 'noa' | 'bawi'; label: string } | null {
+  if (!s || s.done) return null;
+  if (!has(s, 'where')) return { npc: 'maru', label: '촌장 마루에게 이곳이 어디인지 묻기' };
+  if (!has(s, 'shadow')) return { npc: 'noa', label: '포탈 앞 노아에게 그림자 이야기하기' };
+  if (!has(s, 'fist')) return { npc: 'bawi', label: '북문 기사 바위 찾아가기' };
+  return null;
+}
+
 /** 북문이 막혀 있나 */
 export function gateLocked(s: Ch0State | null): boolean {
   return !!s && !!s.fresh && !s.done;

@@ -9,6 +9,7 @@ import {
   NOTES,
   finishScene,
   gateLocked,
+  nextObjective,
   nextScene,
   notesComplete,
   scene,
@@ -107,3 +108,51 @@ const board = VILLAGE_SPOTS.find((v) => v.id === 'board')!;
 w2.player.reset(board.x - 1.2, board.z, 1, 0);
 w2.step();
 check('notice board shows "inspect" when close', w2.hud().spot?.id === 'board');
+
+// 퀘스트 자동진행: 다음 할 일 순서 · 어디서 출발해도 그 사람 앞까지 걸어가 도착한다
+{
+  const q = startCh0(1, true);
+  check('auto quest: first goes to chief maru', nextObjective(q)?.npc === 'maru');
+  finishScene(q, 'maru', 'survive');
+  finishScene(q, 'maruAfter');
+  check('auto quest: then noa', nextObjective(q)?.npc === 'noa');
+  finishScene(q, 'noa');
+  check('auto quest: then bawi', nextObjective(q)?.npc === 'bawi');
+  finishScene(q, 'bawiHit');
+  finishScene(q, 'end');
+  check('auto quest: nothing left after chapter 0', nextObjective(q) === null);
+
+  const pq = newProfile();
+  pq.dimension = { visits: 1, prologue: true, ch0: startCh0(1, true) };
+  const wq = new FieldWorld({ read: () => ({ move: null, input: NEUTRAL_INPUT }) }, new AutoHuntController(), pq);
+  // 깨어나는 여관 앞, 우물 뒤, 포탈 앞, 동쪽 집 옆에서 출발
+  const starts = [
+    { x: -6.7, z: 31.3 },
+    { x: -5.2, z: 28.6 },
+    { x: 0, z: 34.2 },
+    { x: 8.4, z: 34.5 },
+  ];
+  for (const npc of ['maru', 'noa', 'bawi'] as const) {
+    for (const st of starts) {
+      wq.player.reset(st.x, st.z, 0, -1);
+      wq.walkToNpc(npc);
+      let f = 0;
+      while (!wq.questArrived && f < 60 * 25) {
+        wq.step();
+        f++;
+      }
+      const near = wq.nearbyNpc()?.def.id;
+      check(`auto walk ${npc} from (${st.x},${st.z}) arrives in talk range`, wq.questArrived === npc && near === npc, `(${(f / 60).toFixed(1)}s)`);
+      wq.questArrived = null;
+    }
+  }
+  // 방향키를 누르면 멈춘다
+  let mv: { x: number; z: number } | null = null;
+  const wm = new FieldWorld({ read: () => ({ move: mv, input: NEUTRAL_INPUT }) }, new AutoHuntController(), pq);
+  wm.player.reset(-6.7, 31.3, 0, -1);
+  wm.walkToNpc('maru');
+  for (let i = 0; i < 30; i++) wm.step();
+  mv = { x: 0, z: 1 };
+  wm.step();
+  check('pressing a direction key cancels auto walk', wm.questPath === null && wm.questCancelled && !wm.questArrived);
+}

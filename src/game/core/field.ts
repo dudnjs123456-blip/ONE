@@ -58,6 +58,30 @@ export function clampWalk(f: { x: number; z: number }, monster = false) {
   if (!monster) pushOutOfHouses(f);
 }
 
+/** 선분 a→b 가 상자(가운데 cx, cz · 반폭 hw, hd)를 지나가나 (자동진행 길 찾기) */
+function segHitsBox(a: { x: number; z: number }, b: { x: number; z: number }, cx: number, cz: number, hw: number, hd: number): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  for (const [p, q] of [
+    [-dx, a.x - (cx - hw)],
+    [dx, cx + hw - a.x],
+    [-dz, a.z - (cz - hd)],
+    [dz, cz + hd - a.z],
+  ]) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) t0 = Math.max(t0, r);
+    else t1 = Math.min(t1, r);
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
 /** 마을 건물 안으로 들어가지 않게 가장 가까운 벽 바깥으로 민다 */
 function pushOutOfHouses(f: { x: number; z: number }) {
   const r = FIGHTER_RADIUS;
@@ -337,6 +361,15 @@ export class FieldWorld {
   talking: VillageNpc | null = null;
   playerDeadFrames = 0;
   private gateWarned = -999;
+  /** 퀘스트 자동진행: 걸어갈 길 (마지막이 목적지). 방향키를 누르면 멈춘다 */
+  questPath: { x: number; z: number }[] | null = null;
+  /** 자동진행으로 목적지에 막 도착했다 (화면이 말을 걸고 지운다) */
+  questArrived: string | null = null;
+  private questFor: string | null = null;
+  private questStuck = 0;
+  private questLastDist = Infinity;
+  /** 방향키로 자동진행을 멈췄다 (화면이 자동진행 모드를 끄고 지운다) */
+  questCancelled = false;
   log: { id: number; text: string }[] = [];
 
   // ── 같이 사냥 (접속했을 때만) ──
@@ -482,6 +515,34 @@ export class FieldWorld {
     return true;
   }
 
+  /**
+   * 퀘스트 자동진행: 그 NPC 앞까지 걸어간다. 가는 길에 건물이 있으면 마을 광장 한가운데를 거쳐 간다.
+   * 도착하면 questArrived = npc id. 못 찾으면 false
+   */
+  walkToNpc(id: string): boolean {
+    const n = this.npcs.find((v) => v.def.id === id);
+    if (!n || this.player.hp <= 0) return false;
+    if (this.auto) this.toggleAuto();
+    const d = n.def;
+    // NPC 가 바라보는 쪽 앞에 선다 (북문 쪽을 보는 사람은 마을 안쪽에서)
+    let stand = { x: d.x + d.fx * 1.25, z: d.z + d.fz * 1.25 };
+    if (stand.z < VILLAGE.z0 + 1.2) stand = { x: d.x, z: d.z + 1.3 };
+    const p = this.player;
+    const hub = { x: 0, z: 31.5 };
+    const blocked = (a: { x: number; z: number }, b: { x: number; z: number }) => VILLAGE_HOUSES.some((h) => segHitsBox(a, b, h.x, h.z, h.w / 2 + 0.6, h.d / 2 + 0.6));
+    this.questPath = blocked(p, stand) && !blocked(hub, stand) ? [hub, stand] : [stand];
+    this.questFor = id;
+    this.questArrived = null;
+    this.questStuck = 0;
+    return true;
+  }
+
+  /** 자동진행 멈춤 */
+  stopQuestWalk() {
+    this.questPath = null;
+    this.questFor = null;
+  }
+
   /** 떠오르는 글자 (장면 연출용) */
   floatText(x: number, y: number, z: number, text: string) {
     this.texts.push({ x, y, z, text, kind: 'exp' });
@@ -588,7 +649,33 @@ export class FieldWorld {
       const life = this.life.tick(this.profile.life, { running: p.state === 'run' || p.state === 'dash', attackSerial: p.moveSerial });
       p.moveScale = life.slow * (life.canRun ? 1 : 0.8);
       if (life.warn) this.addLog(LIFE_WARNING[life.warn]);
-      const cmd = this.talking ? idle() : (this.auto ? this.autoCtl : this.manual).read(this);
+      let cmd = this.talking ? idle() : (this.auto ? this.autoCtl : this.manual).read(this);
+      if (this.questPath && !this.talking) {
+        if (cmd.move || this.auto) {
+          // 직접 움직이면 자동진행을 멈춘다
+          this.stopQuestWalk();
+          this.questCancelled = true;
+          this.addLog('자동 진행을 멈췄어요 (G 로 다시)');
+        } else {
+          const tgt = this.questPath[0];
+          const dx = tgt.x - p.x;
+          const dz = tgt.z - p.z;
+          const dist = Math.hypot(dx, dz);
+          const last = this.questPath.length === 1;
+          // 건물 모서리 같은 데 걸려 한참 못 가면 다음 지점으로 넘긴다
+          this.questStuck = dist < this.questLastDist - 0.01 ? 0 : this.questStuck + 1;
+          this.questLastDist = dist;
+          if (dist < (last ? 0.35 : 0.8) || this.questStuck > 90) {
+            this.questPath.shift();
+            this.questStuck = 0;
+            this.questLastDist = Infinity;
+            if (!this.questPath.length) {
+              this.questArrived = this.questFor;
+              this.stopQuestWalk();
+            }
+          } else cmd = { move: { x: dx, z: dz }, run: dist > 2.5, input: NEUTRAL_INPUT };
+        }
+      }
       // 서울과 같이: 방향키 = 걷기, Shift = 달리기 (자동사냥은 늘 달린다)
       p.runSpeed = cmd.run ? DASH_RUN_SPEED : WALK_SPEED;
       p.freeMove = cmd.move;
@@ -830,7 +917,7 @@ export class FieldWorld {
     for (let i = 0; i < this.spawnTimers.length; i++) this.spawnTimers[i] = this.monsters.some((m) => m.spawnIndex === i) ? -1 : this.frame + wait;
   }
 
-  private addLog(text: string) {
+  addLog(text: string) {
     this.log.push({ id: ++this.logId, text });
     if (this.log.length > 20) this.log.shift();
   }
