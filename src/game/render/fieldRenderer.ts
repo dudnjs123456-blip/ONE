@@ -45,6 +45,10 @@ export class FieldRenderer {
   private shake = 0;
   private initialized = false;
   private village: VillageScene | null = null;
+  /** 1장 사건: 포탈 빛이 꺼졌다 (로그아웃이 안 되는 동안) */
+  setPortalDown(down: boolean) {
+    if (this.village) this.village.portal.visible = !down;
+  }
   private inn: InnScene | null = null;
   private lastWarp = -1;
 

@@ -25,6 +25,9 @@ import VillageTalk, { type TalkState } from './VillageTalk';
 import DimensionPrologue from './DimensionPrologue';
 import StoryDialog, { type DialogLine } from './StoryDialog';
 import QuestNotebook from './QuestNotebook';
+import Chapter1Panel, { SkillNameModal } from './Chapter1Panel';
+import TrainingGame from './TrainingGame';
+import { ROOT_INFO, ch1Objective, ch1Scene, ch1SceneForNpc, countQuestKill, finishCh1, sceneOnLogout, startCh1, type Ch1SceneId, type Ch1State } from '@/game/story/chapter1';
 import { RESCUE_SCRIPT, type ScriptLine } from '@/game/data/prologueScript';
 import { VILLAGE_DUMMY, VILLAGE_NPCS } from '@/game/data/village';
 import { MOVES } from '@/game/data/moves';
@@ -82,9 +85,19 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
   const [kb] = useState(() => new Keyboard());
   const touch = useIsTouch();
   const portrait = usePortrait();
-  const talkApi = useRef<{ start: () => void; next: () => void; close: () => void; story: () => void; pick: (v: string) => void; quest: () => void } | null>(null);
+  const talkApi = useRef<{
+    start: () => void;
+    next: () => void;
+    close: () => void;
+    story: () => void;
+    pick: (v: string) => void;
+    quest: () => void;
+    exit: () => void;
+    trained: (score: number) => void;
+    named: (name: string) => void;
+  } | null>(null);
   /** 이야기 장면 대사 (여러 사람이 번갈아 말한다). scene 이 없으면 구조 장면(RESCUE), 있으면 0장 장면 */
-  const [story, setStory] = useState<{ lines: ScriptLine[]; idx: number; scene?: SceneId; npc?: string; choices?: { label: string; value: string }[] } | null>(null);
+  const [story, setStory] = useState<{ lines: ScriptLine[]; idx: number; scene?: SceneId | `c1:${Ch1SceneId}`; npc?: string; choices?: { label: string; value: string }[] } | null>(null);
   /** 0장 의문 수첩 (화면 표시용 사본) · 방금 채운 줄 (반짝) · 알림 */
   const [ch0, setCh0] = useState<Ch0State | null>(() => profile.dimension?.ch0 ?? null);
   const [flash, setFlash] = useState<NoteId | null>(null);
@@ -93,6 +106,25 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
   const [questAuto, setQuestAuto] = useState(false);
   const questAutoRef = useRef(questAuto);
   questAutoRef.current = questAuto;
+  /** 1장 진행 (화면 표시용 사본) · 수련 미니게임 · 기술 이름 짓기 · 포탈이 꺼진 사건 · 서울 내 방 장면 · 근 폭발 빛 */
+  const [ch1, setCh1] = useState<Ch1State | null>(() => profile.dimension?.ch1 ?? null);
+  const [training, setTraining] = useState<{ mode: 'guard' | 'breath'; next?: Ch1SceneId; npc?: string } | null>(null);
+  const [naming, setNaming] = useState<{ next?: Ch1SceneId } | null>(null);
+  const [portalDown, setPortalDown] = useState(false);
+  const [seoulCut, setSeoulCut] = useState(false);
+  const [burst, setBurst] = useState<{ color: string; key: number } | null>(null);
+  const [shaking, setShaking] = useState(false);
+  /** 미니게임 · 이름 짓기 창이 떠 있으면 게임 키를 받지 않는다 */
+  const overlayRef = useRef(false);
+  overlayRef.current = !!training || !!naming;
+  const trainingRef = useRef(training);
+  trainingRef.current = training;
+  const namingRef = useRef(naming);
+  namingRef.current = naming;
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
+  const portalDownRef = useRef(portalDown);
+  portalDownRef.current = portalDown;
   const storyRef = useRef(story);
   storyRef.current = story;
   /** 찍어 둔 얼굴 ('me' · NPC id → 그림) */
@@ -157,6 +189,28 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         if (arrive) storyTimer = window.setTimeout(() => playScene(arrive), WARP_MS + 600);
       }
     }
+    {
+      const dim = profile.dimension;
+      if (dim?.ch0?.done && !dim.ch1) {
+        dim.ch1 = startCh1();
+        saveProfile(profile);
+        setCh1({ ...dim.ch1 });
+      }
+    }
+    world.onKill = (monsterId) => {
+      const c1 = profile.dimension?.ch1 ?? null;
+      if (!c1 || c1.step !== 'quest') return;
+      const done = countQuestKill(c1, monsterId);
+      saveProfile(profile);
+      setCh1({ ...c1 });
+      // 세 마리째: 자동사냥을 끄고 콩이의 비명
+      if (done) {
+        if (world.auto) world.toggleAuto();
+        questAutoRef.current = false;
+        setQuestAuto(false);
+        storyTimer = window.setTimeout(() => playCh1('scream'), 900);
+      }
+    };
     const savePlace = () => {
       const p = world.player;
       // 쓰러져 있을 땐 저장하지 않는다 (다시 들어오면 마을에서 일어난 것과 같게)
@@ -174,8 +228,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     window.addEventListener('resize', resize);
 
     const onKey = (e: KeyboardEvent) => {
-      // 식당 메뉴는 메뉴 창이 키를 받는다
-      if (menuRef.current) return;
+      // 식당 메뉴는 메뉴 창이 키를 받는다 (1장 미니게임 · 이름 짓기 창도)
+      if (menuRef.current || overlayRef.current) return;
       // 여관 침대에서 자는 중: 아무 키나 누르면 일어난다 (씻는 중엔 기다린다)
       if (world.sleep) {
         if (!e.repeat) world.wakeUp();
@@ -222,6 +276,9 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       const ch = profile.dimension?.ch0 ?? null;
       const near = world.nearbyNpc();
       if (near) {
+        const c1 = profile.dimension?.ch1 ?? null;
+        const s1 = ch1SceneForNpc(near.def.id, c1, profile);
+        if (s1) return playCh1(s1.id, near.def.id);
         const sc = sceneForNpc(near.def.id, ch);
         if (sc) return playScene(sc, near.def.id);
       } else {
@@ -245,8 +302,20 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       }
       return shot;
     }
+    /** 지금 자동진행이 따라갈 일: 0장 필수 순서, 그다음 1장 */
+    function currentGoal(): { kind: 'npc'; npc: string } | { kind: 'logout' | 'hunt' } | null {
+      const o0 = nextObjective(profile.dimension?.ch0 ?? null);
+      if (o0) return { kind: 'npc', npc: o0.npc };
+      const o1 = ch1Objective(profile.dimension?.ch1 ?? null);
+      return o1 ? (o1.kind === 'npc' ? { kind: 'npc', npc: o1.npc } : { kind: o1.kind }) : null;
+    }
     function toggleQuestAuto() {
-      const on = !questAutoRef.current && !!nextObjective(profile.dimension?.ch0 ?? null);
+      const g = currentGoal();
+      if (!questAutoRef.current && g?.kind === 'logout') {
+        world.addLog('지금은 로그아웃해서 서울 집에 다녀올 차례예요');
+        return;
+      }
+      const on = !questAutoRef.current && !!g;
       questAutoRef.current = on;
       setQuestAuto(on);
       if (!on) world.stopQuestWalk();
@@ -267,13 +336,105 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         return;
       }
       if (world.questPath) return;
-      const obj = nextObjective(profile.dimension?.ch0 ?? null);
-      if (!obj) {
+      const g = currentGoal();
+      if (!g || g.kind === 'logout') {
         questAutoRef.current = false;
         setQuestAuto(false);
         return;
       }
-      world.walkToNpc(obj.npc);
+      // 고블린 의뢰: 자동사냥을 켜 둔다
+      if (g.kind !== 'npc') {
+        if (!world.auto && !world.gateLocked) world.toggleAuto();
+        return;
+      }
+      world.walkToNpc(g.npc);
+    }
+    function playCh1(id: Ch1SceneId, npc?: string) {
+      const c1 = profile.dimension?.ch1;
+      if (!c1) return;
+      if (npc) world.holdNpc(npc);
+      const sc = ch1Scene(id, c1, profile);
+      if (id === 'quake') {
+        // 땅이 울리고 포탈 빛이 꺼진다: 장면이 끝날 때까지 로그아웃이 안 된다
+        setPortalDown(true);
+        setShaking(true);
+        renderer.setPortalDown(true);
+        window.setTimeout(() => setShaking(false), 2600);
+      }
+      setStory({ lines: sc.lines, idx: 0, scene: `c1:${id}`, npc });
+    }
+    function endCh1(id: Ch1SceneId, npc?: string) {
+      const c1 = profile.dimension?.ch1;
+      if (!c1) return world.endTalk();
+      const a = finishCh1(c1, id);
+      if (id === 'quake') {
+        setPortalDown(false);
+        renderer.setPortalDown(false);
+      }
+      saveProfile(profile);
+      setCh1({ ...c1 });
+      if (a.effect === 'guard' || a.effect === 'breath') return setTraining({ mode: a.effect, next: a.next, npc });
+      if (a.effect === 'name') return setNaming({ next: a.next });
+      if (a.effect === 'burst') {
+        // 근이 처음 터진다: 그 근의 빛이 화면을 덮고, 둘레 고블린이 튕겨 나간다
+        const info = ROOT_INFO[c1.root ?? '력'];
+        world.rootBurst(`${c1.root ?? '력'}(${info.hanja}) 발현!`);
+        playHit('counter', true, 1);
+        setBurst({ color: info.color, key: Date.now() });
+        setShaking(true);
+        window.setTimeout(() => setShaking(false), 900);
+        storyTimer = window.setTimeout(() => a.next && playCh1(a.next, 'noa'), 1700);
+        return;
+      }
+      if (a.effect === 'exit') {
+        // 서울 내 방: 몸이 진짜로 운동한 것처럼 피곤하다
+        world.endTalk();
+        profile.life.fatigue = Math.min(100, profile.life.fatigue + 15);
+        saveProfile(profile);
+        onExitRef.current();
+        return;
+      }
+      if (a.next) return playCh1(a.next, npc);
+      world.endTalk();
+    }
+    /** 로그아웃: 포탈이 꺼져 있으면 안 되고, 1장에서 서울에 다녀올 차례면 서울 내 방 장면부터 */
+    function tryExit() {
+      if (portalDownRef.current) {
+        world.addLog('⚠ 연결이 끊겼어요… 로그아웃이 안 돼요');
+        return;
+      }
+      const cut = sceneOnLogout(profile.dimension?.ch1 ?? null);
+      if (cut && !storyRef.current) {
+        setPaused(false);
+        setSeoulCut(true);
+        playCh1(cut);
+        return;
+      }
+      onExitRef.current();
+    }
+    function trained(score: number) {
+      const t = trainingRef.current;
+      setTraining(null);
+      const c1 = profile.dimension?.ch1;
+      if (c1 && t) {
+        if (t.mode === 'guard') c1.guard = score;
+        else c1.breath = score;
+        saveProfile(profile);
+      }
+      if (t?.next) playCh1(t.next, t.npc);
+      else world.endTalk();
+    }
+    function named(name: string) {
+      const n = namingRef.current;
+      setNaming(null);
+      const c1 = profile.dimension?.ch1;
+      if (c1) {
+        c1.skillName = name;
+        saveProfile(profile);
+        setCh1({ ...c1 });
+        world.addLog(`첫 발현 「${name}」`);
+      }
+      if (n?.next) playCh1(n.next, 'noa');
     }
     function playScene(sc: Scene, npc?: string) {
       if (npc) world.holdNpc(npc);
@@ -297,6 +458,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (!s) return;
       storyRef.current = null;
       setStory(null);
+      if (s.scene?.startsWith('c1:')) return endCh1(s.scene.slice(3) as Ch1SceneId, s.npc);
       if (!s.scene) {
         // 구조 장면 끝: 구해 준 사람과 인사한 것으로 친다 (여관 주인이면 차 한 잔으로 기운도 차린다) → 0장 시작
         world.endTalk();
@@ -311,7 +473,12 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       }
       const ch = profile.dimension?.ch0;
       if (!ch) return world.endTalk();
-      const got = finishScene(ch, s.scene, choice);
+      const got = finishScene(ch, s.scene as SceneId, choice);
+      // 0장을 막 마쳤다: 1장 시작 (도하는 다음 접속부터 마을에 보인다)
+      if (ch.done && !profile.dimension!.ch1) {
+        profile.dimension!.ch1 = startCh1();
+        setCh1({ ...profile.dimension!.ch1 });
+      }
       saveProfile(profile);
       setCh0({ ...ch, notes: { ...ch.notes }, clues: [...(ch.clues ?? [])] });
       if (got.length) {
@@ -320,7 +487,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         window.setTimeout(() => setFlash(null), 2400);
         window.setTimeout(() => setToast(null), 3200);
       }
-      const nx = nextScene(ch, s.scene);
+      const nx = nextScene(ch, s.scene as SceneId);
       if (nx === 'bawiHit') {
         // 허수아비 앞에서 한 번 쳐 본다: 주먹은 들어가지만 거의 흔들리지 않는다
         const p = world.player;
@@ -356,7 +523,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (t.idx + 1 < t.lines.length) setTalk({ ...t, idx: t.idx + 1 });
       else closeTalk();
     }
-    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory, pick: pickChoice, quest: toggleQuestAuto };
+    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory, pick: pickChoice, quest: toggleQuestAuto, exit: tryExit, trained, named };
 
     let raf = 0;
     let last = performance.now();
@@ -449,12 +616,12 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     if (!paused) return;
     const openedAt = performance.now();
     const ready = () => performance.now() - openedAt > 700;
-    return watchPad({ 0: () => ready() && setPaused(false), 1: () => ready() && onExit() });
-  }, [paused, onExit]);
+    return watchPad({ 0: () => ready() && setPaused(false), 1: () => ready() && talkApi.current?.exit() });
+  }, [paused]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
-      <canvas ref={canvasRef} className="block h-full w-full" />
+      <canvas ref={canvasRef} className={`block h-full w-full ${shaking ? 'quake-shake' : ''}`} />
       {hud && <FieldHud hud={hud} onToggleAuto={() => worldRef.current?.toggleAuto()} touch={touch} portrait={portrait} />}
 
       {/* 수동 조작일 때만 터치 버튼 (자동사냥 중엔 필요 없음) */}
@@ -541,12 +708,26 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           {!touch && ' · E'}
         </button>
       )}
-      {ch0 && !paused && !inventory && (
+      {ch1 && !paused && !inventory && <Chapter1Panel ch1={ch1} auto={questAuto} onAuto={() => talkApi.current?.quest()} touch={touch} />}
+      {ch0 && !ch1 && !paused && !inventory && (
         <QuestNotebook ch0={ch0} flash={flash} touch={touch} next={nextObjective(ch0)?.label ?? null} auto={questAuto} onAuto={() => talkApi.current?.quest()} />
       )}
       {toast && (
         <div className="note-toast pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-amber-200/50 bg-[#2a1f12]/90 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg">{toast}</div>
       )}
+      {/* 1장 사건 A: 로그아웃 직후 서울 내 방 (대사창 뒤 어두운 방) */}
+      {seoulCut && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center bg-[#0c0b10] pt-24">
+          <div className="text-center">
+            <div className="font-mono text-xs tracking-[0.4em] text-white/40">LOGOUT</div>
+            <div className="mt-2 text-2xl font-black text-white/80">서울 · 내 방</div>
+          </div>
+        </div>
+      )}
+      {/* 1장 사건 E: 근이 처음 터진다 */}
+      {burst && <div key={burst.key} className="root-burst pointer-events-none absolute inset-0 z-30" style={{ background: `radial-gradient(circle at 50% 55%, #fff 0%, ${burst.color} 25%, transparent 70%)` }} />}
+      {training && <TrainingGame mode={training.mode} onDone={(n) => talkApi.current?.trained(n)} onHit={(b) => !b && playHit('hit', true, 0.8)} touch={touch} />}
+      {naming && <SkillNameModal root={ch1?.root ?? '력'} onSubmit={(n) => talkApi.current?.named(n)} />}
       {story && (() => {
         const l = story.lines[story.idx];
         const npc = VILLAGE_NPCS.find((n) => n.id === l.who);
@@ -570,8 +751,11 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         <button onClick={() => setPaused(true)} className="rounded bg-black/50 px-3 py-1.5 text-white/80 hover:bg-black/70">
           메뉴{!touch && ' (Esc)'}
         </button>
-        <button onClick={onExit} className="rounded bg-cyan-500/30 px-3 py-1.5 font-bold text-cyan-100 hover:bg-cyan-500/50">
-          🖥️ 로그아웃
+        <button
+          onClick={() => talkApi.current?.exit()}
+          className={`rounded px-3 py-1.5 font-bold ${portalDown ? 'animate-pulse cursor-not-allowed bg-rose-600/60 text-rose-100' : 'bg-cyan-500/30 text-cyan-100 hover:bg-cyan-500/50'}`}
+        >
+          {portalDown ? '⚠ 연결 끊김' : '🖥️ 로그아웃'}
         </button>
       </div>
 
@@ -597,7 +781,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
               계속하기
             </button>
             <VibrationToggle />
-            <button onClick={onExit} className="rounded bg-white/10 py-2 hover:bg-white/20">
+            <button onClick={() => talkApi.current?.exit()} className="rounded bg-white/10 py-2 hover:bg-white/20">
               로그아웃 (서울 집으로)
             </button>
           </div>

@@ -30,6 +30,7 @@
     "test:park": "tsx scripts/park-sim.ts",
     "test:prologue": "tsx scripts/prologue-sim.ts",
     "test:chapter0": "tsx scripts/chapter0-sim.ts",
+    "test:chapter1": "tsx scripts/chapter1-sim.ts",
     "test:inn": "tsx scripts/inn-sim.ts"
   },
   "dependencies": {

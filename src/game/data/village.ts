@@ -54,6 +54,8 @@ export interface VillageNpcDef {
   again: string[];
   /** 대화 끝에 해 주는 일 */
   service?: 'rest' | 'meal';
+  /** 'ch0' = 0장을 마친 사람에게만 보인다 (1장에 처음 나오는 인물) */
+  after?: 'ch0';
 }
 
 export const VILLAGE_NPCS: VillageNpcDef[] = [
@@ -153,6 +155,21 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
       '나도 언젠가 포탈 너머에 가 보고 싶어. 그러려면 몬스터가 없어져야 한대.',
     ],
     again: ['형아(누나) 오늘은 몇 마리 잡았어?', '우물 아래에서 이상한 빛이 나는 걸 봤어… 아무한테도 말하지 마!'],
+  },
+  {
+    id: 'doha',
+    name: '도하',
+    title: '먼저 온 저편 사람',
+    // 광장 서쪽 벤치 옆, 북쪽 하늘(차원 틈 쪽)을 보고 서 있다. 서울에서 입던 옷 그대로
+    x: -2.4,
+    z: 27.3,
+    fx: 0.2,
+    fz: -1,
+    body: 'male',
+    outfit: ['beanie-gray', 'fw-knit-charcoal', 'fw-denim-washed', 'fw-suede-loafer'],
+    after: 'ch0',
+    first: ['(북쪽 하늘만 보고 있다) …아, 미안. 지금은 좀 혼자 있고 싶어.'],
+    again: ['서울 가면 김밥이나 하나 먹고 와. 여기 밥은 맛있는데, 뭔가 모자라.', '막차 놓치면 나 여기 못 와. 그래서 요즘 술자리도 1차만 해.', '넌 컴퓨터로 온다며. 부럽다, 아무 때나 올 수 있어서.'],
   },
   {
     id: 'bori',

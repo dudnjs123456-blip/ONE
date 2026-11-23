@@ -49,6 +49,8 @@ export interface PlayerProfile {
     prologue?: boolean;
     /** 0장 「저편에서 온 사람」: 의문 수첩 · 단서 · 마루에게 고른 마음 (story/chapter0) */
     ch0?: import('../story/chapter0').Ch0State;
+    /** 1장 「기운 수련」: 단계 · 내 근 · 첫 발현 기술 이름 (story/chapter1) */
+    ch1?: import('../story/chapter1').Ch1State;
     /** 차원 돈 (은화). 몬스터를 잡아 벌고 차원 안에서만 쓴다 — 서울 돈(gold)과 따로 */
     coin?: number;
     /** 달빛 여관 첫 숙박(공짜)을 썼다 */

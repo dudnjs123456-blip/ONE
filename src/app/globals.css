@@ -345,3 +345,25 @@ body {
   10%, 80% { opacity: 1; transform: translate(-50%, 0); }
   100% { opacity: 0; transform: translate(-50%, -6px); }
 }
+
+/* 1장: 땅이 울린다 (포탈이 꺼지는 사건 · 근이 터지는 순간) */
+.quake-shake {
+  animation: quake-shake 0.12s linear infinite;
+}
+@keyframes quake-shake {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-5px, 3px); }
+  50% { transform: translate(4px, -4px); }
+  75% { transform: translate(-3px, -2px); }
+  100% { transform: translate(0, 0); }
+}
+/* 1장: 근이 처음 터질 때 그 근의 빛이 화면을 덮었다가 걷힌다 */
+.root-burst {
+  animation: root-burst 1.6s ease-out forwards;
+  mix-blend-mode: screen;
+}
+@keyframes root-burst {
+  0% { opacity: 0; transform: scale(0.3); }
+  12% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1.6); }
+}

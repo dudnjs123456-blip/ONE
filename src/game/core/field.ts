@@ -474,7 +474,9 @@ export class FieldWorld {
     this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     // 접속하면 경계 마을 포탈 앞에서 시작한다 (자동사냥은 꺼 둔 채로, 켜면 북문을 나가 사냥)
     this.player.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
-    this.npcs = VILLAGE_NPCS.map((def, i) => {
+    // 1장에 처음 나오는 인물은 0장을 마친 사람에게만 보인다
+    const ch0Done = !!profile.dimension?.ch0?.done;
+    this.npcs = VILLAGE_NPCS.filter((def) => def.after !== 'ch0' || ch0Done).map((def, i) => {
       const f = new Fighter(HUNTER_INDEX - 1 - i, def.name, { maxHp: 1, power: 0, canBlock: false });
       f.reset(def.x, def.z, def.fx, def.fz);
       return { def, fighter: f };
@@ -1482,7 +1484,32 @@ export class FieldWorld {
     }
   }
 
+  /** 몬스터를 잡을 때마다 (이야기 의뢰 세기용, 화면이 단다) */
+  onKill: ((monsterId: string) => void) | null = null;
+
+  /**
+   * 근이 처음 터진다 (1장 첫 발현): 둘레 몬스터를 크게 밀쳐 내고 빛 글자. 몬스터 계산을 맡은 사람만 실제로 민다
+   * (같은 차원 사람들끼리 몬스터 자리가 어긋나지 않게)
+   */
+  rootBurst(text: string, radius = 6) {
+    const p = this.player;
+    this.texts.push({ x: p.x, y: 2.8, z: p.z, text, kind: 'exp' });
+    if (!this.isHost) return;
+    for (const m of this.monsters) {
+      const f = m.fighter;
+      const dx = f.x - p.x;
+      const dz = f.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > radius || f.hp <= 0) continue;
+      const k = (radius - d + 2) / Math.max(0.3, d);
+      f.x += dx * k;
+      f.z += dz * k;
+      clampWalk(f, true);
+    }
+  }
+
   private grantKill(type: MonsterType, x: number, z: number) {
+    this.onKill?.(type.id);
     // 차원에서 번 돈은 은화 (서울 돈 G 와 따로)
     this.profile.kills++;
     this.addCoin(type.gold);
