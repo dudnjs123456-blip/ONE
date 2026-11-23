@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { PlayerProfile } from '@/game/core/profile';
+import { saveProfile, type PlayerProfile } from '@/game/core/profile';
+import { clearDimensionPlace } from '@/game/core/lastScreen';
+import { STORY_ENTRIES, hasStoryBackup, isMaster, jumpToStory, restoreStory } from '@/game/story/master';
 
 /** 접속 버튼을 누른 뒤 창이 하얗게 번지며 사라지는 시간 (ms) */
 const FADE_MS = 900;
@@ -41,7 +43,7 @@ const POSTS: { title: string; who: string; when: string; views: string; replies:
  * 처음엔 평범한 게임처럼 보인다: 커뮤니티 글 → 설치 → (내 이름이 이미 적힌) 캐릭터 이름 → 접속.
  * 그다음부턴 바로 실행 화면.
  */
-export default function HomePcPanel({ profile, playerName, onConnect, onClose }: { profile: PlayerProfile; playerName?: string | null; onConnect: () => void; onClose: () => void }) {
+export default function HomePcPanel({ profile, playerName, userId = null, onConnect, onClose }: { profile: PlayerProfile; playerName?: string | null; userId?: string | null; onConnect: () => void; onClose: () => void }) {
   const visits = profile.dimension?.visits ?? 0;
   const first = visits === 0 && !profile.dimension?.prologue;
   const [step, setStep] = useState<Step>(first ? 'board' : 'run');
@@ -50,6 +52,9 @@ export default function HomePcPanel({ profile, playerName, onConnect, onClose }:
   const [installed, setInstalled] = useState(false);
   const [agree, setAgree] = useState(false);
   const name = playerName || '플레이어';
+  const master = isMaster(playerName);
+  const [masterOpen, setMasterOpen] = useState(false);
+  const [masterMsg, setMasterMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (step !== 'install' || !agree) return;
@@ -61,6 +66,23 @@ export default function HomePcPanel({ profile, playerName, onConnect, onClose }:
     if (going) return;
     setGoing(true);
     window.setTimeout(onConnect, FADE_MS);
+  };
+
+  /** 마스터: 고른 장면부터 다시 (진행한 뒤에도 언제든). 차원 안 자리 기억은 지워 포탈 앞에서 시작 */
+  const pickStory = (id: string, label: string) => {
+    if (going) return;
+    if (!window.confirm(`「${label}」부터 다시 볼까요?
+지금 이야기 진행은 처음 한 번 백업해 두고, 나중에 되돌릴 수 있어요.`)) return;
+    if (!jumpToStory(profile, id)) return;
+    saveProfile(profile);
+    clearDimensionPlace(userId);
+    connect();
+  };
+  const restore = () => {
+    if (!restoreStory(profile)) return;
+    saveProfile(profile);
+    clearDimensionPlace(userId);
+    setMasterMsg('원래 이야기 진행으로 되돌렸어요');
   };
 
   return (
@@ -197,6 +219,43 @@ export default function HomePcPanel({ profile, playerName, onConnect, onClose }:
             <button onClick={() => setStep('board')} className="mt-2 w-full text-xs text-white/45 hover:text-white/80">
               커뮤니티 글 다시 보기
             </button>
+            {master && (
+              <div className="mt-3 rounded-lg border border-amber-300/40 bg-amber-500/10 p-3 text-left">
+                <button onClick={() => setMasterOpen((v) => !v)} className="flex w-full items-center justify-between text-sm font-bold text-amber-200">
+                  <span>🛠 마스터 · 장면 골라 보기</span>
+                  <span className="text-xs text-amber-200/60">{masterOpen ? '접기 ▴' : '펼치기 ▾'}</span>
+                </button>
+                {masterOpen && (
+                  <div className="mt-2 space-y-3">
+                    <div className="text-[11px] leading-4 text-white/55">고르면 그 장면부터 바로 접속해요. 진행한 뒤에도 언제든 다시 고를 수 있어요. (내 저장만 바뀌어요)</div>
+                    {(['프롤로그', '0장', '1장'] as const).map((ch) => (
+                      <div key={ch}>
+                        <div className="mb-1 text-xs font-bold text-white/80">{ch}</div>
+                        <div className="grid grid-cols-1 gap-1">
+                          {STORY_ENTRIES.filter((e) => e.chapter === ch).map((e) => (
+                            <button
+                              key={e.id}
+                              disabled={going}
+                              onClick={() => pickStory(e.id, `${e.chapter} ${e.label}`)}
+                              className="rounded bg-white/10 px-2 py-1.5 text-left text-xs hover:bg-amber-400/30 disabled:opacity-40"
+                            >
+                              {e.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="text-xs text-white/40">2장 — 준비 중 (대본: docs/story/chapter2-opening.md)</div>
+                    {hasStoryBackup(profile) && (
+                      <button onClick={restore} className="w-full rounded bg-white/15 py-1.5 text-xs font-bold hover:bg-white/25">
+                        ↩ 원래 이야기 진행으로 되돌리기
+                      </button>
+                    )}
+                    {masterMsg && <div className="text-xs text-emerald-300">{masterMsg}</div>}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

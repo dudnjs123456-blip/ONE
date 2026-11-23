@@ -52,6 +52,10 @@ export interface PlayerProfile {
     ch1?: import('../story/chapter1').Ch1State;
     /** 차원 돈 (은화). 몬스터를 잡아 벌고 차원 안에서만 쓴다 — 서울 돈(gold)과 따로 */
     coin?: number;
+    /** 마스터 계정: 장면 고르기 전의 원래 이야기 진행 (되돌리기용, story/master) */
+    masterBackup?: { prologue?: boolean; ch0?: import('../story/chapter0').Ch0State; ch1?: import('../story/chapter1').Ch1State; met?: string[] };
+    /** 마스터 계정: 0장 처음을 골랐다 — 다음 접속 때 구조 장면부터 (한 번) */
+    replayRescue?: boolean;
     /** 차원 장비 (무구 노점 · 몬스터 드롭). 서울로는 못 들고 나온다 */
     gear?: import('../data/equipment').GearState;
     /** 달빛 여관 첫 숙박(공짜)을 썼다 */

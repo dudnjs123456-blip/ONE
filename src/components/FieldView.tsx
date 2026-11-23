@@ -53,7 +53,8 @@ const WARP_MS = 1600;
 export default function FieldView(props: { profile: PlayerProfile; account?: Account | null; onExit: () => void }) {
   const { profile } = props;
   const [prologue, setPrologue] = useState(() => !profile.dimension?.prologue);
-  const [intro, setIntro] = useState(false);
+  // 마스터 계정이 0장 처음을 골랐으면 프롤로그 직후처럼 구조 장면부터 (story/master)
+  const [intro, setIntro] = useState(() => !!profile.dimension?.replayRescue);
   if (prologue)
     return (
       <DimensionPrologue
@@ -163,6 +164,10 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     const warpTimer = window.setTimeout(() => setWarp(false), intro ? 0 : WARP_MS);
     let storyTimer = 0;
     if (intro) {
+      if (profile.dimension?.replayRescue) {
+        delete profile.dimension.replayRescue;
+        saveProfile(profile);
+      }
       // 프롤로그에서 벼랑 아래로 떨어진 뒤: 여관 앞에서 달래가 지켜보는 가운데 깨어난다
       const dallae = world.npcs.find((n) => n.def.id === 'dallae');
       world.player.reset(-6.7, 31.3, -1, -0.25);
