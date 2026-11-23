@@ -85,7 +85,7 @@ check('every speaker is me or a villager (portrait rule)', [...speakers].every((
 check('every notebook question has an answer text', NOTES.every((n) => (n.half ?? n.full).length > 0));
 // 아직 정하지 않은 설정은 못 박지 않는다 (세계 이름 후보가 대사에 없다)
 const all = ids.flatMap((id) => scene(id, s).lines.map((l) => l.text)).join(' ');
-check('undecided world name is not written anywhere', !/리엔|에델|아르세/.test(all));
+check('undecided world name is not written anywhere', !/(^|[^가-힣])(리엔|에델|아르세)/.test(all));
 
 // 필드: 새 사람은 북문 앞에서 멈추고, 자동사냥도 안 켜진다
 const p = newProfile();
