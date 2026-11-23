@@ -53,7 +53,7 @@ export interface VillageNpcDef {
   /** 다시 말을 걸면 */
   again: string[];
   /** 대화 끝에 해 주는 일 */
-  service?: 'rest';
+  service?: 'rest' | 'meal';
 }
 
 export const VILLAGE_NPCS: VillageNpcDef[] = [
@@ -119,8 +119,9 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
     id: 'dallae',
     name: '달래',
     title: '여관 주인',
-    x: -8.4,
-    z: 30.6,
+    // 여관 문(동쪽 벽 가운데) 바로 옆: 문은 비워 둔다
+    x: -8.2,
+    z: 29.25,
     fx: 1,
     fz: 0,
     body: 'female',
@@ -128,9 +129,11 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
     first: [
       '어머, 새 얼굴이네! 여긴 "달빛 여관"이야.',
       '사냥하다 다치면 언제든 들러. 따뜻한 차 한 잔이면 금방 기운이 날 거야.',
+      '안에는 씻는 곳, 먹는 곳, 자는 곳이 다 있어. 저편 사람들이 여럿 같이 묵는 게스트하우스란다.',
+      '여기선 서울 돈은 못 써. 사냥해서 번 은화로 묵고 먹는 거야. 첫날 밤은 내가 그냥 재워 줄게.',
       '자, 한 잔 마시고 가.',
     ],
-    again: ['또 다쳐서 왔구나? 앉아, 차 내올게.'],
+    again: ['또 다쳐서 왔구나? 앉아, 차 내올게.', '피곤하면 안에 들어가서 한숨 자. 침대는 넉넉해.'],
     service: 'rest',
   },
   {
@@ -150,6 +153,25 @@ export const VILLAGE_NPCS: VillageNpcDef[] = [
       '나도 언젠가 포탈 너머에 가 보고 싶어. 그러려면 몬스터가 없어져야 한대.',
     ],
     again: ['형아(누나) 오늘은 몇 마리 잡았어?', '우물 아래에서 이상한 빛이 나는 걸 봤어… 아무한테도 말하지 마!'],
+  },
+  {
+    id: 'bori',
+    name: '보리',
+    title: '여관 요리사',
+    // 달빛 여관 안 식당 주방 (카운터 뒤, 식탁 쪽을 본다)
+    x: 99.5,
+    z: 26.7,
+    fx: 0,
+    fz: 1,
+    body: 'male',
+    outfit: ['npc-bori-hat', 'npc-bori-top', 'npc-bori-bottom', 'npc-bori-apron'],
+    first: [
+      '어서 와! 달빛 여관 식당이야. 난 요리 담당 보리.',
+      '미안하지만 서울 돈(G)은 여기서 안 받아. 몬스터 잡고 번 은화만 받지.',
+      '배고프면 언제든 와. 차 한 잔부터 정식까지 다 있으니까.',
+    ],
+    again: ['오늘은 뭐 먹을래?', '사냥 다녀왔구나? 배 많이 고프겠네.', '스튜가 딱 알맞게 끓었어.'],
+    service: 'meal',
   },
 ];
 

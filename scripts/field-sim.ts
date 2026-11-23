@@ -23,8 +23,8 @@ if (w.profile.kills === 0) process.exitCode = 1;
 {
   // 이번 사냥 요약: 새 프로필이라 처치·골드가 그대로 같아야 한다
   const ss = w.hud().session;
-  const ok = ss.kills === w.profile.kills && ss.gold === w.profile.gold && ss.exp > 0 && ss.seconds === Math.floor(w.frame / 60) && ss.deaths <= deaths;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  이번 사냥 요약 (처치 ${ss.kills}, +${ss.exp} EXP, +${ss.gold} G, ${ss.seconds}초, 사망 ${ss.deaths})`);
+  const ok = ss.kills === w.profile.kills && ss.coin === (w.profile.dimension?.coin ?? 0) && w.profile.gold === 0 && ss.exp > 0 && ss.seconds === Math.floor(w.frame / 60) && ss.deaths <= deaths;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  이번 사냥 요약 (처치 ${ss.kills}, +${ss.exp} EXP, +${ss.coin} 은화, ${ss.seconds}초, 사망 ${ss.deaths})`);
   if (!ok) process.exitCode = 1;
 }
 

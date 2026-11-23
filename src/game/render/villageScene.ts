@@ -18,7 +18,7 @@ const seeded = (seed: number) => {
 };
 const hsl = (h: number, s: number, l: number) => `hsl(${h},${s}%,${l}%)`;
 
-function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D, r: () => number) => void, seed = 1, wrap = true) {
+export function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D, r: () => number) => void, seed = 1, wrap = true) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -106,7 +106,7 @@ const dirtTex = () =>
   );
 
 /** 회반죽 벽 */
-const plasterTex = () =>
+export const plasterTex = () =>
   canvasTex(
     256,
     256,
@@ -126,7 +126,7 @@ const plasterTex = () =>
   );
 
 /** 쌓은 돌 블록 (성벽·주춧돌·여관 1층) */
-const blockTex = () =>
+export const blockTex = () =>
   canvasTex(
     512,
     512,
@@ -153,7 +153,7 @@ const blockTex = () =>
   );
 
 /** 나무 판자 (문·노점·통) */
-const plankTex = () =>
+export const plankTex = () =>
   canvasTex(
     256,
     256,
@@ -322,7 +322,7 @@ const stripeTex = (a: string, b: string) =>
   });
 
 /** 동그랗게 번지는 빛 (반딧불이·불꽃·등불 빛무리) */
-const glowTex = () =>
+export const glowTex = () =>
   canvasTex(
     64,
     64,
@@ -373,7 +373,7 @@ const swirlTex = () =>
   );
 
 /** 나무 간판 (여관·촌장 집·성문 현판) */
-function signTexture(text: string) {
+export function signTexture(text: string) {
   return canvasTex(
     512,
     160,
@@ -418,7 +418,7 @@ function signTexture(text: string) {
 // ───────────────────────── 합쳐 그리기
 
 /** 움직이지 않는 조각을 재질별로 모았다가 한 덩어리로 그린다. push/pop 으로 집·벽면 기준 좌표를 쌓는다 */
-class Batch {
+export class Batch {
   private parts = new Map<THREE.Material, THREE.BufferGeometry[]>();
   private stack: THREE.Matrix4[] = [new THREE.Matrix4()];
   private m = new THREE.Matrix4();

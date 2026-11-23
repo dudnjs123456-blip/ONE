@@ -248,6 +248,16 @@ body {
   100% { transform: translateY(6px); }
 }
 
+/* 달빛 여관 문을 지날 때: 까맣게 시작해 밝아진다 (그사이 카메라가 안팎으로 옮겨진다) */
+.door-fade {
+  animation: door-fade 0.7s ease-out forwards;
+}
+@keyframes door-fade {
+  0% { opacity: 1; }
+  30% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
 /* 집 컴퓨터: 설치 막대, 접속하면 창이 하얗게 번지며 사라진다 */
 .pc-install-bar {
   width: 0;

@@ -110,7 +110,7 @@ export class DimensionLink {
 
     if (now - this.lastSent >= SEND_MS) {
       const s = w.netState();
-      const key = `${s.x}|${s.z}|${s.y}|${s.fx}|${s.fz}|${s.s}|${s.m}|${s.hp}|${s.mh}|${s.lv}`;
+      const key = `${s.x}|${s.z}|${s.y}|${s.fx}|${s.fz}|${s.s}|${s.m}|${s.hp}|${s.mh}|${s.lv}|${s.b ?? ''}|${s.r ?? ''}|${s.w ?? ''}`;
       if (key !== this.lastKey || now - this.lastSent >= IDLE_MS) {
         this.lastKey = key;
         this.lastSent = now;

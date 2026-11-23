@@ -33,6 +33,7 @@ import { sharedGameTime } from '@/game/city/worldClock';
 import { finishScene, nextObjective, nextScene, NOTES, scene, sceneForNpc, sceneForSpot, sceneOnArrive, startCh0, wakeScene, type Ch0State, type NoteId, type Scene, type SceneId } from '@/game/story/chapter0';
 import { storyPortrait } from '@/game/data/portraits';
 import { loadDimensionPlace, saveDimensionPlace } from '@/game/core/lastScreen';
+import InnMenuPanel from './InnMenuPanel';
 
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
@@ -99,6 +100,12 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
   const facesRef = useRef(faces);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  /** 달빛 여관 식당 메뉴 (요리사와 이야기한 뒤) */
+  const [menu, setMenu] = useState(false);
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
+  /** 여관 문을 지날 때 잠깐 어두워진다 */
+  const [doorFade, setDoorFade] = useState(0);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -140,6 +147,10 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (at && at.hp > 0) {
         world.player.reset(at.x, at.z, at.fx, at.fz);
         world.player.hp = Math.min(at.hp, world.player.maxHp);
+        // 여관 침대에서 자다가 창을 닫았으면 그 침대에서 계속 잔다 (그동안 흐른 실제 시간만큼 쉬었다)
+        world.resumeSleep();
+      } else if (world.resumeSleep()) {
+        // 자는 채로 서울에 갔다 온 게 아니라 자리 기억만 지워진 경우: 그대로 이어 잔다
       } else {
         // 새로고침이 아니라 서울에서 다시 접속했을 때만 (기억해 둔 자리가 없다)
         const arrive = sceneOnArrive(dim.ch0 ?? null, dim.visits);
@@ -163,6 +174,14 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     window.addEventListener('resize', resize);
 
     const onKey = (e: KeyboardEvent) => {
+      // 식당 메뉴는 메뉴 창이 키를 받는다
+      if (menuRef.current) return;
+      // 여관 침대에서 자는 중: 아무 키나 누르면 일어난다 (씻는 중엔 기다린다)
+      if (world.sleep) {
+        if (!e.repeat) world.wakeUp();
+        return;
+      }
+      if (world.shower) return;
       // 대화 중: E · Enter · Space 다음 줄, Esc 닫기 (게임 키는 대화창이 먹는다)
       const t = talkRef.current;
       const interact = bindCodes('interact').includes(e.code);
@@ -206,6 +225,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         const sc = sceneForNpc(near.def.id, ch);
         if (sc) return playScene(sc, near.def.id);
       } else {
+        // 여관 안: 침대에 눕기 · 샤워하기
+        if (world.useInnSpot()) return;
         const sp = world.nearbySpot();
         if (sp && ch) return playScene(sceneForSpot(sp.id));
       }
@@ -323,9 +344,11 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       world.endTalk();
     }
     function closeTalk() {
-      world.endTalk();
+      const service = world.endTalk();
       saveProfile(profile);
       setTalk(null);
+      // 요리사와 이야기를 마치면 식당 메뉴
+      if (service === 'meal') setMenu(true);
     }
     function nextLine() {
       const t = talkRef.current;
@@ -339,6 +362,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     let last = performance.now();
     let acc = 0;
     let lastHudKey = '';
+    let lastWarp = world.warpSerial;
     // 성장 정보는 주기적으로 저장 (탭을 그냥 닫아도 대부분 남도록)
     const autosave = window.setInterval(() => saveProfile(profile), 5000);
     const loop = (now: number) => {
@@ -355,6 +379,10 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (steps === 5) acc = 0;
 
       link?.tick(now);
+      if (world.warpSerial !== lastWarp) {
+        lastWarp = world.warpSerial;
+        setDoorFade((v) => v + 1);
+      }
       renderer.sync(world, makeClock(world.frame, acc / FRAME_MS, world.hitstop > 0, dt));
       // 대사 중인데 아직 얼굴을 못 찍었으면 (모델을 불러오는 중) 조금씩 다시 찍어 본다
       if (world.frame % 10 === 0) stepQuestAuto();
@@ -384,6 +412,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       window.clearTimeout(warpTimer);
       window.clearTimeout(storyTimer);
       link?.stop();
+      // 로그아웃(서울로 돌아감): 여관 침대에서 자던 중이면 일어나서 나간다 (창을 그냥 닫으면 계속 잔다)
+      world.leaveBed();
       saveProfile(profile);
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
@@ -428,7 +458,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       {hud && <FieldHud hud={hud} onToggleAuto={() => worldRef.current?.toggleAuto()} touch={touch} portrait={portrait} />}
 
       {/* 수동 조작일 때만 터치 버튼 (자동사냥 중엔 필요 없음) */}
-      {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && !talk && <TouchControls kb={kb} map={P1_KEYS} />}
+      {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && !talk && !menu && !hud.sleep && hud.shower === null && <TouchControls kb={kb} map={P1_KEYS} />}
 
       {/* NPC 가까이: 말 걸기 */}
       {hud?.npc && !talk && !story && !paused && (
@@ -440,6 +470,67 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           {!hud.npc.met && <span className="ml-1 text-amber-300">❗</span>} 대화하기{!touch && ' · E'}
         </button>
       )}
+      {/* 달빛 여관 문: 걸어 들어가도 되고 눌러도 된다 */}
+      {hud?.innDoor && !hud.npc && !hud.innSpot && !talk && !story && !paused && !menu && (
+        <button
+          onClick={() => (hud.innDoor === 'in' ? worldRef.current?.enterInn() : worldRef.current?.leaveInn())}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 rounded-full border border-amber-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg hover:bg-black/85"
+        >
+          🚪 {hud.innDoor === 'in' ? '달빛 여관 들어가기' : '마을로 나가기'}
+        </button>
+      )}
+      {/* 달빛 여관: 침대 · 샤워 칸 */}
+      {hud?.innSpot && !hud.npc && !talk && !story && !paused && !menu && (
+        <button
+          onClick={() => talkApi.current?.start()}
+          className={`absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border bg-black/70 px-5 py-2 text-sm font-bold shadow-lg hover:bg-black/85 ${hud.innSpot.busy ? 'border-white/20 text-white/50' : 'border-amber-200/50 text-amber-100'}`}
+        >
+          {hud.innSpot.kind === 'bed' ? '🛏️' : '🚿'} {hud.innSpot.busy ? (hud.innSpot.kind === 'bed' ? '다른 사람이 자는 중' : '누가 씻는 중') : hud.innSpot.label}
+          {!touch && ' · E'}
+        </button>
+      )}
+      {/* 자는 중: 화면이 어두워지고, 아무 키 · 화면을 누르면 일어난다 */}
+      {hud?.sleep && (
+        <div
+          className={`absolute inset-0 z-20 flex items-end justify-center bg-[#05030f] pb-24 transition-opacity duration-[1500ms] ${hud.sleep.phase === 'sleep' ? 'opacity-80' : 'opacity-30'}`}
+          onClick={() => worldRef.current?.wakeUp()}
+        >
+          {hud.sleep.phase === 'sleep' && (
+            <div className="rounded-xl border border-violet-200/20 bg-black/60 px-6 py-3 text-center text-violet-100">
+              <div className="text-2xl">😴 Zzz…</div>
+              <div className="mt-1 text-sm text-white/75">
+                {Math.floor(hud.sleep.sleptMs / 60_000)}분째 자는 중 · 피로도 {hud.fatigue} · HP {hud.hp}/{hud.maxHp}
+              </div>
+              <div className="mt-1 text-xs text-white/50">창을 닫아도 계속 자요 · {touch ? '화면을 누르면' : '아무 키나 누르면'} 일어나요</div>
+            </div>
+          )}
+        </div>
+      )}
+      {/* 씻는 중 */}
+      {hud && hud.shower !== null && (
+        <div className="pointer-events-none absolute bottom-32 left-1/2 w-64 -translate-x-1/2 rounded-full border border-sky-200/40 bg-black/70 px-4 py-2 text-center text-sm font-bold text-sky-100">
+          🚿 씻는 중… {Math.round(hud.shower * 100)}%
+          <div className="mt-1 h-1.5 overflow-hidden rounded bg-white/10">
+            <div className="h-full bg-sky-300" style={{ width: `${hud.shower * 100}%` }} />
+          </div>
+        </div>
+      )}
+      {menu && hud && (
+        <InnMenuPanel
+          coin={hud.coin}
+          hunger={hud.hunger}
+          fatigue={hud.fatigue}
+          touch={touch}
+          onBuy={(id) => {
+            const r = worldRef.current?.buyMeal(id) ?? { ok: false, message: '' };
+            if (r.ok) saveProfile(profile);
+            return r;
+          }}
+          onClose={() => setMenu(false)}
+        />
+      )}
+      {/* 여관 문을 지날 때: 잠깐 어두워졌다 밝아진다 */}
+      {doorFade > 0 && <div key={doorFade} className="door-fade pointer-events-none absolute inset-0 z-40 bg-black" />}
       {/* 0장: 살펴볼 곳 */}
       {hud?.spot && !hud.npc && ch0 && !talk && !story && !paused && (
         <button
@@ -486,7 +577,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
 
       <RotateHint touch={touch} />
 
-      {inventory && <InventoryPanel profile={profile} onClose={() => setInventory(false)} />}
+      {inventory && <InventoryPanel profile={profile} dimension onClose={() => setInventory(false)} />}
 
       {/* 접속 연출: 모니터 속으로 빨려 들어간다 */}
       {warp && (

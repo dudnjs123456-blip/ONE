@@ -1,5 +1,6 @@
 import type { FieldHudState } from '@/game/core/field';
 import { LifeBars } from './LifeBar';
+import CoinIcon from './CoinIcon';
 import { bindLabel } from '@/game/core/keybinds';
 
 function Bar({ value, max, color, height = 'h-3' }: { value: number; max: number; color: string; height?: string }) {
@@ -35,7 +36,7 @@ export default function FieldHud({
           <span className="text-lg font-black">
             <span className="text-amber-300">Lv.{hud.level}</span> 나
           </span>
-          <span className="text-sm text-amber-200">{hud.gold.toLocaleString()} G</span>
+          <span className="text-sm text-slate-100" title="차원 돈 (서울 돈 G 와 따로, 차원 안에서만 써요)"><CoinIcon /> {hud.coin.toLocaleString()} 은화</span>
         </div>
         <div className="mt-2 flex items-center gap-2 text-xs">
           <span className="w-7 font-bold text-red-300">HP</span>
@@ -51,7 +52,7 @@ export default function FieldHud({
         </div>
         <div className="mt-1 flex justify-between text-xs text-white/60">
           <span>처치 {hud.kills}</span>
-          {hud.inVillage ? <span className="text-amber-200">🏘️ 경계 마을 · 안전</span> : <span className="text-violet-200">⚔️ 사냥터</span>}
+          {hud.inInn ? <span className="text-amber-200">🏠 달빛 여관 · 안전</span> : hud.inVillage ? <span className="text-amber-200">🏘️ 경계 마을 · 안전</span> : <span className="text-violet-200">⚔️ 사냥터</span>}
         </div>
         {hud.others.length > 0 && (
           <div className="mt-1 truncate text-[11px] text-cyan-200/90" title={hud.others.map((o) => `Lv.${o.level} ${o.name}`).join(', ')}>
@@ -63,13 +64,13 @@ export default function FieldHud({
             <span className="text-white/50">이번 사냥 {Math.floor(hud.session.seconds / 60)}분</span> · 처치 {hud.session.kills}
             {hud.session.deaths > 0 && <span className="text-red-300"> · 사망 {hud.session.deaths}</span>}
             <br />
-            <span className="text-lime-300">+{hud.session.exp.toLocaleString()} EXP</span> · <span className="text-amber-200">+{hud.session.gold.toLocaleString()} G</span>
+            <span className="text-lime-300">+{hud.session.exp.toLocaleString()} EXP</span> · <span className="text-slate-100">+{hud.session.coin.toLocaleString()} 은화</span>
             {hud.session.seconds >= 60 && (
               <span className="text-white/45"> (분당 {Math.round((hud.session.exp * 60) / hud.session.seconds)} EXP)</span>
             )}
           </div>
         )}
-        <LifeBars fatigue={hud.fatigue} hunger={hud.hunger} />
+        <LifeBars fatigue={hud.fatigue} hunger={hud.hunger} dirt={hud.dirt} />
       </div>
 
       {/* 타겟 */}

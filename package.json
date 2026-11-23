@@ -29,7 +29,8 @@
     "test:karaoke": "tsx scripts/karaoke-sim.ts",
     "test:park": "tsx scripts/park-sim.ts",
     "test:prologue": "tsx scripts/prologue-sim.ts",
-    "test:chapter0": "tsx scripts/chapter0-sim.ts"
+    "test:chapter0": "tsx scripts/chapter0-sim.ts",
+    "test:inn": "tsx scripts/inn-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

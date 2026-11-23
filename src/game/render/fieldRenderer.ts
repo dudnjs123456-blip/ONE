@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import { pixelRatioFor } from './graphics';
 import { mulberry32 } from '../core/controllers';
-import { FIELD_HALF, inVillage, type FieldWorld, type FloatText } from '../core/field';
+import { FIELD_HALF, inSafe, type FieldWorld, type FloatText } from '../core/field';
 import type { Fighter } from '../core/fighter';
 import { FIELD_SPAWNS } from '../data/monsters';
 import { smooth, type FrameClock } from './clock';
 import { FloatingTexts, Nameplate, SparkSystem } from './effects';
 import { playerLook, type BodyType } from './looks';
-import { wornList } from '../data/fashion';
+import { SLEEPWEAR, wornList } from '../data/fashion';
 import type { Appearance, CharacterView } from './mannequin';
 import { createCharacter } from './vrmCharacter';
 import { headshot } from './portraitShot';
@@ -15,6 +15,8 @@ import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playCoin, playHit, playLevelUp } from './sfx';
 import { buildVillage, type VillageScene } from './villageScene';
 import { VILLAGE } from '../data/village';
+import { buildInn, type InnScene } from './innScene';
+import { INN_BEDS, bedPose } from '../data/inn';
 
 /** 16:10 화면에서 45° 일 때 보이는 옆 시야각 — 세로 화면도 이만큼은 보이게 */
 const WIDE_HFOV = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(45) / 2) * 1.6);
@@ -22,9 +24,11 @@ const CAM_OFFSET = new THREE.Vector3(0, 8.5, 9);
 const TEXT_COLORS: Record<FloatText['kind'], string> = { exp: '#b8f36b', gold: '#ffd54a', level: '#ffe066' };
 
 interface Actor {
-  mannequin: CharacterView & { dispose?(): void };
+  mannequin: CharacterView & { dispose?(): void; setOutfit?(ids: string[]): void };
   plate: Nameplate;
   height: number;
+  /** 지금 입힌 옷 (잠옷으로 갈아입을 때 비교) */
+  outfitKey?: string;
 }
 
 /** 다른 차원(필드) 렌더러: 쿼터뷰 추적 카메라, 보랏빛 들판/수정/귀환 포탈, 머리 위 HP, 데미지 숫자 */
@@ -41,6 +45,8 @@ export class FieldRenderer {
   private shake = 0;
   private initialized = false;
   private village: VillageScene | null = null;
+  private inn: InnScene | null = null;
+  private lastWarp = -1;
 
   /** 카메라 거리 배율 (1 = 기본 쿼터뷰, 작을수록 가까이) */
   private camOffset: THREE.Vector3;
@@ -120,6 +126,24 @@ export class FieldRenderer {
 
     // 마을: 포탈 소용돌이·깃발·불꽃·연기·반딧불이 (포탈 고리는 돌리지 않는다 — 돌리면 화면 앞을 크게 가린다)
     this.village?.update(clock.t, world.player.x, world.player.z);
+    // 달빛 여관: 자는 사람 침대엔 이불, 씻는 사람 칸엔 커튼 · 김
+    if (this.inn) {
+      const beds = new Set<number>();
+      const booths = new Set<number>();
+      if (world.sleep && world.restAmount >= 0.9) beds.add(world.sleep.bed);
+      if (world.shower) booths.add(world.shower.booth);
+      for (const h of world.hunters.values()) {
+        if (!h.target) continue;
+        if (h.bed !== null && h.rest >= 0.9) beds.add(h.bed);
+        if (h.booth !== null) booths.add(h.booth);
+      }
+      this.inn.update(clock.t, { beds, booths });
+    }
+    // 여관 문을 지났으면 카메라를 바로 옮긴다 (마을과 여관 안은 멀리 떨어져 있다)
+    if (world.warpSerial !== this.lastWarp) {
+      if (this.lastWarp >= 0) this.initialized = false;
+      this.lastWarp = world.warpSerial;
+    }
 
     this.updateCamera(world.player, clock);
     this.renderer.render(this.scene, this.camera);
@@ -180,10 +204,16 @@ export class FieldRenderer {
     };
 
     const p = world.player;
-    const pa = ensure(p, playerLook(wornList(world.profile.wardrobe), world.profile.body), 1, false);
-    // 경계 마을 안에선 서울처럼 편한 자세 (전투 자세는 사냥터에서만)
-    pa.mannequin.casual = inVillage(p.x, p.z);
+    const worn = wornList(world.profile.wardrobe);
+    const pa = ensure(p, playerLook(worn, world.profile.body), 1, false);
+    // 경계 마을 · 여관 안에선 서울처럼 편한 자세 (전투 자세는 사냥터에서만)
+    pa.mannequin.casual = inSafe(p.x, p.z);
+    const myRest = world.sleep ? world.restAmount : 0;
+    this.restPose(pa, world.sleep?.bed ?? null, myRest, world.netId ?? 'me', worn);
     pa.mannequin.update(p, clock);
+    // 씻는 동안은 커튼 뒤 (모습을 감춘다)
+    pa.mannequin.root.visible = !world.shower;
+    pa.plate.sprite.visible = !world.shower && myRest < 0.3;
     pa.plate.draw(`Lv.${world.level} 나`, p.hp, p.maxHp);
     const pp = p.lerped(clock.alpha);
     pa.plate.sprite.position.set(pp.x, pp.y + pa.height, pp.z);
@@ -192,8 +222,11 @@ export class FieldRenderer {
     for (const h of hunters) {
       const f = h.fighter;
       const a = ensure(f, playerLook(h.outfit, h.body as BodyType | undefined), 1, false);
-      a.mannequin.casual = inVillage(f.x, f.z);
+      a.mannequin.casual = inSafe(f.x, f.z);
+      this.restPose(a, h.bed, h.bed !== null ? h.rest : 0, h.id, h.outfit);
       a.mannequin.update(f, clock);
+      a.mannequin.root.visible = h.booth === null;
+      a.plate.sprite.visible = h.booth === null && (h.bed === null || h.rest < 0.3);
       a.plate.draw(`Lv.${h.level} ${h.name}`, f.hp, f.maxHp);
       const fp = f.lerped(clock.alpha);
       a.plate.sprite.position.set(fp.x, fp.y + a.height, fp.z);
@@ -230,6 +263,19 @@ export class FieldRenderer {
       a.plate.sprite.position.set(fp.x, fp.y + a.height, fp.z);
       // 시체는 서서히 가라앉는다
       if (m.rewarded && f.state === 'ko') a.mannequin.root.position.y = -m.deadFrames * 0.004;
+    }
+  }
+
+  /** 여관 침대에 눕는 자세 (서울 집 침대와 같은 동작) · 누우면 잠옷으로 갈아입는다 */
+  private restPose(a: Actor, bed: number | null, t: number, seed: string, worn: string[]) {
+    const b = bed !== null ? INN_BEDS[bed] : null;
+    a.mannequin.rest = b && t > 0 ? { t, ...bedPose(b), sleepSeed: seed } : null;
+    const want = b && t > 0 ? [...SLEEPWEAR] : worn;
+    const key = want.join(',');
+    if (a.outfitKey === undefined) a.outfitKey = worn.join(',');
+    if (key !== a.outfitKey) {
+      a.outfitKey = key;
+      a.mannequin.setOutfit?.(want);
     }
   }
 
@@ -279,6 +325,8 @@ export class FieldRenderer {
 
     // 경계 마을 (접속하면 도착하는 곳, 사냥터 남쪽)
     this.village = buildVillage(s);
+    // 달빛 여관 안 (게스트하우스, 마을에서 멀리 떨어진 곳)
+    this.inn = buildInn(s);
 
     // 떠 있는 차원 수정
     const crystalMat = new THREE.MeshStandardMaterial({ color: 0xb48cff, emissive: 0x6a3cff, emissiveIntensity: 0.9, roughness: 0.25, metalness: 0.1 });

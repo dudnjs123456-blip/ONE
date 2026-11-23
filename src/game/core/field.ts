@@ -12,6 +12,12 @@ import { expToNext } from '../data/progression';
 import { playerStats } from '../data/equipment';
 import { SPOT_RANGE, TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, VILLAGE_SPOTS, type VillageNpcDef } from '../data/village';
 import { gateLocked } from '../story/chapter0';
+import { DIRT_PER_FRAME, DIRTY, dirtRate } from '../city/chores';
+import {
+  COIN_NAME, INN, INN_BED_PRICE, INN_BEDS, INN_BOOTHS, INN_DOOR_OUT, INN_ENTRY, INN_EXIT, INN_FURNITURE, INN_LEAVE, INN_MENU, INN_SLEEPY, INN_SPOT_RANGE, INN_WALLS,
+  SHOWER_FRAMES, SLEEP_FATIGUE_PER_MS, SLEEP_HP_PER_MS, SLEEP_HUNGER_PER_MS, SLEEP_LIE_FRAMES, SLEEP_MAX_MS, SLEEP_SETTLE_FRAMES, SLEEP_WAKE_FRAMES,
+  bedStand, boothStand, inInn, type InnBlock,
+} from '../data/inn';
 
 /** 필드는 [-FIELD_HALF, FIELD_HALF] 정사각형 */
 export const FIELD_HALF = 22;
@@ -24,12 +30,19 @@ const WALK_RECTS = (() => {
     { x0: -h, x1: h, z0: -h, z1: h },
     { x0: VILLAGE.x0 + r, x1: VILLAGE.x1 - r, z0: VILLAGE.z0 + r, z1: VILLAGE.z1 - r },
     { x0: -VILLAGE.gate + r, x1: VILLAGE.gate - r, z0: FIELD_HALF - 1, z1: VILLAGE.z0 + 1 },
+    // 달빛 여관 안 (마을에서 멀리 떨어진 곳, 문으로만 오간다)
+    { x0: INN.x0 + r, x1: INN.x1 - r, z0: INN.z0 + r, z1: INN.z1 - r },
   ];
 })();
 
 /** 마을 담장 안(북문 포함)에 있나. 몬스터는 여기 있는 사람을 쫓지 않는다 */
 export function inVillage(x: number, z: number): boolean {
   return z > FIELD_HALF && x > VILLAGE.x0 && x < VILLAGE.x1 && z < VILLAGE.z1;
+}
+
+/** 마을 담장 안 · 여관 안: 몬스터가 쫓지 않고, 편한 자세로 걷는다 */
+export function inSafe(x: number, z: number): boolean {
+  return inVillage(x, z) || inInn(x, z);
 }
 
 /** 걸을 수 있는 곳 밖으로 나가면 가장 가까운 걸을 수 있는 자리로 (벽을 따라 미끄러진다) */
@@ -55,7 +68,28 @@ export function clampWalk(f: { x: number; z: number }, monster = false) {
   }
   f.x = bx;
   f.z = bz;
-  if (!monster) pushOutOfHouses(f);
+  if (!monster) {
+    pushOutOfHouses(f);
+    if (inInn(f.x, f.z)) for (const b of INN_BLOCKS) pushOut(f, b);
+  }
+}
+
+const INN_BLOCKS: InnBlock[] = [...INN_WALLS, ...INN_FURNITURE];
+
+/** 사각형 안으로 들어가지 않게 가장 가까운 변 바깥으로 민다 */
+function pushOut(f: { x: number; z: number }, b: InnBlock) {
+  const r = FIGHTER_RADIUS;
+  const x0 = b.x0 - r;
+  const x1 = b.x1 + r;
+  const z0 = b.z0 - r;
+  const z1 = b.z1 + r;
+  if (f.x <= x0 || f.x >= x1 || f.z <= z0 || f.z >= z1) return;
+  const d = [f.x - x0, x1 - f.x, f.z - z0, z1 - f.z];
+  const k = d.indexOf(Math.min(...d));
+  if (k === 0) f.x = x0;
+  else if (k === 1) f.x = x1;
+  else if (k === 2) f.z = z0;
+  else f.z = z1;
 }
 
 /** 선분 a→b 가 상자(가운데 cx, cz · 반폭 hw, hd)를 지나가나 (자동진행 길 찾기) */
@@ -174,6 +208,11 @@ export interface Hunter {
   target: NetPose | null;
   seenAt: number;
   hitLock: number;
+  /** 여관 침대에서 자는 중이면 침대 번호와 눕는 정도 (0~1) */
+  bed: number | null;
+  rest: number;
+  /** 샤워 칸에서 씻는 중이면 칸 번호 */
+  booth: number | null;
 }
 
 /** 내 모습 (같은 차원 사람들에게 보낸다) */
@@ -184,6 +223,10 @@ export interface DimState extends NetPose {
   hp: number;
   mh: number;
   lv: number;
+  /** 여관: 자는 침대 · 눕는 정도(0~1, 0.05 단위) · 씻는 샤워 칸 */
+  b?: number;
+  r?: number;
+  w?: number;
 }
 
 /** 몬스터 한 마리 (계산 담당이 보낸다). d = 쓰러진 뒤 지난 프레임 (살아 있으면 -1) */
@@ -238,10 +281,12 @@ export interface FieldHudState {
   level: number;
   exp: number;
   expNext: number;
-  gold: number;
+  /** 차원 돈 (은화) */
+  coin: number;
   kills: number;
   fatigue: number;
   hunger: number;
+  dirt: number;
   hp: number;
   maxHp: number;
   auto: boolean;
@@ -252,9 +297,19 @@ export interface FieldHudState {
   /** 같은 차원에 있는 다른 사람들 */
   others: { name: string; level: number }[];
   /** 이번 사냥(필드에 들어온 뒤) 성과 */
-  session: { seconds: number; kills: number; exp: number; gold: number; deaths: number };
-  /** 경계 마을 안에 있나 */
+  session: { seconds: number; kills: number; exp: number; coin: number; deaths: number };
+  /** 경계 마을 안에 있나 (여관 안 포함) */
   inVillage: boolean;
+  /** 달빛 여관 안에 있나 */
+  inInn: boolean;
+  /** 여관 문 가까이: 'in' 들어가기 · 'out' 나가기 */
+  innDoor: 'in' | 'out' | null;
+  /** 여관: 가까이 있는 침대 · 샤워 칸 (E) */
+  innSpot: { kind: 'bed' | 'shower'; index: number; label: string; busy: boolean } | null;
+  /** 자는 중: 단계 · 잔 시간(ms) */
+  sleep: { phase: 'lie' | 'sleep' | 'wake'; sleptMs: number } | null;
+  /** 씻는 중: 0~1 */
+  shower: number | null;
   /** 말을 걸 수 있는 가까운 NPC */
   npc: { id: string; name: string; title: string; met: boolean } | null;
   /** 0장: 가까이 있는 살펴볼 곳 (NPC 가 더 가까우면 null) */
@@ -349,7 +404,7 @@ export class MonsterBrain {
 export class FieldWorld {
   frame = 0;
   /** 이번 사냥 성과 (필드에 들어온 뒤부터) */
-  private session = { kills: 0, exp: 0, gold: 0, deaths: 0 };
+  private session = { kills: 0, exp: 0, coin: 0, deaths: 0 };
   hitstop = 0;
   readonly player: Fighter;
   auto = false;
@@ -370,6 +425,14 @@ export class FieldWorld {
   private questLastDist = Infinity;
   /** 방향키로 자동진행을 멈췄다 (화면이 자동진행 모드를 끄고 지운다) */
   questCancelled = false;
+  /** 여관 침대에서 자는 중. since·last 는 실제 시각 (ms) */
+  sleep: { bed: number; phase: 'lie' | 'sleep' | 'wake'; t: number; since: number; last: number } | null = null;
+  /** 샤워 칸에서 씻는 중 */
+  shower: { booth: number; t: number; dirt0: number } | null = null;
+  /** 여관 문을 지날 때마다 늘어난다 (화면을 잠깐 어둡게 · 카메라를 바로 옮긴다) */
+  warpSerial = 0;
+  /** 실제 시각 (시험에서 바꾼다) */
+  nowMs: () => number = () => Date.now();
   log: { id: number; text: string }[] = [];
 
   // ── 같이 사냥 (접속했을 때만) ──
@@ -462,6 +525,10 @@ export class FieldWorld {
   }
 
   toggleAuto() {
+    if (!this.auto && (this.sleep || this.shower || inInn(this.player.x, this.player.z))) {
+      this.addLog('여관 안에서는 자동사냥을 켤 수 없어요 (밖으로 나가서 켜 주세요)');
+      return;
+    }
     if (!this.auto && this.gateLocked) {
       this.addLog('바위: "문 밖은 아직 안 돼. 마을 사람들부터 만나고 와."');
       return;
@@ -521,9 +588,11 @@ export class FieldWorld {
    */
   walkToNpc(id: string): boolean {
     const n = this.npcs.find((v) => v.def.id === id);
-    if (!n || this.player.hp <= 0) return false;
+    if (!n || this.player.hp <= 0 || this.sleep || this.shower) return false;
     if (this.auto) this.toggleAuto();
     const d = n.def;
+    // 여관 안에서 마을 사람에게 가려면 먼저 마을로 나간다 (여관 안 사람이면 그대로)
+    if (inInn(this.player.x, this.player.z) && !inInn(d.x, d.z)) this.leaveInn();
     // NPC 가 바라보는 쪽 앞에 선다 (북문 쪽을 보는 사람은 마을 안쪽에서)
     let stand = { x: d.x + d.fx * 1.25, z: d.z + d.fz * 1.25 };
     if (stand.z < VILLAGE.z0 + 1.2) stand = { x: d.x, z: d.z + 1.3 };
@@ -586,11 +655,11 @@ export class FieldWorld {
     return true;
   }
 
-  /** 대화를 마쳤다: 처음 만난 사람으로 기록하고, 여관이면 쉬어 간다 */
-  endTalk() {
+  /** 대화를 마쳤다: 처음 만난 사람으로 기록하고, 여관이면 쉬어 간다. 해 주는 일(식당이면 'meal')을 돌려준다 */
+  endTalk(): VillageNpcDef['service'] | null {
     const n = this.talking;
     this.talking = null;
-    if (!n) return;
+    if (!n) return null;
     const d = (this.profile.dimension ??= { visits: 0 });
     d.met ??= [];
     if (!d.met.includes(n.def.id)) d.met.push(n.def.id);
@@ -601,6 +670,277 @@ export class FieldWorld {
       this.addLog(`${n.def.name}의 차를 마시고 기운을 차렸습니다 (HP 가득)`);
     }
     n.fighter.reset(n.def.x, n.def.z, n.def.fx, n.def.fz);
+    return n.def.service ?? null;
+  }
+
+  // ───────────────────────── 은화 · 달빛 여관 ─────────────────────────
+
+  /** 차원 돈 (은화). 서울 돈(profile.gold)과 따로 센다 */
+  get coin(): number {
+    return this.profile.dimension?.coin ?? 0;
+  }
+
+  private addCoin(n: number) {
+    const d = (this.profile.dimension ??= { visits: 0 });
+    d.coin = Math.max(0, (d.coin ?? 0) + n);
+  }
+
+  /** 다른 사람이 자는 침대 · 씻는 샤워 칸 */
+  private takenBeds(): Set<number> {
+    const out = new Set<number>();
+    for (const h of this.hunters.values()) if (this.fresh(h) && h.bed !== null) out.add(h.bed);
+    return out;
+  }
+  private takenBooths(): Set<number> {
+    const out = new Set<number>();
+    for (const h of this.hunters.values()) if (this.fresh(h) && h.booth !== null) out.add(h.booth);
+    return out;
+  }
+
+  /** 여관 안 가장 가까운 침대 · 샤워 칸 (E 로 쓴다) */
+  nearbyInnSpot(): { kind: 'bed' | 'shower'; index: number } | null {
+    const p = this.player;
+    if (p.hp <= 0 || this.sleep || this.shower || !inInn(p.x, p.z)) return null;
+    let best: { kind: 'bed' | 'shower'; index: number } | null = null;
+    let bd = INN_SPOT_RANGE;
+    const near = (x: number, z: number, kind: 'bed' | 'shower', index: number) => {
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = { kind, index };
+      }
+    };
+    INN_BEDS.forEach((b, i) => {
+      const st = bedStand(b);
+      near(st.x, st.z, 'bed', i);
+    });
+    INN_BOOTHS.forEach((b, i) => {
+      const st = boothStand(b);
+      near(st.x, st.z, 'shower', i);
+    });
+    return best;
+  }
+
+  /** E: 가까운 침대에 눕거나 샤워 칸에 들어간다 */
+  useInnSpot(): boolean {
+    const s = this.nearbyInnSpot();
+    if (!s) return false;
+    return s.kind === 'bed' ? this.lieDown(s.index) : this.startShower(s.index);
+  }
+
+  /** 침대에 눕는다 (숙박비 은화, 첫날 밤은 공짜). 실제 시간으로 자고, 창을 닫아도 계속 잔다 */
+  lieDown(bed: number): boolean {
+    const b = INN_BEDS[bed];
+    const life = this.profile.life;
+    if (!b || this.sleep || this.shower) return false;
+    if (this.takenBeds().has(bed)) {
+      this.addLog('다른 사람이 자고 있는 침대예요');
+      return false;
+    }
+    if (life.fatigue < INN_SLEEPY) {
+      this.addLog(`😐 아직 졸리지 않다 (피로도 ${INN_SLEEPY} 이상부터 잘 수 있어요 · 지금 ${Math.round(life.fatigue)})`);
+      return false;
+    }
+    const d = (this.profile.dimension ??= { visits: 0 });
+    if (!d.innFree) {
+      d.innFree = true;
+      this.addLog('🛏️ 첫날 밤은 달래가 공짜로 재워 줬다');
+    } else if (this.coin < INN_BED_PRICE) {
+      this.addLog(`💰 ${COIN_NAME}가 모자라요 (숙박 ${INN_BED_PRICE} ${COIN_NAME} · 가진 돈 ${this.coin})`);
+      return false;
+    } else {
+      this.addCoin(-INN_BED_PRICE);
+      this.texts.push({ x: this.player.x, y: 2.2, z: this.player.z, text: `-${INN_BED_PRICE} ${COIN_NAME}`, kind: 'gold' });
+      this.addLog(`🛏️ 숙박비 ${INN_BED_PRICE} ${COIN_NAME}를 내고 침대에 누웠다`);
+    }
+    this.auto = false;
+    const st = bedStand(b);
+    this.player.reset(st.x, st.z, 1, 0);
+    const now = this.nowMs();
+    this.sleep = { bed, phase: 'lie', t: 0, since: now, last: now };
+    return true;
+  }
+
+  /** 새로고침·다시 접속: 잠든 채로 이어서 잔다 (그동안 흐른 실제 시간만큼 쉰 것으로 친다) */
+  resumeSleep(): boolean {
+    const s = this.profile.dimension?.sleep;
+    const b = s && INN_BEDS[s.bed];
+    if (!s || !b) return false;
+    const st = bedStand(b);
+    this.player.reset(st.x, st.z, 1, 0);
+    this.sleep = { bed: s.bed, phase: 'sleep', t: SLEEP_SETTLE_FRAMES, since: s.at, last: s.at };
+    this.applySleepTime();
+    return true;
+  }
+
+  /** 깨운다 (아무 키 · 화면 누르기). 다 누운 뒤에만 */
+  wakeUp() {
+    const s = this.sleep;
+    if (!s || s.phase !== 'sleep' || s.t < SLEEP_SETTLE_FRAMES) return;
+    this.startWake();
+  }
+
+  /** 곧바로 침대에서 나온다 (로그아웃할 때) */
+  leaveBed() {
+    if (!this.sleep) return;
+    this.applySleepTime();
+    this.sleep = null;
+    if (this.profile.dimension) delete this.profile.dimension.sleep;
+  }
+
+  /** 눕는 정도 0~1 (렌더러 자세) */
+  get restAmount(): number {
+    const s = this.sleep;
+    if (!s) return 0;
+    if (s.phase === 'lie') return Math.min(1, s.t / SLEEP_LIE_FRAMES);
+    if (s.phase === 'sleep') return 1;
+    return Math.max(0, 1 - s.t / SLEEP_WAKE_FRAMES);
+  }
+
+  private startWake() {
+    const s = this.sleep!;
+    this.applySleepTime();
+    const slept = s.last - s.since;
+    s.phase = 'wake';
+    s.t = 0;
+    if (this.profile.dimension) delete this.profile.dimension.sleep;
+    const m = Math.floor(slept / 60_000);
+    const span = m >= 60 ? `${Math.floor(m / 60)}시간 ${m % 60}분` : `${m}분`;
+    this.addLog(`☀️ 잘 잤다! (${span} 잠) · 피로도 ${Math.round(this.profile.life.fatigue)}`);
+  }
+
+  /** 잠든 뒤 흐른 실제 시간만큼 쉰다 (서울 집 침대와 같은 속도) */
+  private applySleepTime() {
+    const s = this.sleep;
+    if (!s) return;
+    const now = Math.min(this.nowMs(), s.since + SLEEP_MAX_MS);
+    const dt = Math.max(0, now - s.last);
+    s.last = Math.max(s.last, now);
+    if (dt <= 0) return;
+    const life = this.profile.life;
+    life.fatigue = Math.max(0, life.fatigue - dt * SLEEP_FATIGUE_PER_MS);
+    life.hunger = Math.min(100, life.hunger + dt * SLEEP_HUNGER_PER_MS);
+    const p = this.player;
+    p.hp = Math.min(p.maxHp, Math.round(p.hp + p.maxHp * dt * SLEEP_HP_PER_MS));
+  }
+
+  private stepSleep() {
+    const s = this.sleep!;
+    s.t++;
+    if (s.phase === 'lie') {
+      if (s.t >= SLEEP_LIE_FRAMES) {
+        s.phase = 'sleep';
+        s.t = 0;
+        // 다 누웠다: 이때부터 창을 닫아도 계속 잔다
+        const d = (this.profile.dimension ??= { visits: 0 });
+        d.sleep = { bed: s.bed, at: s.since };
+        this.addLog('😴 잠이 들었다… (아무 키나 누르면 일어나요)');
+      }
+      return;
+    }
+    if (s.phase === 'sleep') {
+      this.applySleepTime();
+      if (s.t >= SLEEP_SETTLE_FRAMES) {
+        const cmd = this.manual.read(this);
+        if (cmd.move || cmd.input.buttons.some(Boolean)) return this.startWake();
+      }
+      if (this.nowMs() - s.since >= SLEEP_MAX_MS) {
+        this.addLog('12시간을 자고 저절로 깼다');
+        this.startWake();
+      }
+      return;
+    }
+    if (s.t >= SLEEP_WAKE_FRAMES) this.sleep = null;
+  }
+
+  /** 샤워 칸에 들어간다 (커튼을 치고 씻는다, 공짜) */
+  startShower(booth: number): boolean {
+    const b = INN_BOOTHS[booth];
+    if (!b || this.sleep || this.shower) return false;
+    if (this.takenBooths().has(booth)) {
+      this.addLog('누가 씻고 있어요. 다른 칸을 써 주세요');
+      return false;
+    }
+    this.auto = false;
+    const st = boothStand(b);
+    this.player.reset(st.x, st.z, 0, -1);
+    this.shower = { booth, t: 0, dirt0: this.profile.life.dirt ?? 0 };
+    this.addLog('🚿 커튼을 치고 씻는 중…');
+    return true;
+  }
+
+  private stepShower() {
+    const s = this.shower!;
+    s.t++;
+    const life = this.profile.life;
+    life.dirt = s.dirt0 * Math.max(0, 1 - s.t / SHOWER_FRAMES);
+    if (s.t < SHOWER_FRAMES) return;
+    life.dirt = 0;
+    // 따뜻한 물: 피로가 조금 풀린다
+    life.fatigue = Math.max(0, life.fatigue - 3);
+    this.shower = null;
+    this.texts.push({ x: this.player.x, y: 2.3, z: this.player.z, text: '개운하다!', kind: 'exp' });
+    this.addLog('🧼 깨끗이 씻었다 (더러움 0 · 피로도 -3)');
+  }
+
+  /** 식당에서 사 먹는다 (은화) */
+  buyMeal(id: string): { ok: boolean; message: string } {
+    const meal = INN_MENU.find((m) => m.id === id);
+    if (!meal) return { ok: false, message: '없는 메뉴예요' };
+    const life = this.profile.life;
+    if (meal.hunger > meal.fatigue && life.hunger < 5) return { ok: false, message: '배불러서 더는 못 먹겠다…' };
+    if (this.coin < meal.price) return { ok: false, message: `${COIN_NAME}가 모자라요 (${meal.price} ${COIN_NAME} · 가진 돈 ${this.coin})` };
+    this.addCoin(-meal.price);
+    life.hunger = Math.max(0, life.hunger - meal.hunger);
+    life.fatigue = Math.max(0, life.fatigue - meal.fatigue);
+    const p = this.player;
+    if (meal.hp) p.hp = p.maxHp;
+    this.texts.push({ x: p.x, y: 2.3, z: p.z, text: `${meal.icon} 냠냠`, kind: 'exp' });
+    const fx = [meal.hunger ? `배고픔 -${meal.hunger}` : '', meal.fatigue ? `피로도 -${meal.fatigue}` : '', meal.hp ? 'HP 가득' : ''].filter(Boolean).join(' · ');
+    const message = `${meal.icon} ${meal.name} 먹었다 (${fx})`;
+    this.addLog(message);
+    return { ok: true, message };
+  }
+
+  /** 여관 문: 마을 쪽 문으로 걸어 들어가면 여관 안 · 안쪽 남문으로 걸어 나오면 마을 */
+  private passInnDoor() {
+    const p = this.player;
+    const mv = p.freeMove;
+    if (!mv || p.hp <= 0) return;
+    const len = Math.hypot(mv.x, mv.z) || 1;
+    const r = FIGHTER_RADIUS;
+    if (inInn(p.x, p.z)) {
+      if (mv.z / len > 0.5 && p.z >= INN.z1 - r - 0.03 && Math.abs(p.x - INN_EXIT.x) < INN_EXIT.halfWidth) this.leaveInn();
+      return;
+    }
+    if (mv.x / len < -0.5 && p.x <= INN_DOOR_OUT.x + r + 0.03 && p.x > INN_DOOR_OUT.x - 0.2 && Math.abs(p.z - INN_DOOR_OUT.z) < INN_DOOR_OUT.halfWidth) this.enterInn();
+  }
+
+  /** 여관 문 가까이 있나: 'in' = 마을 쪽 문 앞 (들어가기) · 'out' = 여관 안 남문 앞 (나가기) */
+  innDoorNear(): 'in' | 'out' | null {
+    const p = this.player;
+    if (p.hp <= 0 || this.sleep || this.shower || this.talking) return null;
+    if (inInn(p.x, p.z)) return Math.abs(p.x - INN_EXIT.x) < 1.2 && p.z > INN.z1 - 1.3 ? 'out' : null;
+    return Math.hypot(p.x - INN_DOOR_OUT.x, p.z - INN_DOOR_OUT.z) < 1.6 ? 'in' : null;
+  }
+
+  /** 여관에 들어간다 (문으로 걸어 들어가거나 버튼) */
+  enterInn() {
+    const p = this.player;
+    if (p.hp <= 0 || inInn(p.x, p.z)) return;
+    this.auto = false;
+    p.reset(INN_ENTRY.x, INN_ENTRY.z, 0, -1);
+    this.warpSerial++;
+    this.addLog(`🏠 ${INN.name}에 들어왔습니다 · 씻는 곳(왼쪽) · 먹는 곳(가운데) · 자는 곳(오른쪽)`);
+  }
+
+  /** 여관에서 마을로 나간다 */
+  leaveInn() {
+    const p = this.player;
+    if (p.hp <= 0 || !inInn(p.x, p.z) || this.sleep || this.shower) return;
+    p.reset(INN_LEAVE.x, INN_LEAVE.z, 1, 0);
+    this.warpSerial++;
+    this.addLog(`${VILLAGE.name}로 나왔습니다`);
   }
 
   drainCombatEvents(): CombatEvent[] {
@@ -620,7 +960,7 @@ export class FieldWorld {
     let best: Fighter | null = null;
     let bd = Infinity;
     for (const f of this.aliveHunters()) {
-      if (outside && inVillage(f.x, f.z)) continue;
+      if (outside && inSafe(f.x, f.z)) continue;
       const d = Math.hypot(f.x - x, f.z - z);
       if (d < bd) {
         bd = d;
@@ -644,11 +984,22 @@ export class FieldWorld {
     this.stepHunters();
     this.updateTarget();
 
-    if (p.hp > 0) {
+    if (p.hp > 0 && (this.sleep || this.shower)) {
+      // 여관 침대에서 자는 중 · 샤워 칸에서 씻는 중: 제자리에 멈춰 있다 (생활 수치는 잠·샤워가 정한다)
+      if (this.sleep) this.stepSleep();
+      else this.stepShower();
+      p.freeMove = null;
+      p.feed(NEUTRAL_INPUT);
+    } else if (p.hp > 0) {
       // 생활 수치: 사냥하는 동안에도 지치고 배고파진다 (기술을 쓸수록 더 피곤)
       const life = this.life.tick(this.profile.life, { running: p.state === 'run' || p.state === 'dash', attackSerial: p.moveSerial });
       p.moveScale = life.slow * (life.canRun ? 1 : 0.8);
       if (life.warn) this.addLog(LIFE_WARNING[life.warn]);
+      // 땀·먼지: 서울과 같은 속도 (뛰고 싸울수록 빨리). 여관 샤워 칸에서 씻는다
+      const pl = this.profile.life;
+      const dirt0 = pl.dirt ?? 0;
+      pl.dirt = Math.min(100, dirt0 + DIRT_PER_FRAME * dirtRate(this.life.activity, 0));
+      if (dirt0 <= DIRTY && pl.dirt > DIRTY) this.addLog('💦 땀 냄새가 난다… 여관에서 씻고 싶다');
       let cmd = this.talking ? idle() : (this.auto ? this.autoCtl : this.manual).read(this);
       if (this.questPath && !this.talking) {
         if (cmd.move || this.auto) {
@@ -724,10 +1075,11 @@ export class FieldWorld {
       level: pr.level,
       exp: pr.exp,
       expNext: expToNext(pr.level),
-      gold: pr.gold,
+      coin: this.coin,
       kills: pr.kills,
       fatigue: Math.round(pr.life.fatigue),
       hunger: Math.round(pr.life.hunger),
+      dirt: Math.round(pr.life.dirt ?? 0),
       hp: p.hp,
       maxHp: p.maxHp,
       auto: this.auto,
@@ -737,7 +1089,20 @@ export class FieldWorld {
       log: this.log.slice(-6),
       others: [...this.hunters.values()].filter((h) => this.fresh(h)).map((h) => ({ name: h.name, level: h.level })),
       session: { seconds: Math.floor(this.frame / FPS), ...this.session },
-      inVillage: inVillage(p.x, p.z),
+      inVillage: inSafe(p.x, p.z),
+      inInn: inInn(p.x, p.z),
+      innDoor: this.innDoorNear(),
+      innSpot: (() => {
+        const s = this.nearbyInnSpot();
+        if (!s) return null;
+        if (s.kind === 'bed') {
+          const free = !this.profile.dimension?.innFree;
+          return { kind: s.kind, index: s.index, label: `침대에 눕기 (${free ? '첫날 밤 공짜' : `숙박 ${INN_BED_PRICE} ${COIN_NAME}`})`, busy: this.takenBeds().has(s.index) };
+        }
+        return { kind: s.kind, index: s.index, label: '샤워하기', busy: this.takenBooths().has(s.index) };
+      })(),
+      sleep: this.sleep && { phase: this.sleep.phase, sleptMs: Math.max(0, this.sleep.last - this.sleep.since) },
+      shower: this.shower && Math.min(1, this.shower.t / SHOWER_FRAMES),
       npc: (() => {
         const n = this.nearbyNpc();
         return n && { id: n.def.id, name: n.def.name, title: n.def.title, met: this.hasMet(n.def.id) };
@@ -757,7 +1122,7 @@ export class FieldWorld {
     if (!h) {
       const f = new Fighter(this.hunterIndex++, name, { canBlock: false, body: bodySpecFor(body) });
       f.reset(0, 0, 0, -1);
-      h = { id, name, fighter: f, level: 1, outfit, body, joinedAt, target: null, seenAt: this.frame, hitLock: 0 };
+      h = { id, name, fighter: f, level: 1, outfit, body, joinedAt, target: null, seenAt: this.frame, hitLock: 0, bed: null, rest: 0, booth: null };
       this.hunters.set(id, h);
       this.addLog(`👋 ${name} 님이 차원에 들어왔어요`);
     }
@@ -779,7 +1144,13 @@ export class FieldWorld {
   /** 보낼 내 모습 */
   netState(): DimState {
     const p = this.player;
-    return { x: q(p.x), z: q(p.z), y: q(p.y), fx: q(p.fx), fz: q(p.fz), s: p.state, f: p.frame, m: p.move?.id ?? null, hp: Math.round(p.hp), mh: p.maxHp, lv: this.profile.level };
+    const out: DimState = { x: q(p.x), z: q(p.z), y: q(p.y), fx: q(p.fx), fz: q(p.fz), s: p.state, f: p.frame, m: p.move?.id ?? null, hp: Math.round(p.hp), mh: p.maxHp, lv: this.profile.level };
+    if (this.sleep) {
+      out.b = this.sleep.bed;
+      out.r = Math.round(this.restAmount * 20) / 20;
+    }
+    if (this.shower) out.w = this.shower.booth;
+    return out;
   }
 
   applyHunterState(id: string, s: DimState) {
@@ -789,6 +1160,9 @@ export class FieldWorld {
     const first = !h.target;
     h.seenAt = this.frame;
     h.level = s.lv ?? h.level;
+    h.bed = typeof s.b === 'number' && s.b >= 0 && s.b < INN_BEDS.length ? s.b : null;
+    h.rest = h.bed !== null ? Math.min(1, Math.max(0, Number(s.r) || 0)) : 0;
+    h.booth = typeof s.w === 'number' && s.w >= 0 && s.w < INN_BOOTHS.length ? s.w : null;
     h.target = { x: s.x, z: s.z, y: s.y, fx: s.fx, fz: s.fz };
     if (first) placeAt(f, h.target);
     if (this.frame < h.hitLock) return;
@@ -994,6 +1368,7 @@ export class FieldWorld {
       }
     }
     for (const { f, local } of all) if (local) clampWalk(f, f !== this.player);
+    this.passInnDoor();
     // 0장이 끝나기 전엔 북문 앞에서 멈춘다
     if (this.gateLocked && this.player.z < VILLAGE.z0 + 0.7) {
       this.player.z = VILLAGE.z0 + 0.7;
@@ -1108,14 +1483,15 @@ export class FieldWorld {
   }
 
   private grantKill(type: MonsterType, x: number, z: number) {
+    // 차원에서 번 돈은 은화 (서울 돈 G 와 따로)
     this.profile.kills++;
-    this.profile.gold += type.gold;
+    this.addCoin(type.gold);
     this.session.kills++;
     this.session.exp += type.exp;
-    this.session.gold += type.gold;
+    this.session.coin += type.gold;
     this.texts.push({ x, y: 2.2, z, text: `+${type.exp} EXP`, kind: 'exp' });
-    this.texts.push({ x, y: 1.8, z, text: `+${type.gold} G`, kind: 'gold' });
-    this.addLog(`${type.name} 처치 (+${type.exp} EXP, +${type.gold} G)`);
+    this.texts.push({ x, y: 1.8, z, text: `+${type.gold} ${COIN_NAME}`, kind: 'gold' });
+    this.addLog(`${type.name} 처치 (+${type.exp} EXP, +${type.gold} ${COIN_NAME})`);
     this.onExp(type.exp);
   }
 

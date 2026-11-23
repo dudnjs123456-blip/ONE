@@ -49,6 +49,12 @@ export interface PlayerProfile {
     prologue?: boolean;
     /** 0장 「저편에서 온 사람」: 의문 수첩 · 단서 · 마루에게 고른 마음 (story/chapter0) */
     ch0?: import('../story/chapter0').Ch0State;
+    /** 차원 돈 (은화). 몬스터를 잡아 벌고 차원 안에서만 쓴다 — 서울 돈(gold)과 따로 */
+    coin?: number;
+    /** 달빛 여관 첫 숙박(공짜)을 썼다 */
+    innFree?: boolean;
+    /** 여관 침대에서 자는 중: 침대 번호와 잠든 실제 시각 (ms). 창을 닫아도 계속 잔다 */
+    sleep?: { bed: number; at: number };
   };
   /** 키우는 애완동물 (펫샵) */
   pets?: import('../data/pets').PetState;

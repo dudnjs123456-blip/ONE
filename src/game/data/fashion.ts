@@ -265,6 +265,11 @@ export const NPC_COSTUMES: CosmeticDef[] = [
   C({ id: 'npc-kong-top', name: '주황 튜닉', icon: '🗡️', slot: 'top', price: 0, color: 0xf08a2c, color2: 0xffd27a, pattern: 'stripe', desc: '' }),
   C({ id: 'npc-kong-bottom', name: '모험가 반바지', icon: '🗡️', slot: 'bottom', price: 0, color: 0x5a4632, desc: '' }),
   C({ id: 'npc-kong-cape', name: '짧은 초록 망토', icon: '🗡️', slot: 'bag', price: 0, color: 0x2f9d5a, color2: 0xffd27a, style: 'shortCape', desc: '' }),
+  // 보리: 여관 요리사 (흰 두건 + 올리브 셔츠 + 갈색 앞치마)
+  C({ id: 'npc-bori-hat', name: '요리사 두건', icon: '🍲', slot: 'hat', price: 0, color: 0xf4efe4, color2: 0xd9b45c, style: 'bandana', desc: '' }),
+  C({ id: 'npc-bori-top', name: '올리브 셔츠', icon: '🍲', slot: 'top', price: 0, color: 0x6b7a45, color2: 0x4a5530, desc: '' }),
+  C({ id: 'npc-bori-bottom', name: '짙은 작업 바지', icon: '🍲', slot: 'bottom', price: 0, color: 0x3a2f28, fabric: 'leather', desc: '' }),
+  C({ id: 'npc-bori-apron', name: '요리사 앞치마', icon: '🍲', slot: 'tail', price: 0, color: 0x9a6a3e, color2: 0xf4efe4, style: 'apron', desc: '' }),
 ];
 
 const BASE_BY_ID: Record<string, CosmeticDef> = Object.fromEntries([...COSMETICS, ...OPTICAL_GLASSES, ...PAJAMAS, ...NPC_COSTUMES].map((c) => [c.id, c]));

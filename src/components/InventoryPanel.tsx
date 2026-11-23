@@ -1,9 +1,10 @@
 import type { PlayerProfile } from '@/game/core/profile';
 import { ITEMS } from '@/game/data/items';
 import { PET_GOOD_BY_ID } from '@/game/data/pets';
+import CoinIcon from './CoinIcon';
 
 /** I 키로 여닫는 인벤토리: 골드와 주운 물건 */
-export default function InventoryPanel({ profile, onClose }: { profile: PlayerProfile; onClose: () => void }) {
+export default function InventoryPanel({ profile, onClose, dimension = false }: { profile: PlayerProfile; onClose: () => void; /** 다른 차원: 은화를 크게, 서울 돈은 작게 (차원에선 못 쓴다) */ dimension?: boolean }) {
   const items = Object.entries(profile.inventory ?? {}).filter(([, n]) => n > 0);
   return (
     <div className="absolute right-4 top-48 w-80 rounded-xl border border-white/20 bg-zinc-900/90 p-4 text-white shadow-2xl backdrop-blur">
@@ -13,10 +14,23 @@ export default function InventoryPanel({ profile, onClose }: { profile: PlayerPr
           ✕ <span className="text-[10px]">(I)</span>
         </button>
       </div>
-      <div className="mb-3 flex items-center justify-between rounded-lg bg-amber-400/10 px-3 py-2">
-        <span className="text-sm text-amber-200">골드</span>
-        <span className="text-lg font-black tabular-nums text-amber-300">{profile.gold.toLocaleString()} G</span>
-      </div>
+      {dimension ? (
+        <div className="mb-3 rounded-lg bg-slate-300/10 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-200"><CoinIcon /> 은화 (차원 돈)</span>
+            <span className="text-lg font-black tabular-nums text-slate-100">{(profile.dimension?.coin ?? 0).toLocaleString()} 은화</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[11px] text-white/45">
+            <span>서울 지갑 (차원에선 못 써요)</span>
+            <span className="tabular-nums">{profile.gold.toLocaleString()} G</span>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-3 flex items-center justify-between rounded-lg bg-amber-400/10 px-3 py-2">
+          <span className="text-sm text-amber-200">골드</span>
+          <span className="text-lg font-black tabular-nums text-amber-300">{profile.gold.toLocaleString()} G</span>
+        </div>
+      )}
       {items.length === 0 ? (
         <div className="py-6 text-center text-sm text-white/50">아직 가진 물건이 없다</div>
       ) : (
