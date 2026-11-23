@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CharacterView } from './mannequin';
 import { BodyQuilt } from './bodyQuilt';
 import { Batch, blockTex, canvasTex, glowTex, plankTex, plasterTex, signTexture } from './villageScene';
+import { SIGN_FONT } from './signFonts';
 import { BED_L, BED_W, BOOTH_D, BOOTH_W, INN, INN_BEDS, INN_BOOTHS, INN_EXIT, INN_HALL_Z, INN_ROOM_DOORS, INN_ROOMS } from '../data/inn';
 
 /**
@@ -167,10 +168,10 @@ const menuBoardTex = () =>
       g.lineWidth = 16;
       g.strokeRect(8, 8, 368, 240);
       g.fillStyle = '#f2ead8';
-      g.font = '800 38px "Pretendard", "Malgun Gothic", sans-serif';
+      g.font = `700 38px ${SIGN_FONT.batang}`;
       g.textAlign = 'center';
       g.fillText('오늘의 메뉴', 192, 60);
-      g.font = '600 26px "Pretendard", "Malgun Gothic", sans-serif';
+      g.font = `700 25px ${SIGN_FONT.batang}`;
       g.textAlign = 'left';
       const rows = [
         ['허브차', '5'],
@@ -204,9 +205,9 @@ const priceTex = () =>
       g.strokeRect(4, 4, 312, 192);
       g.fillStyle = '#4a2f1a';
       g.textAlign = 'center';
-      g.font = '800 30px "Pretendard", "Malgun Gothic", sans-serif';
+      g.font = `800 30px ${SIGN_FONT.myeongjo}`;
       g.fillText('달빛 여관 안내', 160, 46);
-      g.font = '600 22px "Pretendard", "Malgun Gothic", sans-serif';
+      g.font = `700 21px ${SIGN_FONT.myeongjo}`;
       g.fillText('숙박 하룻밤 30 은화', 160, 92);
       g.fillText('샤워 무료 · 식사는 식당에서', 160, 126);
       g.fillStyle = '#9a3434';

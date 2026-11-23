@@ -5,6 +5,7 @@ import { PET_BY_ID, PET_SHOP_NAME } from "../data/pets";
 import { CLOTHES_SHOP_NAME } from "../data/fashion";
 import { FISHING_SHOP_NAME } from "../data/fishing";
 import { animatePet, buildPet, disposePet } from "./petKit";
+import { SIGN_FONT, liveCanvas } from "./signFonts";
 
 /**
  * 공실 상가 건물 (근린생활시설, 4층): 행복빌라 옆에 새로 지은 통유리 상가. 아직 들어온 가게가 없다.
@@ -14,8 +15,7 @@ import { animatePet, buildPet, disposePet } from "./petKit";
  *  - 밤: 빈 건물이라 창이 어둡다. 계단 입구 등만 켜진다
  * 건물 그룹 좌표계 (바닥 가운데 = 원점, 정면 = +z). 같은 재질끼리 합쳐 그리기 횟수를 줄인다.
  */
-const FONT =
-  '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif';
+const FONT = SIGN_FONT.sans;
 export const SHOP_GROUND_H = 4.2;
 export const SHOP_FLOOR_H = 3.4;
 const PHONE = "010-1234-5678";
@@ -29,11 +29,12 @@ function canvasTex(
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
-  draw(c.getContext("2d")!);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  // 글자가 있으면 웹 글꼴이 받아진 뒤 한 번 더 그린다
+  liveCanvas(c, draw, () => (t.needsUpdate = true));
   return t;
 }
 
@@ -262,108 +263,129 @@ function shutterTexture() {
   );
 }
 
-/** 펫샵 간판: 민트 바탕 + 발자국 + 가게 이름 */
-function petSignTexture(aspect: number) {
+/** 펫샵 간판: 따뜻한 크림 판 + 둥근 글씨 + 진한 청록 발자국 원 */
+export function petSignTexture(aspect: number) {
   const W = 1024;
   const H = Math.max(160, Math.round(W / aspect));
+  const INK = "#2d5a51";
   return canvasTex(W, H, (g) => {
-    const grd = g.createLinearGradient(0, 0, 0, H);
-    grd.addColorStop(0, "#5fd3b8");
-    grd.addColorStop(1, "#2fae93");
-    g.fillStyle = grd;
+    g.fillStyle = "#f4efe6";
     g.fillRect(0, 0, W, H);
-    g.fillStyle = "#ffffff";
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.font = `900 ${Math.round(H * 0.5)}px ${FONT}`;
-    const fit = Math.min(1, (W * 0.72) / g.measureText(PET_SHOP_NAME).width);
-    g.font = `900 ${Math.round(H * 0.5 * fit)}px ${FONT}`;
-    g.fillText(PET_SHOP_NAME, W * 0.56, H * 0.46);
-    g.font = `700 ${Math.round(H * 0.17 * Math.max(fit, 0.7))}px ${FONT}`;
-    g.fillStyle = "#fff7c2";
-    g.fillText("분양 · 용품 · 미용", W * 0.56, H * 0.84);
-    paw(g, W * 0.1, H * 0.5, H * 0.32, "#ffffff");
-  });
-}
-
-/** 옷가게 간판: 검은 바탕 + 금색 글씨 + 옷걸이 */
-function clothesSignTexture(aspect: number) {
-  const W = 1024;
-  const H = Math.max(160, Math.round(W / aspect));
-  return canvasTex(W, H, (g) => {
-    g.fillStyle = "#1d1e22";
-    g.fillRect(0, 0, W, H);
-    g.strokeStyle = "#e0b44a";
-    g.lineWidth = H * 0.04;
-    g.strokeRect(H * 0.06, H * 0.06, W - H * 0.12, H - H * 0.12);
-    g.fillStyle = "#f2d38a";
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.font = `900 ${Math.round(H * 0.42)}px ${FONT}`;
-    g.fillText(CLOTHES_SHOP_NAME, W * 0.56, H * 0.44);
-    g.font = `700 ${Math.round(H * 0.15)}px ${FONT}`;
-    g.fillStyle = "#ffffff";
-    g.fillText("FASHION · BATTLE GEAR", W * 0.56, H * 0.8);
-    // 옷걸이
-    const x = W * 0.11;
-    const y = H * 0.5;
-    const s = H * 0.3;
-    g.strokeStyle = "#f2d38a";
-    g.lineWidth = H * 0.035;
+    g.fillStyle = INK;
+    g.fillRect(0, H * 0.86, W, H * 0.14);
+    // 왼쪽 발자국 원
+    const cx = H * 0.62;
+    const cy = H * 0.43;
     g.beginPath();
-    g.arc(x, y - s * 0.75, s * 0.18, Math.PI, Math.PI * 2.4);
-    g.moveTo(x, y - s * 0.55);
-    g.lineTo(x - s, y + s * 0.3);
-    g.lineTo(x + s, y + s * 0.3);
-    g.closePath();
-    g.stroke();
+    g.arc(cx, cy, H * 0.3, 0, Math.PI * 2);
+    g.fill();
+    paw(g, cx, cy + H * 0.02, H * 0.2, "#f4efe6");
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillStyle = INK;
+    const left = H * 1.1;
+    const mid = left + (W - left) / 2;
+    fitText(g, PET_SHOP_NAME, W - left - H * 0.4, Math.round(H * 0.42), 400, SIGN_FONT.round, 0.06);
+    g.fillText(PET_SHOP_NAME, mid + spaced(g), H * 0.4);
+    g.fillStyle = "#7d8a83";
+    fitText(g, "분양 · 용품 · 미용", W - left - H * 0.4, Math.round(H * 0.13), 700, FONT, 0.3);
+    g.fillText("분양 · 용품 · 미용", mid + spaced(g), H * 0.7);
   });
 }
 
-/** 낚시점 간판: 짙은 파랑 바탕 + 흰 글씨 + 물고기 */
-function fishingSignTexture(aspect: number) {
+/** 글꼴을 정하고 칸 폭에 맞게 크기를 줄인다 (자간 포함) */
+function fitText(g: CanvasRenderingContext2D, text: string, maxW: number, size: number, weight: number, family: string, spacing = 0) {
+  let px = size;
+  const set = () => {
+    g.font = `${weight} ${px}px ${family}`;
+    g.letterSpacing = `${Math.round(px * spacing)}px`;
+  };
+  set();
+  while (g.measureText(text).width > maxW && px > 10) {
+    px -= 2;
+    set();
+  }
+  return px;
+}
+
+/** 자간을 준 글자를 가운데 정렬할 때: 마지막 글자 뒤 자간만큼 오른쪽으로 */
+const spaced = (g: CanvasRenderingContext2D) => (parseFloat(g.letterSpacing) || 0) / 2;
+
+/** 옷가게 간판: 무광 검정 + 가는 테두리 + 넓은 자간 명조 (편집숍 느낌) */
+export function clothesSignTexture(aspect: number) {
   const W = 1024;
   const H = Math.max(160, Math.round(W / aspect));
   return canvasTex(W, H, (g) => {
-    const grd = g.createLinearGradient(0, 0, 0, H);
-    grd.addColorStop(0, "#2a7ab8");
-    grd.addColorStop(1, "#174d78");
-    g.fillStyle = grd;
+    g.fillStyle = "#151515";
     g.fillRect(0, 0, W, H);
-    // 물결 무늬
-    g.strokeStyle = "rgba(255,255,255,0.18)";
-    g.lineWidth = H * 0.03;
-    for (let k = 0; k < 3; k++) {
+    g.strokeStyle = "#6f6556";
+    g.lineWidth = Math.max(2, H * 0.014);
+    g.strokeRect(H * 0.09, H * 0.09, W - H * 0.18, H - H * 0.18);
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillStyle = "#efe7da";
+    fitText(g, CLOTHES_SHOP_NAME, W * 0.62, Math.round(H * 0.36), 600, SIGN_FONT.serif, 0.2);
+    g.fillText(CLOTHES_SHOP_NAME, W / 2 + spaced(g), H * 0.42);
+    g.fillStyle = "#a69a86";
+    fitText(g, "FASHION · BATTLE GEAR", W * 0.5, Math.round(H * 0.11), 600, SIGN_FONT.latin, 0.5);
+    g.fillText("FASHION · BATTLE GEAR", W / 2 + spaced(g), H * 0.72);
+    // 양옆 작은 옷걸이 (선 하나)
+    g.strokeStyle = "#a69a86";
+    g.lineWidth = Math.max(2, H * 0.016);
+    for (const x of [W * 0.12, W * 0.88]) {
+      const y = H * 0.5;
+      const s = H * 0.16;
       g.beginPath();
-      for (let x = 0; x <= W; x += 16) g.lineTo(x, H * (0.78 + k * 0.08) + Math.sin(x / 40 + k) * H * 0.025);
+      g.arc(x, y - s * 0.78, s * 0.2, Math.PI, Math.PI * 2.35);
+      g.moveTo(x, y - s * 0.55);
+      g.lineTo(x - s, y + s * 0.32);
+      g.lineTo(x + s, y + s * 0.32);
+      g.closePath();
       g.stroke();
     }
-    g.fillStyle = "#ffffff";
+  });
+}
+
+/** 낚시점 간판: 짙은 남색 무광 판 + 흰 고딕 + 모래색 물고기 선 그림, 아래 물결 한 줄 */
+export function fishingSignTexture(aspect: number) {
+  const W = 1024;
+  const H = Math.max(160, Math.round(W / aspect));
+  return canvasTex(W, H, (g) => {
+    g.fillStyle = "#15293a";
+    g.fillRect(0, 0, W, H);
+    g.strokeStyle = "rgba(159,195,217,0.35)";
+    g.lineWidth = Math.max(2, H * 0.014);
+    g.beginPath();
+    for (let x = 0; x <= W; x += 8) g.lineTo(x, H * 0.9 + Math.sin(x / 34) * H * 0.02);
+    g.stroke();
+    // 물고기 (선)
+    const x = H * 0.62;
+    const y = H * 0.45;
+    const s = H * 0.22;
+    g.strokeStyle = "#e3b562";
+    g.lineWidth = Math.max(3, H * 0.03);
+    g.lineJoin = "round";
+    g.beginPath();
+    g.ellipse(x + s * 0.2, y, s, s * 0.5, 0, 0, Math.PI * 2);
+    g.moveTo(x - s * 0.75, y);
+    g.lineTo(x - s * 1.3, y - s * 0.45);
+    g.lineTo(x - s * 1.3, y + s * 0.45);
+    g.closePath();
+    g.stroke();
+    g.fillStyle = "#e3b562";
+    g.beginPath();
+    g.arc(x + s * 0.7, y - s * 0.1, s * 0.09, 0, Math.PI * 2);
+    g.fill();
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.font = `900 ${Math.round(H * 0.4)}px ${FONT}`;
-    g.fillText(FISHING_SHOP_NAME, W * 0.57, H * 0.42);
-    g.font = `700 ${Math.round(H * 0.15)}px ${FONT}`;
-    g.fillStyle = "#ffe08a";
-    g.fillText("낚싯대 · 미끼 · 활어 수매", W * 0.57, H * 0.76);
-    // 물고기 (몸 + 꼬리 + 눈)
-    const x = W * 0.1;
-    const y = H * 0.45;
-    const s = H * 0.28;
-    g.fillStyle = "#ffe08a";
-    g.beginPath();
-    g.ellipse(x, y, s, s * 0.5, 0, 0, Math.PI * 2);
-    g.fill();
-    g.beginPath();
-    g.moveTo(x - s * 0.8, y);
-    g.lineTo(x - s * 1.5, y - s * 0.5);
-    g.lineTo(x - s * 1.5, y + s * 0.5);
-    g.closePath();
-    g.fill();
-    g.fillStyle = "#174d78";
-    g.beginPath();
-    g.arc(x + s * 0.5, y - s * 0.1, s * 0.1, 0, Math.PI * 2);
-    g.fill();
+    const left = H * 1.15;
+    const mid = left + (W - left - H * 0.3) / 2;
+    g.fillStyle = "#f4f6f7";
+    fitText(g, FISHING_SHOP_NAME, W - left - H * 0.5, Math.round(H * 0.38), 800, FONT, 0.04);
+    g.fillText(FISHING_SHOP_NAME, mid + spaced(g), H * 0.4);
+    g.fillStyle = "#9fc3d9";
+    fitText(g, "낚싯대 · 미끼 · 활어 수매", W - left - H * 0.5, Math.round(H * 0.13), 600, FONT, 0.24);
+    g.fillText("낚싯대 · 미끼 · 활어 수매", mid + spaced(g), H * 0.7);
   });
 }
 
@@ -1304,63 +1326,64 @@ export function buildVacantShop(b: Building, envMap: THREE.Texture | null) {
   return { group, mats, glow: [lamp], textures, glass };
 }
 
-/** 코인노래방 네온 간판 (2층 띠): 짙은 보라 바탕 + 분홍 네온 글씨 + 마이크 */
-function karaokeSignTexture(aspect: number) {
+/** 코인노래방 간판 (2층 띠): 짙은 가지색 판 + 가는 네온 테두리, 글자는 은은하게만 번진다 */
+export function karaokeSignTexture(aspect: number) {
   const W = 1024;
   const H = Math.max(120, Math.round(W / aspect));
   return canvasTex(W, H, (g) => {
-    const grd = g.createLinearGradient(0, 0, W, 0);
-    grd.addColorStop(0, "#2a0a3d");
-    grd.addColorStop(1, "#15052a");
-    g.fillStyle = grd;
+    g.fillStyle = "#130e1d";
     g.fillRect(0, 0, W, H);
-    g.strokeStyle = "#ff5fd2";
-    g.lineWidth = H * 0.05;
-    g.shadowColor = "#ff5fd2";
-    g.shadowBlur = H * 0.12;
-    g.strokeRect(H * 0.08, H * 0.1, W - H * 0.16, H - H * 0.2);
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.font = `900 ${Math.round(H * 0.44)}px ${FONT}`;
-    const fit = Math.min(1, (W * 0.62) / g.measureText(KARAOKE_NAME).width);
-    g.font = `900 ${Math.round(H * 0.44 * fit)}px ${FONT}`;
-    g.fillStyle = "#ffe9ff";
-    g.shadowColor = "#ff4fd8";
-    g.shadowBlur = H * 0.18;
-    g.fillText(KARAOKE_NAME, W * 0.57, H * 0.43);
-    g.font = `800 ${Math.round(H * 0.17)}px ${FONT}`;
-    g.fillStyle = "#7fe9ff";
-    g.shadowColor = "#38d9ff";
-    g.fillText("COIN KARAOKE · 2F", W * 0.57, H * 0.78);
-    // 마이크
-    g.shadowColor = "#ffd24a";
-    g.fillStyle = "#ffd24a";
-    const mx = W * 0.13;
-    const my = H * 0.42;
-    const r = H * 0.16;
+    g.strokeStyle = "#e46fc4";
+    g.lineWidth = Math.max(2, H * 0.018);
+    g.shadowColor = "rgba(228,111,196,0.7)";
+    g.shadowBlur = H * 0.06;
+    g.strokeRect(H * 0.1, H * 0.12, W - H * 0.2, H - H * 0.24);
+    // 마이크 (선)
+    const mx = H * 0.7;
+    const my = H * 0.4;
+    const r = H * 0.12;
+    g.strokeStyle = "#f2c66d";
+    g.shadowColor = "rgba(242,198,109,0.6)";
+    g.lineWidth = Math.max(3, H * 0.028);
     g.beginPath();
     g.arc(mx, my, r, 0, Math.PI * 2);
-    g.fill();
-    g.fillRect(mx - r * 0.35, my + r * 0.8, r * 0.7, r * 1.6);
+    g.moveTo(mx, my + r);
+    g.lineTo(mx, my + r * 2.4);
+    g.stroke();
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    const left = H * 1.15;
+    const mid = left + (W - left - H * 0.3) / 2;
+    g.fillStyle = "#f7ecfb";
+    g.shadowColor = "rgba(255,120,220,0.55)";
+    g.shadowBlur = H * 0.05;
+    fitText(g, KARAOKE_NAME, W - left - H * 0.5, Math.round(H * 0.38), 800, FONT, 0.08);
+    g.fillText(KARAOKE_NAME, mid + spaced(g), H * 0.43);
+    g.fillStyle = "#9be3f0";
+    g.shadowColor = "rgba(120,220,240,0.5)";
+    fitText(g, "COIN KARAOKE · 2F", W - left - H * 0.5, Math.round(H * 0.13), 600, SIGN_FONT.latin, 0.4);
+    g.fillText("COIN KARAOKE · 2F", mid + spaced(g), H * 0.74);
   });
 }
 
 /** 계단 출입문 위 작은 안내판: '2F ↑ 코인노래방' */
-function stairSignTexture() {
+export function stairSignTexture() {
   return canvasTex(256, 200, (g) => {
-    g.fillStyle = "#1b0629";
+    g.fillStyle = "#130e1d";
     g.fillRect(0, 0, 256, 200);
+    g.strokeStyle = "#e46fc4";
+    g.lineWidth = 3;
+    g.strokeRect(10, 10, 236, 180);
     g.textAlign = "center";
     g.textBaseline = "middle";
-    g.shadowColor = "#ff4fd8";
-    g.shadowBlur = 14;
-    g.fillStyle = "#ffe9ff";
-    g.font = `900 64px ${FONT}`;
-    g.fillText("2F ↑", 128, 62);
-    g.font = `800 36px ${FONT}`;
-    g.fillStyle = "#7fe9ff";
-    g.shadowColor = "#38d9ff";
-    g.fillText(KARAOKE_NAME, 128, 140);
+    g.shadowColor = "rgba(255,120,220,0.5)";
+    g.shadowBlur = 6;
+    g.fillStyle = "#f7ecfb";
+    g.font = `600 60px ${SIGN_FONT.latin}`;
+    g.fillText("2F ↑", 128, 70);
+    g.fillStyle = "#9be3f0";
+    fitText(g, KARAOKE_NAME, 210, 34, 700, FONT, 0.06);
+    g.fillText(KARAOKE_NAME, 128 + spaced(g), 140);
   });
 }
 

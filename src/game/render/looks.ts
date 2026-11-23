@@ -20,8 +20,15 @@ export const BODY_TYPES = [
 
 export type BodyType = (typeof BODY_TYPES)[number]['id'];
 
+/**
+ * 차원 NPC 전용 몸 (플레이어 코디 창엔 안 나온다): VRoid 로 새로 만든 고유 캐릭터.
+ * 설정표는 docs/npc-vroid-sheets.md, 파일은 public/models/npc/. 받으면 여기 한 줄 + village.ts 의 body 를 바꾼다.
+ */
+export const NPC_BODIES: Record<string, string> = {};
+
 /** 기본은 여자 캐릭터 (모르는 값도 여자로) */
 export function bodyUrl(body?: string): string {
+  if (body && NPC_BODIES[body]) return NPC_BODIES[body];
   return (BODY_TYPES.find((b) => b.id === body) ?? BODY_TYPES[0]).url;
 }
 

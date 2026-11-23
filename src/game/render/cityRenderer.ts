@@ -16,6 +16,7 @@ import { BodyQuilt } from './bodyQuilt';
 import { ChoreProps, StinkFx, type ChoreActor } from './choreProps';
 import type { ChoreKind } from '../city/chores';
 import { apartmentSigns, buildVillaEntrance, decorateFacade, swingDoors, type DoorControl } from './signage';
+import { SIGN_FONT, liveCanvas } from './signFonts';
 import { instanceProp } from './propsKit';
 import { CarKit, type CarView } from './carKit';
 import { TreeKit } from './treeKit';
@@ -123,18 +124,105 @@ function windowTextures(style: WindowStyle, seed: number) {
   return { day: day.c, night: night.c };
 }
 
-function signTexture(sign: Sign, w = 256, h = 64) {
-  const { c, g } = canvas(w, h);
-  g.fillStyle = sign.bg;
-  g.fillRect(0, 0, w, h);
-  g.fillStyle = 'rgba(255,255,255,0.12)';
-  g.fillRect(0, 0, w, h * 0.08);
-  g.fillStyle = sign.fg;
-  g.font = `800 ${Math.floor(h * 0.58)}px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(sign.text, w / 2, h / 2 + 2, w - 16);
-  return tex(c);
+/**
+ * 공공 안내판 (지하철·버스·경찰·산책로): 한국 공공 표지처럼 단색 판 + 반듯한 고딕, 판 안쪽 여백을 넉넉히.
+ * "2 한강공원역" 처럼 숫자로 시작하면 숫자를 노선 원 안에 넣는다. 그림 문자(이모지)는 빼고 그린다.
+ */
+export function signTexture(sign: Sign, w = 256, h = 64) {
+  const { c } = canvas(w, h);
+  const t = tex(c);
+  const text = sign.text.replace(/\p{Extended_Pictographic}️?/gu, '').trim();
+  const line = /^(\d)\s+(.+)$/.exec(text);
+  liveCanvas(
+    c,
+    (g) => {
+      g.fillStyle = sign.bg;
+      g.fillRect(0, 0, w, h);
+      // 아래쪽 살짝 어둡게 (평평한 색종이처럼 보이지 않게)
+      const shade = g.createLinearGradient(0, 0, 0, h);
+      shade.addColorStop(0, 'rgba(255,255,255,0.06)');
+      shade.addColorStop(1, 'rgba(0,0,0,0.12)');
+      g.fillStyle = shade;
+      g.fillRect(0, 0, w, h);
+      g.textBaseline = 'middle';
+      const name = line ? line[2] : text;
+      let x0 = w * 0.08;
+      if (line) {
+        // 노선 원: 흰 원 안에 판 색 숫자
+        const r = h * 0.3;
+        x0 = w * 0.06 + r * 2 + h * 0.2;
+        g.fillStyle = '#ffffff';
+        g.beginPath();
+        g.arc(w * 0.06 + r, h / 2, r, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = sign.bg;
+        g.textAlign = 'center';
+        g.font = `700 ${Math.round(r * 1.25)}px ${SIGN_FONT.latin}`;
+        g.fillText(line[1], w * 0.06 + r, h / 2 + r * 0.04);
+      }
+      const maxW = w - x0 - w * 0.08;
+      let px = Math.round(h * 0.44);
+      const set = () => {
+        g.font = `700 ${px}px ${SIGN_FONT.sans}`;
+        g.letterSpacing = `${Math.round(px * 0.06)}px`;
+      };
+      set();
+      while (g.measureText(name).width > maxW && px > 10) {
+        px -= 2;
+        set();
+      }
+      g.fillStyle = sign.fg;
+      g.textAlign = line ? 'left' : 'center';
+      g.fillText(name, line ? x0 : w / 2 + px * 0.03, h / 2 + h * 0.02);
+    },
+    () => (t.needsUpdate = true),
+  );
+  return t;
+}
+
+/** 카지노 간판: 먹색 판 + 가는 금색 두 줄 테두리 + 로마자 대문자 CASINO, 아래 한글 상호 (은은한 금빛만) */
+export function casinoSignTexture() {
+  const W = 1024;
+  const H = 320;
+  const { c } = canvas(W, H);
+  const t = tex(c);
+  liveCanvas(
+    c,
+    (g) => {
+      g.fillStyle = '#0e0d14';
+      g.fillRect(0, 0, W, H);
+      g.strokeStyle = '#c9a45c';
+      g.lineWidth = 4;
+      g.strokeRect(18, 18, W - 36, H - 36);
+      g.lineWidth = 2;
+      g.strokeRect(30, 30, W - 60, H - 60);
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillStyle = '#e3c47c';
+      g.shadowColor = 'rgba(227,196,124,0.45)';
+      g.shadowBlur = 10;
+      g.font = `700 128px ${SIGN_FONT.rune}`;
+      g.letterSpacing = '38px';
+      g.fillText('CASINO', W / 2 + 19, 124);
+      g.shadowBlur = 0;
+      g.letterSpacing = '0px';
+      // 가운데 다이아몬드 + 양옆 선
+      g.fillStyle = '#c9a45c';
+      g.fillRect(W / 2 - 250, 204, 180, 2);
+      g.fillRect(W / 2 + 70, 204, 180, 2);
+      g.save();
+      g.translate(W / 2, 205);
+      g.rotate(Math.PI / 4);
+      g.fillRect(-7, -7, 14, 14);
+      g.restore();
+      g.fillStyle = '#d9cbb0';
+      g.font = `600 38px ${SIGN_FONT.serif}`;
+      g.letterSpacing = '10px';
+      g.fillText('한강 그랜드 카지노', W / 2 + 5, 250);
+    },
+    () => (t.needsUpdate = true),
+  );
+  return t;
 }
 
 /** 집 창밖 풍경: 시간대에 따라 하늘색·불 켜진 창을 다시 그린다 */
@@ -2502,28 +2590,7 @@ export class CityRenderer {
     const b = m.buildings.find((x) => x.label === '한강 그랜드 카지노');
     if (!poi || !b) return;
     const front = b.z + b.d / 2;
-    const cv = document.createElement('canvas');
-    cv.width = 512;
-    cv.height = 160;
-    const g = cv.getContext('2d')!;
-    g.fillStyle = '#1a0b2a';
-    g.fillRect(0, 0, 512, 160);
-    g.strokeStyle = '#ffd54a';
-    g.lineWidth = 8;
-    g.strokeRect(8, 8, 496, 144);
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.shadowColor = '#ff4fd8';
-    g.shadowBlur = 24;
-    g.fillStyle = '#ffe680';
-    g.font = 'bold 76px sans-serif';
-    g.fillText('🎰 CASINO', 256, 70);
-    g.shadowBlur = 0;
-    g.fillStyle = '#ffb3f0';
-    g.font = 'bold 26px sans-serif';
-    g.fillText('한강 그랜드 카지노', 256, 128);
-    const tex = new THREE.CanvasTexture(cv);
-    tex.colorSpace = THREE.SRGBColorSpace;
+    const tex = casinoSignTexture();
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5), new THREE.MeshBasicMaterial({ map: tex }));
     sign.position.set(b.x, 5.2, front + 0.08);
     this.city.add(sign);

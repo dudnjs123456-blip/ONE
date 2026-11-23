@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { glassMaterial } from './glassKit';
 import type { Building, Sign } from '../city/cityMap';
+import { SIGN_FONT, liveCanvas } from './signFonts';
 
 /**
  * 한국 거리 간판 (요즘 세련된 상가 느낌):
@@ -32,7 +33,7 @@ const SUB: Record<string, string> = {
 };
 
 /** 2층 이상 입주 업체 (상호, 판 색, 글자색) — 채도를 낮춘 차분한 색 */
-const TENANTS: [string, string, string][] = [
+export const TENANTS: [string, string, string][] = [
   ['수학전문학원', '#22324f', '#ffffff'],
   ['영어학원', '#f4f6fa', '#28458a'],
   ['피아노 음악학원', '#f7eef2', '#8c3358'],
@@ -51,11 +52,11 @@ const TENANTS: [string, string, string][] = [
   ['어린이 미술학원', '#fff7df', '#c25a12'],
 ];
 
-const VILLAS = ['해오름빌라', '그린빌', '청솔빌라', '다솜하우스', '미소빌', '한빛빌라', '은하맨션', '라온하우스'];
-const OFFICES = ['한강 파이낸스 센터', 'HG 타워', '넥스트 IT 센터', '서울 메디컬 빌딩', '블루오션 빌딩'];
+export const VILLAS = ['해오름빌라', '그린빌', '청솔빌라', '다솜하우스', '미소빌', '한빛빌라', '은하맨션', '라온하우스'];
+export const OFFICES = ['한강 파이낸스 센터', 'HG 타워', '넥스트 IT 센터', '서울 메디컬 빌딩', '블루오션 빌딩'];
 
-/** 한글이 반듯하게 보이는 글꼴 (윈도우: 맑은 고딕, 맥: 애플 SD 고딕) */
-const FONT = '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif';
+/** 간판 기본 글꼴 (signFonts: 웹 글꼴이 받아지면 간판을 다시 그린다) */
+const FONT = SIGN_FONT.sans;
 const CHARCOAL = '#1e2024';
 const IVORY = '#f3f1ec';
 
@@ -63,10 +64,10 @@ function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => 
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  draw(c.getContext('2d')!);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
+  liveCanvas(c, draw, () => (t.needsUpdate = true));
   return t;
 }
 
@@ -88,10 +89,10 @@ function plane(w: number, h: number, map: THREE.Texture, opts: { double?: boolea
 }
 
 /** 글꼴 (자간 포함) 을 정하고, 칸 폭에 맞게 크기를 줄인다 */
-function fit(g: CanvasRenderingContext2D, text: string, maxW: number, size: number, weight = 700, spacing = 0) {
+function fit(g: CanvasRenderingContext2D, text: string, maxW: number, size: number, weight = 700, spacing = 0, family: string = FONT) {
   let s = size;
   const set = () => {
-    g.font = `${weight} ${s}px ${FONT}`;
+    g.font = `${weight} ${s}px ${family}`;
     g.letterSpacing = `${Math.round(s * spacing)}px`;
   };
   set();
@@ -109,6 +110,54 @@ function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number,
 
 const hslOf = (hex: string) => new THREE.Color(hex).getHSL({ h: 0, s: 0, l: 0 });
 
+/**
+ * 1층 가게마다 고른 간판 모양 (글꼴 · 색 · 배치). 한 거리에 같은 틀이 반복되지 않게 업종에 맞춰 다르게.
+ * - badge: 왼쪽 색 블록에 기호 + 상호 (편의점·약국처럼 체인 느낌)
+ * - center: 가는 테두리 안 가운데 상호 + 양옆 선 영문 (카페·빵집·꽃집 같은 동네 가게)
+ * - bold: 굵은 제목체 상호를 크게 + 아래 굵은 띠 (음식점)
+ */
+interface ShopStyle {
+  layout: 'badge' | 'center' | 'bold';
+  family: string;
+  weight: number;
+  spacing: number;
+  panel: string;
+  ink: string;
+  accent: string;
+  /** 부제 글꼴 */
+  subFamily: string;
+  /** badge 블록 기호 (글자 또는 그림) */
+  symbol?: string | 'cross' | 'house';
+}
+
+const S = SIGN_FONT;
+const SHOP_STYLE: Record<string, ShopStyle> = {
+  '편의점 24': { layout: 'badge', family: S.sans, weight: 800, spacing: 0.02, panel: '#f6f5f1', ink: '#17663f', accent: '#17663f', subFamily: S.latin, symbol: '24' },
+  '카페 모먼트': { layout: 'center', family: S.serif, weight: 600, spacing: 0.08, panel: '#2a211c', ink: '#ecdfc6', accent: '#b5926a', subFamily: S.latinSerif },
+  황금치킨: { layout: 'bold', family: S.display, weight: 400, spacing: 0.04, panel: '#1b1713', ink: '#f0b437', accent: '#f0b437', subFamily: S.latin },
+  분식천국: { layout: 'bold', family: S.round, weight: 400, spacing: 0.04, panel: '#f3ead9', ink: '#b5352b', accent: '#b5352b', subFamily: S.latin },
+  PC방: { layout: 'badge', family: S.sans, weight: 800, spacing: 0.04, panel: '#10141c', ink: '#e8f0ff', accent: '#3d7bff', subFamily: S.latin, symbol: 'PC' },
+  네일샵: { layout: 'center', family: S.serif, weight: 600, spacing: 0.14, panel: '#f2e7e4', ink: '#8d4052', accent: '#c79ca5', subFamily: S.latinSerif },
+  약국: { layout: 'badge', family: S.sans, weight: 800, spacing: 0.1, panel: '#ffffff', ink: '#1d6b43', accent: '#1d6b43', subFamily: S.latin, symbol: 'cross' },
+  헤어살롱: { layout: 'center', family: S.serif, weight: 500, spacing: 0.3, panel: '#161616', ink: '#eadbcf', accent: '#8a7466', subFamily: S.latinSerif },
+  꽃집: { layout: 'center', family: S.batang, weight: 700, spacing: 0.2, panel: '#eef0e4', ink: '#4a6240', accent: '#93a684', subFamily: S.latinSerif },
+  베이커리: { layout: 'center', family: S.batang, weight: 700, spacing: 0.1, panel: '#eee1c8', ink: '#6a3f22', accent: '#a87a4f', subFamily: S.latinSerif },
+  세탁소: { layout: 'center', family: S.sans, weight: 700, spacing: 0.24, panel: '#eef2f5', ink: '#234a73', accent: '#8ea6bf', subFamily: S.latin },
+  고깃집: { layout: 'bold', family: S.display, weight: 400, spacing: 0.08, panel: '#26130f', ink: '#ebc68c', accent: '#a8322a', subFamily: S.latin },
+  마라탕: { layout: 'bold', family: S.display, weight: 400, spacing: 0.08, panel: '#7d1c1c', ink: '#f6d38b', accent: '#f6d38b', subFamily: S.latin },
+  떡볶이: { layout: 'bold', family: S.round, weight: 400, spacing: 0.06, panel: '#c4442d', ink: '#fff3df', accent: '#fff3df', subFamily: S.latin },
+  부동산: { layout: 'badge', family: S.sans, weight: 700, spacing: 0.12, panel: '#f4f3ef', ink: '#2d4a38', accent: '#2d4a38', subFamily: S.latin, symbol: 'house' },
+  안경원: { layout: 'center', family: S.sans, weight: 600, spacing: 0.26, panel: '#1c2125', ink: '#e4ecee', accent: '#7d97a3', subFamily: S.latin },
+};
+
+/** 표에 없는 가게: 예전처럼 상호 색으로 무난한 badge 모양 */
+function shopStyle(sign: Sign): ShopStyle {
+  const known = SHOP_STYLE[sign.text];
+  if (known) return known;
+  const { panel, accent } = brand(sign);
+  return { layout: 'center', family: S.sans, weight: 700, spacing: 0.12, panel, ink: accent, accent, subFamily: S.latin };
+}
+
 /** 간판 색 정리: 상호 색(강조색)과 패널 색 */
 function brand(sign: Sign) {
   const a = hslOf(sign.bg);
@@ -122,67 +171,116 @@ function brand(sign: Sign) {
   return { panel: light ? IVORY : CHARCOAL, accent: `#${c.getHexString()}`, muted: light ? '#6b6b6b' : '#a9adb5' };
 }
 
-/** 1층 가게 간판: 로고 마크 + 상호 + 영문 부제 + 아래 가는 강조선 */
-function fasciaTexture(sign: Sign, aspect: number) {
+/** 색을 섞는다 (t = 0 → a, 1 → b) */
+const mix = (a: string, b: string, t: number) => `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
+
+/** 1층 가게 간판: 가게마다 고른 글꼴·색·배치 (SHOP_STYLE) */
+export function fasciaTexture(sign: Sign, aspect: number) {
   const W = 1536;
   const H = Math.max(120, Math.round(W / aspect));
-  const { panel, accent, muted } = brand(sign);
+  const st = shopStyle(sign);
+  const sub = SUB[sign.text];
   return canvasTex(W, H, (g) => {
-    g.fillStyle = panel;
+    g.fillStyle = st.panel;
     g.fillRect(0, 0, W, H);
-    // 위쪽 아주 옅은 광택
-    const sheen = g.createLinearGradient(0, 0, 0, H);
-    sheen.addColorStop(0, 'rgba(255,255,255,0.07)');
-    sheen.addColorStop(0.5, 'rgba(255,255,255,0)');
-    g.fillStyle = sheen;
+    // 판 위아래로 아주 옅은 명암 (평평한 색종이처럼 보이지 않게)
+    const shade = g.createLinearGradient(0, 0, 0, H);
+    shade.addColorStop(0, 'rgba(255,255,255,0.05)');
+    shade.addColorStop(0.55, 'rgba(255,255,255,0)');
+    shade.addColorStop(1, 'rgba(0,0,0,0.08)');
+    g.fillStyle = shade;
     g.fillRect(0, 0, W, H);
-    // 아래 강조선
-    const line = Math.round(H * 0.07);
-    g.fillStyle = accent;
-    g.fillRect(0, H - line, W, line);
-
-    const sub = SUB[sign.text];
-    // 가운데 정렬: [마크] 상호 / 부제
-    const mark = H * 0.62;
-    const nameSize = fit(g, sign.text, W * 0.62, Math.round(H * (sub ? 0.5 : 0.6)), 800, 0.06);
-    const nameW = g.measureText(sign.text).width;
-    let subW = 0;
-    let subSize = 0;
-    if (sub) {
-      subSize = fit(g, sub, W * 0.62, Math.round(H * 0.15), 600, 0.24);
-      subW = g.measureText(sub).width;
-    }
-    const gap = H * 0.22;
-    const x0 = (W - (mark + gap + Math.max(nameW, subW))) / 2;
-    const cy = H * 0.46;
-
-    // 로고 마크: 둥근 사각형 안에 첫 글자
-    g.fillStyle = accent;
-    roundRect(g, x0, cy - mark / 2, mark, mark, mark * 0.24);
-    g.fill();
-    g.fillStyle = panel;
-    g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = `800 ${Math.round(mark * 0.56)}px ${FONT}`;
-    g.letterSpacing = '0px';
-    g.fillText(sign.text.replace(/\s|\d/g, '').slice(0, 1) || sign.text.slice(0, 1), x0 + mark / 2, cy + mark * 0.03);
+    const subInk = mix(st.ink, st.panel, 0.22);
 
-    // 상호 + 부제
-    const tx = x0 + mark + gap;
-    g.textAlign = 'left';
-    g.fillStyle = accent;
-    fit(g, sign.text, W * 0.62, nameSize, 800, 0.06);
-    g.fillText(sign.text, tx, sub ? cy - H * 0.09 : cy + H * 0.02);
-    if (sub) {
-      g.fillStyle = muted;
-      fit(g, sub, W * 0.62, subSize, 600, 0.24);
-      g.fillText(sub, tx + 2, cy + H * 0.27);
+    if (st.layout === 'badge') {
+      // 왼쪽 색 블록 + 기호, 오른쪽에 상호와 부제 (왼쪽 정렬)
+      const bw = H * 1.05;
+      g.fillStyle = st.accent;
+      g.fillRect(0, 0, bw, H);
+      g.fillStyle = st.panel;
+      const cx = bw / 2;
+      const cy = H / 2;
+      if (st.symbol === 'cross') {
+        const a = H * 0.46;
+        const t = a * 0.34;
+        g.fillRect(cx - t / 2, cy - a / 2, t, a);
+        g.fillRect(cx - a / 2, cy - t / 2, a, t);
+      } else if (st.symbol === 'house') {
+        const a = H * 0.44;
+        g.beginPath();
+        g.moveTo(cx, cy - a * 0.62);
+        g.lineTo(cx + a * 0.62, cy - a * 0.02);
+        g.lineTo(cx + a * 0.44, cy - a * 0.02);
+        g.lineTo(cx + a * 0.44, cy + a * 0.56);
+        g.lineTo(cx - a * 0.44, cy + a * 0.56);
+        g.lineTo(cx - a * 0.44, cy - a * 0.02);
+        g.lineTo(cx - a * 0.62, cy - a * 0.02);
+        g.closePath();
+        g.fill();
+        g.fillStyle = st.accent;
+        g.fillRect(cx - a * 0.12, cy + a * 0.18, a * 0.24, a * 0.38);
+      } else if (st.symbol) {
+        g.textAlign = 'center';
+        fit(g, st.symbol, bw * 0.78, Math.round(H * 0.5), 800, 0, st.symbol === 'PC' ? S.tech : S.latin);
+        g.fillText(st.symbol, cx, cy + H * 0.02);
+      }
+      const tx = bw + H * 0.42;
+      const maxW = W - tx - H * 0.5;
+      g.textAlign = 'left';
+      g.fillStyle = st.ink;
+      fit(g, sign.text, maxW, Math.round(H * (sub ? 0.5 : 0.58)), st.weight, st.spacing, st.family);
+      g.fillText(sign.text, tx, sub ? H * 0.4 : H * 0.52);
+      if (sub) {
+        g.fillStyle = subInk;
+        fit(g, sub, maxW, Math.round(H * 0.15), 600, 0.3, st.subFamily);
+        g.fillText(sub, tx + 3, H * 0.76);
+      }
+    } else if (st.layout === 'center') {
+      // 가는 안쪽 테두리 + 가운데 상호 + 양옆 선을 단 영문
+      const m = H * 0.1;
+      g.strokeStyle = st.accent;
+      g.globalAlpha = 0.55;
+      g.lineWidth = Math.max(2, H * 0.016);
+      g.strokeRect(m, m, W - m * 2, H - m * 2);
+      g.globalAlpha = 1;
+      g.textAlign = 'center';
+      g.fillStyle = st.ink;
+      fit(g, sign.text, W * 0.6, Math.round(H * (sub ? 0.46 : 0.54)), st.weight, st.spacing, st.family);
+      // 자간은 글자 오른쪽에 붙으므로 그만큼 반을 왼쪽으로 당겨 가운데를 맞춘다
+      const nudge = parseFloat(g.letterSpacing) / 2 || 0;
+      g.fillText(sign.text, W / 2 + nudge, sub ? H * 0.41 : H * 0.52);
+      if (sub) {
+        g.fillStyle = subInk;
+        fit(g, sub, W * 0.5, Math.round(H * 0.15), 700, 0.3, st.subFamily);
+        const sw = g.measureText(sub).width;
+        g.fillText(sub, W / 2 + (parseFloat(g.letterSpacing) / 2 || 0), H * 0.75);
+        g.fillStyle = st.accent;
+        const ly = H * 0.75;
+        const len = H * 0.5;
+        g.fillRect(W / 2 - sw / 2 - H * 0.18 - len, ly - 1, len, Math.max(2, H * 0.012));
+        g.fillRect(W / 2 + sw / 2 + H * 0.18, ly - 1, len, Math.max(2, H * 0.012));
+      }
+    } else {
+      // 굵은 제목체 상호 + 아래 굵은 띠, 띠 안에 영문
+      const band = H * 0.2;
+      g.fillStyle = st.accent;
+      g.fillRect(0, H - band, W, band);
+      g.textAlign = 'center';
+      g.fillStyle = st.ink;
+      fit(g, sign.text, W * 0.7, Math.round(H * 0.6), st.weight, st.spacing, st.family);
+      g.fillText(sign.text, W / 2 + (parseFloat(g.letterSpacing) / 2 || 0), (H - band) * 0.53);
+      if (sub) {
+        g.fillStyle = st.accent === st.ink ? st.panel : st.ink;
+        fit(g, sub, W * 0.6, Math.round(band * 0.56), 700, 0.4, st.subFamily);
+        g.fillText(sub, W / 2 + (parseFloat(g.letterSpacing) / 2 || 0), H - band / 2);
+      }
     }
   });
 }
 
 /** 2층 이상 입주 업체: 반투명 판 (층 번호 원 + 상호) */
-function tenantTexture(name: string, bg: string, fg: string, floor: number) {
+export function tenantTexture(name: string, bg: string, fg: string, floor: number) {
   const W = 1024;
   const H = 150;
   return canvasTex(W, H, (g) => {
@@ -200,7 +298,7 @@ function tenantTexture(name: string, bg: string, fg: string, floor: number) {
     g.fillStyle = fg;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = `700 40px ${FONT}`;
+    g.font = `600 38px ${SIGN_FONT.latin}`;
     g.letterSpacing = '0px';
     g.fillText(`${floor}F`, 78, H / 2 + 2);
     // 구분선
@@ -208,13 +306,13 @@ function tenantTexture(name: string, bg: string, fg: string, floor: number) {
     g.fillRect(150, 34, 3, H - 68);
     g.globalAlpha = 1;
     g.textAlign = 'left';
-    fit(g, name, W - 210, 74, 700, 0.12);
+    fit(g, name, W - 210, 70, 700, 0.1);
     g.fillText(name, 182, H / 2 + 3);
   });
 }
 
 /** 세로 돌출 간판: 둥근 모서리, 위에 강조색 띠, 상호를 한 글자씩 세로로 */
-function verticalTexture(lines: string[], bg: string, fg: string, heightPx: number) {
+export function verticalTexture(lines: string[], bg: string, fg: string, heightPx: number) {
   const W = 160;
   return canvasTex(W, heightPx, (g) => {
     g.fillStyle = bg;
@@ -226,7 +324,7 @@ function verticalTexture(lines: string[], bg: string, fg: string, heightPx: numb
     g.textBaseline = 'middle';
     const chars = lines.join(' ').replace(/[·&]/g, '').split('').filter((ch) => ch.trim());
     const step = Math.min(110, (heightPx - 70) / Math.max(1, chars.length));
-    g.font = `800 ${Math.round(step * 0.74)}px ${FONT}`;
+    g.font = `700 ${Math.round(step * 0.68)}px ${FONT}`;
     g.letterSpacing = '0px';
     chars.forEach((ch, i) => g.fillText(ch, W / 2, 50 + step * (i + 0.5)));
   });
@@ -250,7 +348,7 @@ export function decorateFacade(g: THREE.Group, b: Building, face: 1 | -1): THREE
   const metal = (color: THREE.ColorRepresentation) => new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.3 });
 
   if (b.kind === 'shop' && b.sign) {
-    const { panel, accent } = brand(b.sign);
+    const { panel, accent } = shopStyle(b.sign);
     // 1층: 건물 폭 가득한 얇은 금속 패널 (두께가 있어 옆에서 봐도 진짜 간판처럼)
     const sw = b.w - 0.4;
     const sh = 0.85;
@@ -331,12 +429,12 @@ export function decorateFacade(g: THREE.Group, b: Building, face: 1 | -1): THREE
       cg.textAlign = 'center';
       cg.textBaseline = 'middle';
       // 글자 옆면 (살짝 아래로 겹쳐 그려 입체감)
-      fit(cg, name, 960, 150, 800, 0.1);
+      fit(cg, name, 960, 150, 700, 0.12, SIGN_FONT.serif);
       cg.fillStyle = 'rgba(0,0,0,0.45)';
       cg.fillText(name, 516, 120);
       cg.fillStyle = tone;
       cg.fillText(name, 512, 114);
-      fit(cg, 'VILLA', 400, 34, 600, 0.6);
+      fit(cg, 'VILLA', 400, 34, 600, 0.7, SIGN_FONT.latin);
       cg.fillText('VILLA', 512, 222);
     });
     const p = plane(nw, nh, nt, { cutout: true });
@@ -355,9 +453,9 @@ export function decorateFacade(g: THREE.Group, b: Building, face: 1 | -1): THREE
       cg.clearRect(0, 0, 1536, 220);
       cg.textAlign = 'center';
       cg.textBaseline = 'middle';
-      fit(cg, name, 1440, 150, 700, 0.08);
-      cg.shadowColor = 'rgba(77,210,255,0.55)';
-      cg.shadowBlur = 16;
+      fit(cg, name, 1440, 140, 600, 0.1);
+      cg.shadowColor = 'rgba(160,200,255,0.35)';
+      cg.shadowBlur = 8;
       cg.fillStyle = '#f4f9ff';
       cg.fillText(name, 768, 112);
     });
@@ -425,12 +523,12 @@ export function swingDoors(parent: THREE.Object3D, cx: number, z: number, width:
 }
 
 /** 글자 모양 그림 (흰 글자 + 투명 바탕). 입체 글자의 앞면·옆면 모두 이 그림으로 오려 낸다 */
-function letterMask(text: string, w: number, h: number, weight: number, spacing: number) {
+function letterMask(text: string, w: number, h: number, weight: number, spacing: number, family: string = FONT) {
   return canvasTex(w, h, (cg) => {
     cg.clearRect(0, 0, w, h);
     cg.textAlign = 'center';
     cg.textBaseline = 'middle';
-    fit(cg, text, w * 0.96, Math.round(h * 0.82), weight, spacing);
+    fit(cg, text, w * 0.96, Math.round(h * 0.82), weight, spacing, family);
     cg.fillStyle = '#ffffff';
     cg.fillText(text, w / 2, h * 0.54);
   });
@@ -600,7 +698,7 @@ export function buildVillaEntrance(g: THREE.Group, b: Building): { door: DoorCon
   const nameW = 1.9;
   const nameH = nameW / 4;
   const nameX = -0.32;
-  const nameMask = letterMask('행복빌라', 1024, 256, 800, 0.08);
+  const nameMask = letterMask('행복빌라', 1024, 256, 600, 0.14, SIGN_FONT.serif);
   const brass = new THREE.MeshStandardMaterial({ color: 0xe0c48e, roughness: 0.32, metalness: 0.55, emissive: 0x3a2a10, emissiveIntensity: 0.6 });
   const brassSide = new THREE.MeshStandardMaterial({ color: 0x6b5330, roughness: 0.5, metalness: 0.4 });
   const letters = channelLetters(nameMask, nameW, nameH, 0.035, brass, brassSide);
@@ -610,13 +708,13 @@ export function buildVillaEntrance(g: THREE.Group, b: Building): { door: DoorCon
     cg.clearRect(0, 0, 1024, 256);
     cg.textAlign = 'center';
     cg.textBaseline = 'middle';
-    fit(cg, '행복빌라', 1024 * 0.96, Math.round(256 * 0.82), 800, 0.08);
+    fit(cg, '행복빌라', 1024 * 0.96, Math.round(256 * 0.82), 600, 0.14, SIGN_FONT.serif);
     cg.shadowColor = 'rgba(255,255,255,1)';
     cg.shadowBlur = 30;
     cg.fillStyle = 'rgba(255,255,255,0.9)';
     for (let i = 0; i < 3; i++) cg.fillText('행복빌라', 512, 256 * 0.54);
   });
-  const haloMat = new THREE.MeshBasicMaterial({ color: 0xffc27a, map: halo, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+  const haloMat = new THREE.MeshBasicMaterial({ color: 0xfff0dc, map: halo, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
   glow.push(haloMat);
   const haloM = new THREE.Mesh(new THREE.PlaneGeometry(nameW * 1.08, nameH * 1.3), haloMat);
   haloM.position.set(nameX, beamY + 0.02, beamFront + 0.004);
@@ -630,10 +728,10 @@ export function buildVillaEntrance(g: THREE.Group, b: Building): { door: DoorCon
       cg.clearRect(0, 0, 512, 128);
       cg.textBaseline = 'middle';
       cg.fillStyle = '#d9c08a';
-      fit(cg, 'HAPPY VILLA', 480, 44, 600, 0.35);
+      fit(cg, 'HAPPY VILLA', 480, 42, 600, 0.38, SIGN_FONT.latin);
       cg.fillText('HAPPY VILLA', 8, 42);
       cg.fillStyle = '#9b9ea4';
-      fit(cg, 'HANGANG-RO 12', 480, 30, 500, 0.4);
+      fit(cg, 'HANGANG-RO 12', 480, 28, 500, 0.42, SIGN_FONT.latin);
       cg.fillText('HANGANG-RO 12', 8, 94);
     }),
     { cutout: true },
@@ -672,14 +770,14 @@ export function apartmentSigns(g: THREE.Group, b: Building, label: string) {
       cg.clearRect(0, 0, w, h);
       cg.textAlign = 'center';
       cg.textBaseline = 'middle';
-      const main = fit(cg, text, w * 0.94, Math.round(h * (sub ? 0.62 : 0.8)), 800, 0.06);
+      const main = fit(cg, text, w * 0.94, Math.round(h * (sub ? 0.62 : 0.8)), 700, 0.08);
       const y = sub ? h * 0.4 : h * 0.52;
       cg.fillStyle = 'rgba(0,0,0,0.3)';
       cg.fillText(text, w / 2 + main * 0.03, y + main * 0.04);
       cg.fillStyle = color;
       cg.fillText(text, w / 2, y);
       if (sub) {
-        fit(cg, sub, w * 0.8, Math.round(h * 0.16), 600, 0.5);
+        fit(cg, sub, w * 0.8, Math.round(h * 0.16), 600, 0.5, SIGN_FONT.latin);
         cg.fillText(sub, w / 2, h * 0.86);
       }
     });

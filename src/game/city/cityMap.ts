@@ -164,7 +164,7 @@ const EXPRESSWAY_Z = 48;
 const X_RANGE: [number, number] = [-110, 110];
 const Z_RANGE: [number, number] = [-80, 41];
 
-const SHOPS: Sign[] = [
+export const SHOPS: Sign[] = [
   { text: '편의점 24', bg: '#1e9e5a', fg: '#ffffff' },
   { text: '카페 모먼트', bg: '#4a3426', fg: '#f7e6c4' },
   { text: '황금치킨', bg: '#f2b705', fg: '#3a1d00' },

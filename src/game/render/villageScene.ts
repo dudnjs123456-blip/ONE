@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { FIELD_HALF } from '../core/field';
 import { VILLAGE, VILLAGE_DUMMY, VILLAGE_HOUSES, VILLAGE_PORTAL, VILLAGE_SPOTS, type VillageHouse } from '../data/village';
+import { SIGN_FONT, liveCanvas } from './signFonts';
 
 /**
  * 경계 마을 그림: 서울(현대 도시)과 전혀 다른 "판타지 RPG 마을".
@@ -22,11 +23,12 @@ export function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  draw(c.getContext('2d')!, seeded(seed));
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = 4;
+  // 글자가 있는 그림은 웹 글꼴이 받아진 뒤 같은 씨앗으로 다시 그린다 (무늬가 바뀌지 않게)
+  liveCanvas(c, (g) => draw(g, seeded(seed)), () => (t.needsUpdate = true));
   return t;
 }
 
@@ -372,47 +374,160 @@ const swirlTex = () =>
     false,
   );
 
-/** 나무 간판 (여관·촌장 집·성문 현판) */
+/** 현판 아래 작은 옛 영문 (없으면 한글만) */
+const SIGN_LATIN: Record<string, string> = {
+  '경계 마을': 'BORDER VILLAGE',
+  '달빛 여관': 'MOONLIGHT INN',
+  '촌장 집': "ELDER'S HALL",
+};
+
+/**
+ * 나무 현판 (여관·촌장 집·성문): 모서리를 깎은 오래된 참나무 판 + 쇠못, 글자는 판에 파고 금박을 입힌 것처럼
+ * (위쪽 그늘 · 아래쪽 빛 · 금색 그라데이션). 각진 옛 명조 + 작은 로마자 부제. 주변은 투명 (alphaTest 로 오려 낸다).
+ */
 export function signTexture(text: string) {
-  return canvasTex(
-    512,
-    160,
-    (g, r) => {
-      g.fillStyle = '#3a2516';
-      g.fillRect(0, 0, 512, 160);
-      for (let k = 0; k < 40; k++) {
-        g.strokeStyle = 'rgba(0,0,0,0.18)';
-        const y = r() * 160;
+  const W = 1024;
+  const H = 320;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  const latin = SIGN_LATIN[text];
+  liveCanvas(
+    c,
+    (g) => {
+      const r = seeded(text.length * 97 + 13);
+      const cut = 34;
+      const m = 6;
+      const shape = (inset: number) => {
+        const a = m + inset;
+        const k = cut;
+        g.beginPath();
+        g.moveTo(a + k, a);
+        g.lineTo(W - a - k, a);
+        g.lineTo(W - a, a + k);
+        g.lineTo(W - a, H - a - k);
+        g.lineTo(W - a - k, H - a);
+        g.lineTo(a + k, H - a);
+        g.lineTo(a, H - a - k);
+        g.lineTo(a, a + k);
+        g.closePath();
+      };
+      // 판: 짙은 참나무 + 결
+      shape(0);
+      const wood = g.createLinearGradient(0, 0, 0, H);
+      wood.addColorStop(0, '#5d4029');
+      wood.addColorStop(0.5, '#4b331f');
+      wood.addColorStop(1, '#3a2717');
+      g.fillStyle = wood;
+      g.fill();
+      g.save();
+      shape(0);
+      g.clip();
+      for (let k = 0; k < 70; k++) {
+        const y = r() * H;
+        g.strokeStyle = r() < 0.5 ? 'rgba(0,0,0,0.16)' : 'rgba(255,220,170,0.05)';
+        g.lineWidth = 1 + r() * 2.5;
         g.beginPath();
         g.moveTo(0, y);
-        g.bezierCurveTo(170, y + (r() - 0.5) * 12, 340, y + (r() - 0.5) * 12, 512, y);
+        g.bezierCurveTo(W * 0.33, y + (r() - 0.5) * 22, W * 0.66, y + (r() - 0.5) * 22, W, y + (r() - 0.5) * 10);
         g.stroke();
       }
-      g.strokeStyle = '#c9a15a';
+      // 옹이 두어 개
+      for (let k = 0; k < 2; k++) {
+        const x = W * (0.15 + r() * 0.7);
+        const y = H * (0.2 + r() * 0.6);
+        for (let ring = 3; ring >= 1; ring--) {
+          g.strokeStyle = `rgba(0,0,0,${0.08 * ring})`;
+          g.lineWidth = 2;
+          g.beginPath();
+          g.ellipse(x, y, ring * 9, ring * 4, 0, 0, Math.PI * 2);
+          g.stroke();
+        }
+      }
+      g.restore();
+      // 판 가장자리 깎은 면: 바깥 어둡게, 안쪽 가는 빛
+      shape(0);
+      g.strokeStyle = 'rgba(0,0,0,0.55)';
       g.lineWidth = 10;
-      g.strokeRect(9, 9, 494, 142);
-      g.fillStyle = '#c9a15a';
+      g.stroke();
+      shape(16);
+      g.strokeStyle = 'rgba(255,214,150,0.16)';
+      g.lineWidth = 2;
+      g.stroke();
+      shape(22);
+      g.strokeStyle = 'rgba(0,0,0,0.28)';
+      g.lineWidth = 2;
+      g.stroke();
+      // 쇠못 (네 귀퉁이)
       for (const [x, y] of [
-        [24, 24],
-        [488, 24],
-        [24, 136],
-        [488, 136],
+        [62, 62],
+        [W - 62, 62],
+        [62, H - 62],
+        [W - 62, H - 62],
       ]) {
+        const nail = g.createRadialGradient(x - 3, y - 3, 1, x, y, 11);
+        nail.addColorStop(0, '#8d8680');
+        nail.addColorStop(0.5, '#3b3632');
+        nail.addColorStop(1, '#1c1916');
+        g.fillStyle = nail;
         g.beginPath();
-        g.arc(x, y, 7, 0, Math.PI * 2);
+        g.arc(x, y, 11, 0, Math.PI * 2);
         g.fill();
       }
-      g.fillStyle = '#ffe2a0';
-      g.shadowColor = 'rgba(255,170,60,0.8)';
-      g.shadowBlur = 12;
-      g.font = '800 70px "Pretendard", "Malgun Gothic", sans-serif';
+
+      // 글자: 판 글자 → 위 그늘(파인 곳) · 아래 빛(턱) · 금박
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(text, 256, 84);
+      const ty = latin ? H * 0.43 : H * 0.52;
+      let px = latin ? 128 : 140;
+      const setMain = () => {
+        g.font = `800 ${px}px ${SIGN_FONT.myeongjo}`;
+        g.letterSpacing = `${Math.round(px * 0.16)}px`;
+      };
+      setMain();
+      while (g.measureText(text).width > W * 0.72 && px > 40) {
+        px -= 4;
+        setMain();
+      }
+      const tx = W / 2 + Math.round(px * 0.08);
+      g.fillStyle = 'rgba(255,226,170,0.22)';
+      g.fillText(text, tx, ty + 3);
+      g.fillStyle = 'rgba(0,0,0,0.6)';
+      g.fillText(text, tx, ty - 3);
+      const gold = g.createLinearGradient(0, ty - px * 0.5, 0, ty + px * 0.5);
+      gold.addColorStop(0, '#f3dca2');
+      gold.addColorStop(0.45, '#d2a95c');
+      gold.addColorStop(1, '#9a7134');
+      g.fillStyle = gold;
+      g.fillText(text, tx, ty);
+
+      if (latin) {
+        g.font = `600 34px ${SIGN_FONT.rune}`;
+        g.letterSpacing = '12px';
+        const lw = g.measureText(latin).width;
+        const ly = H * 0.77;
+        g.fillStyle = 'rgba(0,0,0,0.5)';
+        g.fillText(latin, W / 2 + 6, ly - 2);
+        g.fillStyle = '#c9a463';
+        g.fillText(latin, W / 2 + 6, ly);
+        // 양옆 가는 선 + 마름모
+        for (const sd of [-1, 1]) {
+          const x0 = W / 2 + sd * (lw / 2 + 26);
+          g.fillRect(sd < 0 ? x0 - 90 : x0, ly - 1, 90, 2);
+          g.save();
+          g.translate(x0 + sd * 100, ly);
+          g.rotate(Math.PI / 4);
+          g.fillRect(-5, -5, 10, 10);
+          g.restore();
+        }
+      }
     },
-    text.length,
-    false,
+    () => (t.needsUpdate = true),
   );
+  return t;
 }
 
 // ───────────────────────── 합쳐 그리기
@@ -1055,8 +1170,11 @@ export function buildVillage(s: THREE.Scene): VillageScene {
     for (let k = 0; k < 5; k++) b.box(M.block, 0.4, 0.34, 1.24, -gate + 0.5 + k * ((gate * 2 - 1) / 4), 4.25, z0);
   };
   const plates: THREE.Mesh[] = [];
+  // 현판은 모서리를 깎은 모양이라 바깥 투명한 곳은 오려 낸다 · 빛을 받지 않는 재질이라 살짝 낮춘 밝기
   const plateMat = new THREE.MeshBasicMaterial({
     map: signTexture(VILLAGE.name),
+    color: 0xe8e2da,
+    alphaTest: 0.5,
   });
   for (const sd of [-1, 1]) {
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.75), plateMat);
@@ -1130,7 +1248,7 @@ export function buildVillage(s: THREE.Scene): VillageScene {
   const hangSigns = () => {
     const made: THREE.Mesh[] = [];
     for (const sg of out.signs.splice(0)) {
-      const mat = new THREE.MeshBasicMaterial({ map: signTexture(sg.text) });
+      const mat = new THREE.MeshBasicMaterial({ map: signTexture(sg.text), color: 0xe8e2da, alphaTest: 0.5 });
       for (const flip of [0, Math.PI]) {
         const m = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.42), mat);
         m.position.copy(sg.pos);
