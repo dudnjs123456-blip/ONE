@@ -248,37 +248,56 @@ body {
   100% { transform: translateY(6px); }
 }
 
-/* 집 컴퓨터: 접속 버튼을 누르면 화면이 깨진다 */
-.dim-glitch {
-  animation: dim-glitch 0.9s steps(6) forwards;
+/* 집 컴퓨터: 설치 막대, 접속하면 창이 하얗게 번지며 사라진다 */
+.pc-install-bar {
+  width: 0;
+  animation: prologue-load-bar 2.6s ease-out forwards;
 }
-@keyframes dim-glitch {
-  0% { transform: translate(0); filter: none; }
-  20% { transform: translate(-4px, 2px) skewX(4deg); filter: hue-rotate(90deg) saturate(2); }
-  40% { transform: translate(5px, -3px) skewX(-6deg); filter: invert(0.2) hue-rotate(180deg); }
-  60% { transform: translate(-3px, 4px) scale(1.04); filter: brightness(1.6) hue-rotate(260deg); }
-  80% { transform: scale(1.15); filter: brightness(2.4) blur(2px); opacity: 0.7; }
-  100% { transform: scale(1.4); filter: brightness(4) blur(6px); opacity: 0; }
+.pc-fade {
+  animation: pc-fade 0.9s ease-in forwards;
 }
-
-/* 차원 프롤로그: 게임을 켜자 모니터 속으로 빨려 들어간다 (화면이 다가오다 하얗게 번쩍) */
-.prologue-suck {
-  animation: prologue-suck 2.6s ease-in forwards;
+@keyframes pc-fade {
+  0% { filter: none; opacity: 1; }
+  70% { filter: brightness(2.6) saturate(0.4); opacity: 1; }
+  100% { filter: brightness(4) saturate(0); opacity: 0; }
 }
-.prologue-monitor {
-  animation: prologue-monitor 2.6s cubic-bezier(0.7, 0, 0.9, 0.4) forwards;
+/* 차원 프롤로그: 평범한 게임 로딩 화면 → 막대가 다 차면 하얗게 번지고 → 흰빛이 걷히며 숲 (빨려 드는 연출 없이 자연스럽게) */
+.prologue-load {
+  animation: prologue-load 3.4s linear forwards;
 }
-@keyframes prologue-suck {
-  0%, 82% { opacity: 1; background: #000; }
-  90% { opacity: 1; background: #f4f0ff; }
-  100% { opacity: 0; background: #f4f0ff; }
+@keyframes prologue-load {
+  0%, 85% { opacity: 1; }
+  100% { opacity: 0; }
 }
-@keyframes prologue-monitor {
-  0% { transform: scale(1) rotate(0deg); filter: none; }
-  35% { transform: scale(1.05) rotate(-1deg); filter: hue-rotate(40deg); }
-  55% { transform: scale(1.4) rotate(2deg); filter: hue-rotate(120deg) saturate(2); }
-  80% { transform: scale(4.5) rotate(-6deg); filter: brightness(2) blur(2px); }
-  100% { transform: scale(9) rotate(10deg); filter: brightness(4) blur(8px); opacity: 0; }
+.prologue-load-bar {
+  width: 0;
+  animation: prologue-load-bar 2.3s cubic-bezier(0.3, 0, 0.4, 1) 0.2s forwards;
+}
+@keyframes prologue-load-bar {
+  0% { width: 0; }
+  60% { width: 72%; }
+  80% { width: 78%; }
+  100% { width: 100%; }
+}
+.prologue-white {
+  opacity: 0;
+  animation: prologue-white 3.4s ease-in forwards;
+}
+@keyframes prologue-white {
+  0%, 68% { opacity: 0; }
+  84%, 100% { opacity: 1; }
+}
+/* 가짜 게임 화면이 지지직 (그림자가 가까이 있을 때) */
+.hud-glitch {
+  animation: hud-glitch 1.7s steps(1) infinite;
+}
+@keyframes hud-glitch {
+  0%, 62%, 100% { transform: none; opacity: 1; filter: none; }
+  64% { transform: translate(-5px, 1px) skewX(8deg); opacity: 0.55; filter: hue-rotate(160deg) saturate(3); }
+  67% { transform: translate(4px, -2px); opacity: 0.2; }
+  70% { transform: translate(-2px, 0) skewX(-5deg); opacity: 0.9; filter: invert(0.3); }
+  86% { transform: translateX(3px); opacity: 0.35; filter: hue-rotate(300deg); }
+  88% { transform: none; opacity: 1; filter: none; }
 }
 /* 벼랑에서 떨어진 뒤 서서히 암전 */
 .prologue-black {

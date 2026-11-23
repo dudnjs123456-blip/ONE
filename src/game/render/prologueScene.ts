@@ -17,7 +17,7 @@ type View = CharacterView & { dispose?(): void; loaded?: boolean };
 
 /**
  * 프롤로그 장면: 보랏빛 안개 숲 한 줄기 길 → 벼랑 끝. 벼랑 아래 멀리 경계 마을 불빛이 안개 사이로 보인다.
- * 카메라는 단계마다 바뀐다: 떨어질 땐 위에서 따라 내려오고, 그림자를 만나면 뒤돌아보고, 벼랑에선 옆에서 낭떠러지를 보여 준다.
+ * 카메라는 단계마다 바뀐다: 처음엔 게임 오프닝처럼 빛기둥 속 나를 한 바퀴 돌며 비추고, 그림자를 만나면 뒤돌아보고, 벼랑에선 옆에서 낭떠러지를 보여 준다.
  */
 export class PrologueRenderer {
   private renderer: THREE.WebGLRenderer;
@@ -31,7 +31,8 @@ export class PrologueRenderer {
   private eyesPlaced = false;
   private darkened = false;
   private wind: THREE.LineSegments;
-  private dust: THREE.Mesh;
+  /** 게임 스폰 빛기둥 (처음 나타날 때만) */
+  private pillar: THREE.Group;
   private lastWhoosh = 0;
   private _pivot = new THREE.Vector3();
   private _rot = new THREE.Vector3();
@@ -39,8 +40,8 @@ export class PrologueRenderer {
   private mist: THREE.Points;
   private sparks: SparkSystem;
   private texts: FloatingTexts;
-  private camPos = new THREE.Vector3(0, 30, 12);
-  private camLook = new THREE.Vector3(0, 20, 0);
+  private camPos = new THREE.Vector3(0, 6, 6);
+  private camLook = new THREE.Vector3(0, 1, 0);
   private shake = 0;
   private villageGlow: THREE.Sprite;
 
@@ -130,11 +131,29 @@ export class PrologueRenderer {
       this.scene.add(c);
     }
 
-    // 땅에 처박힐 때 퍼지는 흙먼지 고리
-    this.dust = new THREE.Mesh(new THREE.RingGeometry(0.6, 1.4, 40), new THREE.MeshBasicMaterial({ color: 0xb9aacc, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-    this.dust.rotation.x = -Math.PI / 2;
-    this.dust.visible = false;
-    this.scene.add(this.dust);
+    // 게임 스폰 빛기둥: 하늘에서 내리꽂힌 하늘색 기둥 + 발밑 마법진 고리 + 솟아오르는 빛 알갱이
+    this.pillar = new THREE.Group();
+    const glow = (color: number, opacity: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 40, 32, 1, true), glow(0x7fe8ff, 0.55));
+    beam.position.y = 20;
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 40, 20, 1, true), glow(0xe8fbff, 0.8));
+    core.position.y = 20;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.35, 48), glow(0x7fe8ff, 0.9));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    const sp = new Float32Array(90 * 3);
+    for (let i = 0; i < 90; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = rng() * 1.1;
+      sp.set([Math.cos(a) * r, rng() * 6, Math.sin(a) * r], i * 3);
+    }
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    const motes = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xbff6ff, size: 0.14, map: softDot(), transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+    motes.name = 'motes';
+    this.pillar.add(beam, core, ring, motes);
+    this.pillar.position.set(world.player.x, 0, world.player.z);
+    this.scene.add(this.pillar);
   }
 
   resize(width: number, height: number) {
@@ -162,12 +181,8 @@ export class PrologueRenderer {
     // 허공에선 편한 대기 동작(걷기·서기 동작 파일)을 끄고 허우적거리는 자세를 그대로 보여 준다
     this.player.casual = p.freefall === 0;
     this.player.update(p, clock);
-    if (world.phase === 'fall') {
-      // 허공에서 몸이 천천히 뒤집히며 돈다. 땅에 가까워지면 등이 아래로 오게 (등부터 처박힌다)
-      const near = Math.min(1, Math.max(0, (p.y - 3) / 14));
-      const sp = world.fallSpin;
-      this.player.root.rotation.set(-1.25 * (1 - near) + near * Math.sin(sp * 0.8) * 1.1, sp * 0.6 * near, Math.sin(sp * 0.5) * 0.6 * near);
-    } else if (world.phase === 'jump' && p.y < -0.3) {
+    this.updatePillar(world, clock);
+    if (world.phase === 'jump' && p.y < -0.3) {
       // 벼랑에서 몸을 던진 뒤: 앞으로 고꾸라지며 빙글
       const sp = world.fallSpin;
       this.player.root.rotation.set(Math.min(1.4, -p.y * 0.1) + Math.sin(sp) * 0.3, 0, Math.sin(sp * 0.7) * 0.5);
@@ -254,7 +269,7 @@ export class PrologueRenderer {
       const pos = this.wind.geometry.attributes.position as THREE.BufferAttribute;
       const arr = pos.array as Float32Array;
       // 떨어지는 빠르기만큼 줄기가 위로 스친다 (몸 기준 위아래 12m 안에서 돌고 돈다)
-      const speed = 0.9 + (world.phase === 'fall' ? world.fallT * 2.2 : 1.6);
+      const speed = 2.5;
       for (let i = 0; i < arr.length; i += 6) {
         let y = arr[i + 1] + speed * clock.dt * 60 * 0.35;
         if (y > 12) y -= 24;
@@ -266,27 +281,32 @@ export class PrologueRenderer {
       (this.wind.material as THREE.LineBasicMaterial).opacity = 0.25 + 0.25 * Math.min(1, speed / 3);
       if (performance.now() - this.lastWhoosh > 420) {
         this.lastWhoosh = performance.now();
-        playWhoosh(world.phase === 'fall' && world.fallT > 0.5);
+        playWhoosh(false);
       }
     }
-    if (world.impact) {
-      // 쾅: 흙먼지 고리 + 묵직한 소리 + 큰 흔들림
-      const { x, z } = world.impact;
-      world.impact = null;
-      playHit('counter', true, 1);
-      for (let i = 0; i < 3; i++) this.sparks.spawn({ kind: 'counter', x: x + (i - 1) * 0.5, y: 0.25, z, heavy: true });
-      this.dust.position.set(x, 0.05, z);
-      this.dust.scale.setScalar(0.3);
-      (this.dust.material as THREE.MeshBasicMaterial).opacity = 0.75;
-      this.dust.visible = true;
-      this.shake = Math.max(this.shake, 1.4);
-    }
-    if (this.dust.visible) {
-      const m = this.dust.material as THREE.MeshBasicMaterial;
-      this.dust.scale.multiplyScalar(1 + 2.2 * clock.dt);
-      m.opacity -= 0.6 * clock.dt;
-      if (m.opacity <= 0) this.dust.visible = false;
-    }
+  }
+
+  /** 스폰 빛기둥: 처음엔 눈부시게 내리꽂혔다가 나를 남기고 가늘어지며 사라진다. 나는 빛 속에서 서서히 나타난다 */
+  private updatePillar(world: PrologueWorld, clock: FrameClock) {
+    const u = world.spawnT;
+    this.pillar.visible = u < 1;
+    // 빛이 가장 셀 때(처음 25%)는 몸이 아직 안 보인다
+    this.player.root.visible = u > 0.18;
+    if (u >= 1) return;
+    const fade = u < 0.15 ? u / 0.15 : 1 - Math.max(0, (u - 0.55) / 0.45);
+    const thin = 1 - Math.max(0, (u - 0.5) / 0.5) * 0.8;
+    this.pillar.children.forEach((c, i) => {
+      const mat = (c as THREE.Mesh).material as THREE.Material & { opacity: number };
+      mat.opacity = [0.22, 0.3, 0.75, 0.85][i] * fade;
+      if (i < 2) c.scale.set(thin, 1, thin);
+    });
+    const ring = this.pillar.children[2];
+    ring.rotation.z = clock.t * 0.04;
+    ring.scale.setScalar(1 + Math.sin(clock.t * 0.12) * 0.05);
+    const motes = this.pillar.getObjectByName('motes') as THREE.Points;
+    const arr = motes.geometry.attributes.position.array as Float32Array;
+    for (let i = 1; i < arr.length; i += 3) arr[i] = (arr[i] + clock.dt * 2.4) % 6;
+    motes.geometry.attributes.position.needsUpdate = true;
   }
 
   private updateCamera(world: PrologueWorld, clock: FrameClock) {
@@ -296,25 +316,16 @@ export class PrologueRenderer {
     const wantLook = new THREE.Vector3();
     let k = 0.06;
     switch (world.phase) {
-      case 'fall':
-        if (p.y > 16) {
-          // 함께 떨어지며 아래에서 올려다본다: 허우적거리는 몸 뒤로 하늘과 구름이 솟구친다
-          wantPos.set(p.x + 2, p.y - 2.3, p.z + 2.8);
-          wantLook.set(p.x, p.y + 0.7, p.z);
-          k = 0.35;
-        } else {
-          // 땅에서 기다리는 카메라: 떨어져 처박히는 순간을 옆에서
-          wantPos.set(p.x + 5.5, 1.4, p.z + 6.5);
-          wantLook.set(p.x, Math.max(0.4, p.y * 0.7), p.z);
-          k = 0.3;
-        }
+      case 'spawn': {
+        // 게임 오프닝: 빛기둥 속 나를 앞쪽에서 반 바퀴 돌며 비추고, 끝나면 등 뒤 평소 자리로 내려앉는다
+        const u = world.spawnT;
+        const ang = Math.PI * (1 - u * 1.0);
+        const r = 5.2 + u * 3;
+        wantPos.set(p.x + Math.sin(ang) * r, 1.8 + u * 5.4, p.z + Math.cos(ang) * r);
+        wantLook.set(p.x, 1.1 + u * 0.2, p.z - u * 1.5);
+        k = 0.12;
         break;
-      case 'landed':
-        // 뻗어 있는 나를 내려다보다가 일어나면 평소 자리로
-        wantPos.set(p.x + 2.2, 3.4, p.z + 4.2);
-        wantLook.set(p.x, 0.3, p.z);
-        k = 0.05;
-        break;
+      }
       case 'encounter': {
         // 뒤를 돌아본다: 내 어깨 너머로 그림자
         wantPos.set(p.x - 2.2, 2.6, p.z - 4.2);

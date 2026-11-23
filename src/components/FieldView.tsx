@@ -37,7 +37,7 @@ const WARP_MS = 1600;
  * 로그아웃하면 서울 집 컴퓨터 앞으로 돌아간다.
  */
 /**
- * 차원 들어가기: 처음이면 프롤로그(게임을 켰더니 컴퓨터 속으로 → 안개 숲 → 그림자에게 쫓겨 벼랑에서 뛰어내림)를 먼저 보고,
+ * 차원 들어가기: 처음이면 프롤로그(게임이라 믿고 안개 숲에 접속 → 그림자에게 쫓기며 게임 화면이 꺼짐 → 벼랑에서 뛰어내림)를 먼저 보고,
  * 벼랑 밑에서 구해진 채 경계 마을에서 깨어난다. 그다음부턴 바로 마을 포탈 앞.
  */
 export default function FieldView(props: { profile: PlayerProfile; account?: Account | null; onExit: () => void }) {
@@ -48,6 +48,7 @@ export default function FieldView(props: { profile: PlayerProfile; account?: Acc
     return (
       <DimensionPrologue
         profile={profile}
+        playerName={props.account?.username}
         onExit={props.onExit}
         onDone={() => {
           profile.dimension = { visits: profile.dimension?.visits ?? 0, ...profile.dimension, prologue: true };

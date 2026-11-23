@@ -948,7 +948,7 @@ export default function CityView({
       )}
       {bus && worldRef.current && <BusPanel world={worldRef.current} onClose={() => setBus(false)} />}
       {pcRoom && worldRef.current && onPlay && <PcRoomPanel world={worldRef.current} onPlay={onPlay} onClose={() => setPcRoom(false)} />}
-      {homePc && onDimension && <HomePcPanel profile={profile} onConnect={onDimension} onClose={() => setHomePc(false)} />}
+      {homePc && onDimension && <HomePcPanel profile={profile} playerName={account?.username} onConnect={onDimension} onClose={() => setHomePc(false)} />}
       {gear && worldRef.current && (
         <GearPanel
           world={worldRef.current}

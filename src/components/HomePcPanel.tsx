@@ -1,62 +1,180 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PlayerProfile } from '@/game/core/profile';
 
-/** 접속 버튼을 누른 뒤 화면이 깨지는 연출 시간 (ms) */
-const GLITCH_MS = 900;
+/** 접속 버튼을 누른 뒤 창이 하얗게 번지며 사라지는 시간 (ms) */
+const FADE_MS = 900;
+/** 설치 막대가 다 차는 시간 (ms) */
+const INSTALL_MS = 2600;
+
+/** 처음 켰을 때의 순서: 커뮤니티 인기글 → 설치 → 캐릭터 이름 → 접속 확인 (그다음부턴 바로 실행 화면 'run') */
+type Step = 'board' | 'install' | 'name' | 'run';
+
+/** 인터넷 게임 커뮤니티에 올라온 DIMENSION 글들 (소문은 인터넷에서만 돈다 — 뉴스·TV 에는 나오지 않는다) */
+const POSTS: { title: string; who: string; when: string; views: string; replies: string[] }[] = [
+  {
+    title: 'DIMENSION 해 본 사람? 이거 진짜 뭐임',
+    who: '새벽세시',
+    when: '3분 전',
+    views: '2.4만',
+    replies: ['그래픽이 아니라 진짜 공기 냄새가 남 ㄷㄷ', 'VR 안 껴도 됨. 그냥 모니터로 하는데 들어가 있음', '광고인 줄 알았는데 해 보니까 인정'],
+  },
+  {
+    title: '켜고 나서 시간 순삭됨… 근데 기억이 잘 안 남',
+    who: '퇴근하고롤',
+    when: '12분 전',
+    views: '8,912',
+    replies: ['ㅇㅇ 나도 재밌었던 건 확실한데 뭘 했는지가 흐릿함', '자고 일어났더니 온몸이 쑤시던데 이것 때문인가 ㅋㅋ', '몰입감이 그 정도라는 거지'],
+  },
+  {
+    title: '근데 제작사 어디임? 검색해도 안 나옴',
+    who: '의심병환자',
+    when: '27분 전',
+    views: '5,301',
+    replies: ['무료에 광고도 없고 결제도 없음. 이상하긴 함', '인디 아님? 어차피 재밌으면 됐지', '스토어에도 없고 공식 사이트도 없는데 다운로드만 1,000만 ㄷㄷ'],
+  },
+];
 
 /**
- * 서울 내 집 컴퓨터 (E). 요즘 유행한다는 게임 DIMENSION 을 깔아 실행하면 다른 차원으로 빨려 들어간다.
- * 처음 켜면 인기 게임 소개(이야기의 시작)를 보고, 그다음부턴 바로 실행 화면.
+ * 서울 내 집 컴퓨터 (E). 요즘 인터넷에서 난리 난 게임 DIMENSION 을 깔아 실행한다.
+ * 처음엔 평범한 게임처럼 보인다: 커뮤니티 글 → 설치 → (내 이름이 이미 적힌) 캐릭터 이름 → 접속.
+ * 그다음부턴 바로 실행 화면.
  */
-export default function HomePcPanel({ profile, onConnect, onClose }: { profile: PlayerProfile; onConnect: () => void; onClose: () => void }) {
+export default function HomePcPanel({ profile, playerName, onConnect, onClose }: { profile: PlayerProfile; playerName?: string | null; onConnect: () => void; onClose: () => void }) {
   const visits = profile.dimension?.visits ?? 0;
-  const [mail, setMail] = useState(visits === 0);
+  const first = visits === 0 && !profile.dimension?.prologue;
+  const [step, setStep] = useState<Step>(first ? 'board' : 'run');
+  const [open, setOpen] = useState(0);
   const [going, setGoing] = useState(false);
+  const [installed, setInstalled] = useState(false);
+  const [agree, setAgree] = useState(false);
+  const name = playerName || '플레이어';
+
+  useEffect(() => {
+    if (step !== 'install' || !agree) return;
+    const id = window.setTimeout(() => setInstalled(true), INSTALL_MS);
+    return () => window.clearTimeout(id);
+  }, [step, agree]);
 
   const connect = () => {
     if (going) return;
     setGoing(true);
-    window.setTimeout(onConnect, GLITCH_MS);
+    window.setTimeout(onConnect, FADE_MS);
   };
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-3" onClick={going ? undefined : onClose}>
       <div
-        className={`max-h-full w-full max-w-lg overflow-y-auto rounded-xl border border-violet-300/30 bg-[#0d0a24]/95 text-white shadow-[0_0_40px_rgba(139,92,246,0.35)] ${going ? 'dim-glitch' : ''}`}
+        className={`max-h-full w-full max-w-lg overflow-y-auto rounded-xl border border-violet-300/30 bg-[#0d0a24]/95 text-white shadow-[0_0_40px_rgba(139,92,246,0.35)] ${going ? 'pc-fade' : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 창 제목줄 */}
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-2">
-          <div className="font-mono text-sm font-bold text-violet-200">🖥️ 내 컴퓨터</div>
+          <div className="font-mono text-sm font-bold text-violet-200">🖥️ 내 컴퓨터{step === 'board' ? ' · 게임 커뮤니티' : ''}</div>
           <button onClick={onClose} disabled={going} className="rounded bg-white/10 px-3 py-1 text-sm hover:bg-white/20 disabled:opacity-40">
             끄기
           </button>
         </div>
 
-        {mail ? (
-          // 요즘 유행한다는 게임: 커뮤니티 인기글을 보고 깔아 본다 (이야기의 시작)
+        {step === 'board' && (
+          // 인터넷 게임 커뮤니티 인기글: 다들 DIMENSION 얘기뿐 (이야기의 시작)
           <div className="p-4">
             <div className="mb-3 flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/60">
               <span className="rounded bg-rose-500 px-1.5 py-0.5 font-black text-white">HOT</span>
-              <span>실시간 인기 게임 1위</span>
+              <span>게임 갤러리 · 실시간 인기글</span>
             </div>
-            <div className="rounded-lg border border-cyan-300/20 bg-black/40 p-4">
-              <div className="font-mono text-2xl font-black tracking-[0.3em] text-cyan-300">DIMENSION</div>
-              <div className="mt-1 text-xs text-white/50">무료 · 제작사 정보 없음 · 다운로드 1,000만+</div>
-              <p className="mt-3 text-sm leading-6 text-white/85">요즘 다들 이거 한다는 그 게임. 켜는 순간 진짜 그 세계에 들어간 것 같다는 후기가 쏟아지는 중.</p>
-              <ul className="mt-3 space-y-1.5 text-xs leading-5 text-white/75">
-                <li className="rounded bg-white/5 px-2 py-1">💬 그래픽이 아니라 진짜 공기 냄새가 남 ㄷㄷ</li>
-                <li className="rounded bg-white/5 px-2 py-1">💬 켜고 나서 기억이 잘 안 나는데 재밌었던 건 확실함</li>
-                <li className="rounded bg-white/5 px-2 py-1">💬 근데 제작사 어디임? 검색해도 안 나옴</li>
-              </ul>
+            <ul className="space-y-2">
+              {POSTS.map((p, i) => (
+                <li key={p.title} className="rounded-lg border border-white/10 bg-black/30">
+                  <button onClick={() => setOpen(i)} className="w-full px-3 py-2 text-left">
+                    <div className="text-sm font-bold text-white/90">
+                      {p.title} <span className="text-rose-300">[{p.replies.length * 37 + 12}]</span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-white/40">
+                      {p.who} · {p.when} · 조회 {p.views}
+                    </div>
+                  </button>
+                  {open === i && (
+                    <ul className="space-y-1 px-3 pb-2 text-xs leading-5 text-white/75">
+                      {p.replies.map((r) => (
+                        <li key={r} className="rounded bg-white/5 px-2 py-1">
+                          💬 {r}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 rounded-lg border border-cyan-300/20 bg-black/40 p-3">
+              <div className="font-mono text-xl font-black tracking-[0.3em] text-cyan-300">DIMENSION</div>
+              <div className="mt-0.5 text-xs text-white/50">무료 · 제작사 정보 없음 · 다운로드 1,000만+</div>
             </div>
-            <button onClick={() => setMail(false)} className="mt-4 w-full rounded-lg bg-violet-500/30 py-2 text-sm font-bold hover:bg-violet-500/50">
-              ⬇ 무료 설치하고 실행해 보기 ▸
+            <button onClick={() => setStep('install')} className="mt-3 w-full rounded-lg bg-violet-500/30 py-2 text-sm font-bold hover:bg-violet-500/50">
+              ⬇ 나도 깔아 보기 ▸
             </button>
           </div>
-        ) : (
+        )}
+
+        {step === 'install' && (
+          // 평범한 게임 설치 화면: 약관 동의 → 설치 막대
+          <div className="p-4">
+            <div className="font-mono text-lg font-black tracking-widest text-cyan-300">DIMENSION 설치</div>
+            <div className="mt-3 h-32 overflow-y-auto rounded border border-white/10 bg-black/40 p-3 text-[11px] leading-5 text-white/55">
+              <p className="font-bold text-white/70">이용 약관</p>
+              <p>1. 본 게임은 무료로 제공됩니다.</p>
+              <p>2. 이용자는 게임을 건전하게 즐겨야 합니다.</p>
+              <p>3. 접속 중 이용자가 보고 듣고 느끼는 모든 것은 이용자 본인의 경험으로 남습니다.</p>
+              <p>4. 접속은 이용자가 원할 때 언제든 끝낼 수 있습니다.</p>
+              <p>5. 그 밖의 사항은 접속한 곳의 법을 따릅니다.</p>
+            </div>
+            {!agree ? (
+              <button onClick={() => setAgree(true)} className="mt-3 w-full rounded-lg bg-violet-500/30 py-2 text-sm font-bold hover:bg-violet-500/50">
+                ☑ 동의하고 설치
+              </button>
+            ) : (
+              <div className="mt-3">
+                <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                  <div className="pc-install-bar h-full rounded-full bg-gradient-to-r from-violet-400 to-cyan-300" />
+                </div>
+                <div className="mt-1 text-xs text-white/50">{installed ? '설치 완료!' : '설치하는 중…'}</div>
+                <button
+                  onClick={() => setStep('name')}
+                  disabled={!installed}
+                  className="mt-3 w-full rounded-lg bg-violet-500/30 py-2 text-sm font-bold hover:bg-violet-500/50 disabled:opacity-40"
+                >
+                  실행 ▸
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === 'name' && (
+          // 캐릭터 이름: 입력하려고 보니 내 이름이 이미 적혀 있다 (첫 번째 작은 위화감)
+          <div className="p-4 text-center">
+            <div className="font-mono text-2xl font-black tracking-[0.3em] text-cyan-300">DIMENSION</div>
+            <div className="mt-4 text-left text-xs text-white/60">캐릭터 이름</div>
+            <div className="mt-1 rounded border border-cyan-300/40 bg-black/50 px-3 py-2 text-left font-bold text-white">{name}</div>
+            <div className="mt-1 text-left text-[11px] text-white/40">※ 이미 입력되어 있습니다. …계정이 연동됐나?</div>
+            <div className="mt-5 text-sm font-bold text-white/85">이 세계에 접속하시겠습니까?</div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={onClose} disabled={going} className="flex-1 rounded-lg bg-white/10 py-2 text-sm hover:bg-white/20 disabled:opacity-40">
+                나중에
+              </button>
+              <button
+                onClick={connect}
+                disabled={going}
+                className="flex-1 rounded-lg bg-gradient-to-r from-violet-500 to-cyan-500 py-2 font-black tracking-wider hover:brightness-110 disabled:opacity-70"
+              >
+                {going ? '접속 중…' : '예'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'run' && (
           <div className="p-4">
             <div className="rounded-lg border border-cyan-300/20 bg-black/40 p-4 text-center">
               <div className="font-mono text-xl font-black tracking-widest text-cyan-300">DIMENSION.exe</div>
@@ -76,11 +194,9 @@ export default function HomePcPanel({ profile, onConnect, onClose }: { profile: 
                 {going ? '접속 중…' : '🌀 접속하기'}
               </button>
             </div>
-            {visits > 0 && (
-              <button onClick={() => setMail(true)} className="mt-2 w-full text-xs text-white/45 hover:text-white/80">
-                게임 소개 다시 보기
-              </button>
-            )}
+            <button onClick={() => setStep('board')} className="mt-2 w-full text-xs text-white/45 hover:text-white/80">
+              커뮤니티 글 다시 보기
+            </button>
           </div>
         )}
       </div>

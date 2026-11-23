@@ -1,4 +1,4 @@
-// 차원 첫 접속 프롤로그: 떨어짐 → 정신 차림 → 숲길 → 그림자 → 도망 → 벼랑 → (맞서기) → 뛰어내림 (npm run test:prologue)
+// 차원 첫 접속 프롤로그: 빛기둥 스폰 → "게임이다" → 숲길 → 그림자 → 도망 → 벼랑 → (맞서기) → 뛰어내림 (npm run test:prologue)
 import { PrologueWorld, CLIFF_Z, type ProloguePhase } from '../src/game/story/prologue';
 import { newProfile } from '../src/game/core/profile';
 import { NEUTRAL_INPUT } from '../src/game/core/input';
@@ -21,14 +21,11 @@ const run = (n: number, until?: () => boolean) => {
   }
 };
 
-// 하늘에서 떨어져 땅에 닿으면 정신 차리는 대사
-check('starts falling from the sky', w.phase === 'fall' && w.player.y > 10);
-run(30);
-check('flails arms and legs while falling', w.player.freefall === 1 && w.player.y > 50);
-run(400, () => w.phase !== 'fall');
-check('crashes into the ground and lies there', w.phase === 'landed' && w.player.y === 0 && w.player.state === 'knockdown' && w.player.freefall === 0 && !!w.impact);
+// 게임 캐릭터처럼 빛기둥 속에서 땅 위에 나타난다 (떨어지지 않는다). 게임 화면(HUD)은 다 켜져 있다
+check('spawns standing on the ground in a light pillar', w.phase === 'spawn' && w.player.y === 0 && w.spawnT === 0);
+check('full fake game HUD at the start', w.hudLevel === 3 && !w.hudGlitch);
 run(400, () => w.phase === 'wake');
-check('gets up, then wakes up (talk)', w.phase === 'wake' && w.player.y === 0 && w.talking && w.player.state !== 'knockdown');
+check('pillar fades → "this is a game" talk', w.phase === 'wake' && w.talking && w.spawnT === 1 && w.player.y === 0);
 // 대사 중엔 움직이지 않는다
 cmd = { move: { x: 0, z: -1 }, run: true, input: NEUTRAL_INPUT };
 const z0 = w.player.z;
@@ -41,12 +38,14 @@ check('talk done → explore', w.phase === 'explore');
 cmd = { move: { x: 0, z: -1 }, run: false, input: NEUTRAL_INPUT };
 run(60 * 20, () => w.phase === 'encounter');
 check('shadow appears behind on the path', w.phase === 'encounter' && w.beastOut && w.beast.z > w.player.z, `(z ${w.player.z.toFixed(1)})`);
+check('HUD starts glitching when the shadow appears', w.hudGlitch && w.hudLevel === 3);
 w.finishTalk();
 check('encounter talk → chase', w.phase === 'chase');
 
 // 걸으면 따라잡혀 맞지만 쓰러지지 않는다
 const hp0 = w.player.hp;
 run(60 * 6);
+check('chasing strips the HUD: quest, then minimap', w.hudLevel === 1);
 check('walking gets caught (takes hits) but never dies', w.player.hp < hp0 && w.player.hp > 0, `(HP ${w.player.hp}/${w.player.maxHp})`);
 
 // 달리면(Shift) 벼랑 끝까지 도망친다
@@ -64,10 +63,13 @@ check('fighting back does nothing → cornered again', w.phase === 'cornered' &&
 w.choose(true);
 run(60 * 10, () => w.phase === 'done');
 check('jumps off the cliff and falls into the dark', w.phase === 'done' && w.player.z < CLIFF_Z && w.player.y < -50);
-check('every phase was played', (['fall', 'landed', 'wake', 'explore', 'encounter', 'chase', 'cliff', 'fight', 'cornered', 'jump', 'done'] as ProloguePhase[]).every((p) => seen.has(p)), [...seen].join('→'));
+check('the game HUD is completely gone after the jump', w.hudLevel === 0);
+check('every phase was played', (['spawn', 'wake', 'explore', 'encounter', 'chase', 'cliff', 'fight', 'cornered', 'jump', 'done'] as ProloguePhase[]).every((p) => seen.has(p)), [...seen].join('→'));
 
 // 대사: 말하는 사람이 모두 초상화를 가질 수 있는 사람 (나 · 그림자 · 마을 사람)
 const speakers = new Set([...Object.values(PROLOGUE_SCRIPT).flat(), ...RESCUE_SCRIPT].map((l) => l.who));
 check('every speaker is me, the shadow, or a villager (portrait rule)', [...speakers].every((s) => s === 'me' || s === 'beast' || VILLAGE_NPCS.some((n) => n.id === s)), [...speakers].join(','));
-check('the first waking lines use the new hurt face', PROLOGUE_SCRIPT.wake[0].face === 'hurt' && RESCUE_SCRIPT.some((l) => l.who === 'me' && l.face === 'hurt'));
+check('in the forest you still believe it is a game', PROLOGUE_SCRIPT.wake.some((l) => l.text.includes('그래픽')) && PROLOGUE_SCRIPT.cliff.some((l) => l.text.includes('어차피 게임')));
+check('no "sucked into the monitor" any more', ![...Object.values(PROLOGUE_SCRIPT).flat(), ...RESCUE_SCRIPT].some((l) => l.text.includes('빨려')));
+check('waking in the village: the pain breaks the belief (hurt face)', RESCUE_SCRIPT.some((l) => l.who === 'me' && l.face === 'hurt' && l.text.includes('아파')));
 check('a villager rescues you below the cliff', RESCUE_SCRIPT[0].who !== 'me' && RESCUE_SCRIPT.some((l) => l.text.includes('벼랑')));

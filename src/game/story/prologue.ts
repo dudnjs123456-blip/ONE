@@ -10,8 +10,9 @@ import { DIR_OF_KEY, MOVES } from '../data/moves';
 
 /**
  * 차원 프롤로그 (처음 접속할 때 한 번만, 나 혼자 보는 장면):
- * 요즘 유행한다는 게임을 켰더니 컴퓨터 속으로 빨려 들어가 → 안개 숲에 떨어진다 → 정체 모를 그림자를 만나
- * 도망친다 → 벼랑 끝에 몰려 뛰어내린다 (이어서 경계 마을 사람이 벼랑 밑에서 구해 준다 — FieldView).
+ * 요즘 유행한다는 게임을 켰더니 화면이 하얗게 번지고 → 게임 캐릭터처럼 빛기둥 속에서 안개 숲에 "스폰"된다
+ * (주인공은 아직 진짜 게임이라고 믿는다) → 정체 모를 그림자를 만나 도망친다 → 벼랑 끝에 몰려 뛰어내린다
+ * (이어서 경계 마을 사람이 벼랑 밑에서 구해 준다 — FieldView). 게임 화면(HUD)이 꺼지는 연출은 DimensionPrologue.
  *
  * 숲은 한 줄기 길(남 → 북). 화면 안쪽 = -z = 북쪽 = 벼랑. 순수 로직 (그리기는 prologueScene).
  */
@@ -30,28 +31,23 @@ export const PATH: { x: number; z: number }[] = [
 export const PATH_HALF = 3.3;
 /** 벼랑 끝 (이보다 북쪽은 낭떠러지) */
 export const CLIFF_Z = -48;
-/** 떨어지는 곳 (처음 내려앉는 숲속 빈터) */
+/** 처음 나타나는 곳 (숲속 빈터) */
 export const LAND = { x: 0, z: 0 };
 /** 그림자가 나타나는 곳: 여기를 지나면 등 뒤에서 나타난다 */
 const ENCOUNTER_Z = -9;
 /** 여기까지 오면 막다른 벼랑 */
 const CLIFF_REACH_Z = CLIFF_Z + 3.2;
-/** 하늘에서 떨어지는 시간 (프레임) */
-const FALL_FRAMES = 240;
-const FALL_HEIGHT = 75;
-/** 땅에 처박힌 뒤 누워 있다가 일어나기까지 (프레임) */
-const LANDED_FRAMES = 130;
+/** 빛기둥 속에서 나타나 주위를 둘러보기까지 (프레임) */
+export const SPAWN_FRAMES = 200;
 /** 그림자가 쫓아오는 속도: 걸으면 따라잡히고, 달리면(Shift) 겨우 벌어진다 */
 const BEAST_SPEED = 0.072;
 const WALK = 0.045;
 const RUN = 0.1;
 
 export type ProloguePhase =
-  /** 하늘에서 떨어지는 중 */
-  | 'fall'
-  /** 땅에 처박혀 누워 있다가 비틀비틀 일어난다 */
-  | 'landed'
-  /** 정신 차리는 대사 */
+  /** 게임 캐릭터처럼 빛기둥 속에서 나타난다 (카메라가 한 바퀴 돌며 비춘다) */
+  | 'spawn'
+  /** "그래픽 미쳤다" — 게임이라고 믿는 대사 */
   | 'wake'
   /** 숲길 걷기 (조작) */
   | 'explore'
@@ -75,7 +71,7 @@ export const TALK_PHASES: ProloguePhase[] = ['wake', 'encounter', 'cliff', 'corn
 
 export class PrologueWorld {
   frame = 0;
-  phase: ProloguePhase = 'fall';
+  phase: ProloguePhase = 'spawn';
   /** 지금 단계에 들어선 프레임 */
   at = 0;
   readonly player: Fighter;
@@ -84,8 +80,6 @@ export class PrologueWorld {
   beastOut = false;
   /** 화면 흔들림 요청 (렌더러가 가져간다) */
   shake = 0;
-  /** 방금 땅에 쾅 떨어졌다 (렌더러가 흙먼지·소리를 내고 지운다) */
-  impact: { x: number; z: number } | null = null;
   /** "효과 없음" 같은 떠오르는 글자 */
   private texts: { x: number; y: number; z: number; text: string }[] = [];
   private events: CombatEvent[] = [];
@@ -99,19 +93,44 @@ export class PrologueWorld {
   ) {
     this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: false, manual: true });
     this.player.reset(LAND.x, LAND.z, 0, -1);
-    this.player.y = FALL_HEIGHT;
     this.beast = new Fighter(1, '???', { maxHp: 99999, power: 1.6, canBlock: false, runSpeed: BEAST_SPEED, size: 1.7 });
     this.beast.reset(0, 30, 0, -1);
   }
 
-  /** 떨어지는 동안 몸이 빙글 도는 각도 (렌더러용) */
+  /** 벼랑에서 떨어지는 동안 몸이 빙글 도는 각도 (렌더러용) */
   get fallSpin(): number {
     return this.spin;
   }
 
-  /** 하늘에서 떨어지는 진행도 0~1 */
-  get fallT(): number {
-    return this.phase === 'fall' ? Math.min(1, (this.frame - this.at) / FALL_FRAMES) : 1;
+  /** 빛기둥 스폰 진행도 0~1 */
+  get spawnT(): number {
+    return this.phase === 'spawn' ? Math.min(1, (this.frame - this.at) / SPAWN_FRAMES) : 1;
+  }
+
+  /**
+   * 게임 화면(HUD)이 몇 겹 남았나: 3 = 퀘스트·미니맵·체력 다, 2 = 퀘스트 꺼짐, 1 = 체력만, 0 = 아무것도 없음.
+   * 그림자(진짜 이 세계의 것)가 다가오면 "게임"의 겉껍데기가 하나씩 벗겨진다.
+   */
+  get hudLevel(): 0 | 1 | 2 | 3 {
+    const t = this.frame - this.at;
+    switch (this.phase) {
+      case 'chase':
+        return t < 100 ? 3 : t < 260 ? 2 : 1;
+      case 'cliff':
+      case 'fight':
+      case 'cornered':
+        return 1;
+      case 'jump':
+      case 'done':
+        return 0;
+      default:
+        return 3;
+    }
+  }
+
+  /** HUD 가 지지직 흔들리나 (그림자가 나타난 뒤부터) */
+  get hudGlitch(): boolean {
+    return this.beastOut;
   }
 
   get talking(): boolean {
@@ -154,37 +173,12 @@ export class PrologueWorld {
     const t = this.frame - this.at;
 
     switch (this.phase) {
-      case 'fall': {
-        // 중력처럼 점점 빨라지며 떨어진다: 팔다리를 허우적거리며 몸이 천천히 뒤집힌다. 땅에 닿으면 쾅
-        const u = Math.min(1, t / FALL_FRAMES);
-        p.y = FALL_HEIGHT * (1 - Math.pow(u, 1.8));
-        p.freefall = 1;
-        this.spin += 0.045;
-        if (u >= 1) {
-          p.y = 0;
-          p.freefall = 0;
-          // 등부터 처박혀 그대로 뻗는다
-          p.state = 'knockdown';
-          p.frame = 0;
-          this.shake = 1.5;
-          this.impact = { x: p.x, z: p.z };
-          this.go('landed');
-        }
-        return;
-      }
-      case 'landed': {
-        // 한동안 뻗어 있다가 끙 하고 일어난다
+      case 'spawn': {
+        // 빛기둥 속에 가만히 서 있다 (빛이 걷히면 대사)
         p.freeMove = null;
-        if (t < LANDED_FRAMES - 40) {
-          p.state = 'knockdown';
-          p.frame = Math.min(p.frame, 1);
-        } else if (p.state === 'knockdown') {
-          p.state = 'getup';
-          p.frame = 0;
-        }
         p.feed(NEUTRAL_INPUT);
         p.tick({ opponent: p, awayX: 0, awayZ: -1 });
-        if (t >= LANDED_FRAMES) this.go('wake');
+        if (t >= SPAWN_FRAMES) this.go('wake');
         return;
       }
       case 'jump': {
