@@ -6,7 +6,14 @@
  */
 export type CinematicShot =
   /** 영상 한 컷 (소리 없음) */
-  | { video: string; poster?: string; /** 이 초까지만 틀고 넘긴다 (영상 끝이 어색할 때) */ until?: number }
+  | {
+      video: string;
+      poster?: string;
+      /** 이 초까지만 틀고 넘긴다 (영상 끝이 어색할 때) */
+      until?: number;
+      /** 재생 속도 (슬로모션으로 만든 영상을 빠르게 틀 때 1.5 등) */
+      rate?: number;
+    }
   /** 그림 한 장을 천천히 당겨 보여 준다 (ms 동안) */
   | { image: string; ms: number };
 
@@ -20,13 +27,13 @@ export const CINEMATICS = {
   prologueChase: {
     byBody: {
       smallSilverGirl: [
-        // 안개 속 그림자의 붉은 눈 → 뒤돌아보며 물러선다 (5초)
-        // (1.7초 뒤엔 고개를 돌리며 옆얼굴이 일그러져 잘라 낸다)
-        { video: '/cinematics/prologue-chase/meet.mp4', poster: '/cinematics/prologue-chase/still-1.jpg', until: 1.7 },
+        // 안개 속에서 붉은 눈의 그림자가 다가오고, 소녀는 입을 막고 떤다 (5초, 고개는 돌리지 않는다)
+        { video: '/cinematics/prologue-chase/meet.mp4', poster: '/cinematics/prologue-chase/still-1.jpg' },
         // 겁에 질린 얼굴 클로즈업 (몬스터는 안 보이게): 숨을 몰아쉬며 떨고 두리번거린다
         { video: '/cinematics/prologue-chase/panic.mp4' },
-        // 숲길을 달려 도망, 바로 뒤로 덮쳐 오는 검은 손톱 (5초) → 그대로 추격 조작으로
-        { video: '/cinematics/prologue-chase/run.mp4' },
+        // 숲길을 달려 도망, 그림자는 멀리 뒤에서 쫓아온다 → 그대로 추격 조작으로
+        // 슬로모션으로 만들어 얼굴이 번지지 않게 하고, 게임에선 빠르게 튼다
+        { video: '/cinematics/prologue-chase/run.mp4', rate: 1.6 },
       ],
     },
   },
