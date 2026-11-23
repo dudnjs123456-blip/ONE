@@ -65,6 +65,15 @@ export default function CinematicPlayer({ id, body, onEnd }: { id: CinematicId; 
             muted
             playsInline
             onEnded={next}
+            onTimeUpdate={(e) => {
+              // 한 번만 넘긴다 (timeupdate 는 여러 번 오고, 끝난 뒤 ended 도 온다)
+              const v = e.currentTarget;
+              if (shot.until && v.currentTime >= shot.until && !v.dataset.done) {
+                v.dataset.done = '1';
+                v.pause();
+                next();
+              }
+            }}
             onError={next}
           />
         ) : (

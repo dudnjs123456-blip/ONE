@@ -6,7 +6,7 @@
  */
 export type CinematicShot =
   /** 영상 한 컷 (소리 없음) */
-  | { video: string; poster?: string }
+  | { video: string; poster?: string; /** 이 초까지만 틀고 넘긴다 (영상 끝이 어색할 때) */ until?: number }
   /** 그림 한 장을 천천히 당겨 보여 준다 (ms 동안) */
   | { image: string; ms: number };
 
@@ -22,10 +22,11 @@ export const CINEMATICS = {
       smallSilverGirl: [
         // 안개 속 그림자의 붉은 눈 → 뒤돌아보며 물러선다 (5초)
         { video: '/cinematics/prologue-chase/meet.mp4', poster: '/cinematics/prologue-chase/still-1.jpg' },
-        // 겁에 질린 얼굴 클로즈업 (그림 한 장)
-        { image: '/cinematics/prologue-chase/still-2.jpg', ms: 2000 },
+        // 겁에 질린 얼굴 클로즈업: 숨을 몰아쉬며 떨고 두리번거리다 돌아선다
+        { video: '/cinematics/prologue-chase/panic.mp4', poster: '/cinematics/prologue-chase/still-2.jpg' },
         // 숲길을 달려 도망, 바로 뒤로 덮쳐 오는 검은 손톱 (5초) → 그대로 추격 조작으로
-        { video: '/cinematics/prologue-chase/run.mp4' },
+        // (끝 0.6초는 손이 몸을 덮어 잘라 낸다)
+        { video: '/cinematics/prologue-chase/run.mp4', until: 4.4 },
       ],
     },
   },
