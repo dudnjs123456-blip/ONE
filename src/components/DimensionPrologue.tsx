@@ -12,7 +12,7 @@ import { BEAST_NAME, PROLOGUE_SCRIPT, type ScriptLine } from '@/game/data/prolog
 import { storyPortrait } from '@/game/data/portraits';
 import { startBgm, stopBgm } from '@/game/render/bgm';
 import { playWhoosh, unlockAudioOnInput } from '@/game/render/sfx';
-import { cinematicShots } from '@/game/data/cinematics';
+import { cinematicShots, type CinematicId } from '@/game/data/cinematics';
 import CinematicPlayer from './CinematicPlayer';
 import StoryDialog, { type DialogChoice, type DialogLine } from './StoryDialog';
 import TouchControls, { useIsTouch } from './TouchControls';
@@ -53,11 +53,11 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
   const [talk, setTalk] = useState<Talk | null>(null);
   const [faces, setFaces] = useState<{ me: string | null; beast: string | null }>({ me: null, beast: null });
   const [black, setBlack] = useState(false);
-  /** 그림자를 만난 대사가 끝나면 2D 컷신(도망치기 시작) → 끝나면 추격 */
-  const [cine, setCine] = useState(false);
+  /** 2D 컷신: 그림자를 만난 대사 뒤(도망치기 시작) · 벼랑에서 뛰어내릴 때 */
+  const [cine, setCine] = useState<CinematicId | null>(null);
   const talkRef = useRef(talk);
   talkRef.current = talk;
-  const api = useRef<{ next: () => void; choose: (jump: boolean) => void; cineEnd: () => void } | null>(null);
+  const api = useRef<{ next: () => void; choose: (jump: boolean) => void; cineEnd: (id: CinematicId) => void } | null>(null);
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
 
@@ -99,17 +99,21 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
       if (t.phase === 'cliff' || t.phase === 'cornered') return;
       setTalk(null);
       // 내 캐릭터 그림으로 만든 컷신이 있으면 먼저 틀고, 끝나면 추격을 시작한다
-      if (t.phase === 'encounter' && cinematicShots('prologueChase', profile.body)) return setCine(true);
+      if (t.phase === 'encounter' && cinematicShots('prologueChase', profile.body)) return setCine('prologueChase');
       world.finishTalk();
     };
-    const cineEnd = () => {
-      setCine(false);
-      world.finishTalk();
+    const cineEnd = (id: CinematicId) => {
+      setCine(null);
+      // 뛰어내리는 컷신을 봤으면 3D 낙하는 건너뛰고 바로 암전 → 마을에서 깨어난다
+      if (id === 'prologueJump') world.go('done');
+      else world.finishTalk();
     };
     const choose = (jump: boolean) => {
       setTalk(null);
-      world.choose(jump);
       if (jump) playWhoosh(true);
+      // 내 캐릭터용 뛰어내리기 컷신이 있으면 그걸로 보여 준다 (그동안 벼랑 장면은 멈춰 있다)
+      if (jump && cinematicShots('prologueJump', profile.body)) return setCine('prologueJump');
+      world.choose(jump);
     };
     api.current = { next, choose, cineEnd };
 
@@ -220,7 +224,7 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
       )}
       {touch && control && <TouchControls kb={kb} map={P1_KEYS} />}
 
-      {cine && <CinematicPlayer id="prologueChase" body={profile.body} onEnd={() => api.current?.cineEnd()} />}
+      {cine && <CinematicPlayer key={cine} id={cine} body={profile.body} onEnd={() => api.current?.cineEnd(cine)} />}
 
       {line && <StoryDialog line={line} idx={talk!.idx} total={talk!.lines.length} onNext={() => api.current?.next()} choices={choices} touch={touch} nextLabel="계속" />}
 

@@ -37,6 +37,17 @@ export const CINEMATICS = {
       ],
     },
   },
+  /** 프롤로그: 막다른 벼랑에서 뛰어내린다 (벼랑에서 바로 고르거나, 맞서다 몰려서) → 암전 → 마을에서 깨어난다 */
+  prologueJump: {
+    byBody: {
+      smallSilverGirl: [
+        // 벼랑 끝: 까마득한 아래 마을 불빛, 뒤에서 다가오는 그림자 → 돌아보며 마음을 굳히고 한 걸음 물러선다
+        { video: '/cinematics/prologue-jump/edge.mp4' },
+        // 허공으로 몸을 던진다: 슬로모션으로 만들어 얼굴이 번지지 않게 하고, 조금 빠르게 튼다
+        { video: '/cinematics/prologue-jump/fall.mp4', rate: 1.25 },
+      ],
+    },
+  },
 } satisfies Record<string, Cinematic>;
 
 export type CinematicId = keyof typeof CINEMATICS;
