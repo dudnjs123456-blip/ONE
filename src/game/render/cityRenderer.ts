@@ -2933,7 +2933,7 @@ export class CityRenderer {
       // 침대 위 (매트리스 · 낮에 깔린 이불 · 니트 담요 바깥 끝까지) 를 덮는다. 머리는 베개 위로 내놓는다
       const lie = HOME.bed.lie;
       const day = sleepDuvet();
-      this.duvet = new BodyQuilt({ x0: 3.0, x1: 4.96, zHem: lie.z - 1.29, zFoot: -1.32, top: 0.78, drape: 0.2, fall: 0.3, uvScale: 0.6 }, day.material as THREE.Material);
+      this.duvet = new BodyQuilt({ x0: 3.0, x1: 4.96, zHem: lie.z - 1.35, zFoot: -1.32, top: 0.78, drape: 0.2, fall: 0.3, uvScale: 0.6 }, day.material as THREE.Material);
       day.geometry.dispose();
       s.add(this.duvet.mesh);
     }

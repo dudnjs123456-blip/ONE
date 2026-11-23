@@ -500,7 +500,7 @@ export function buildInn(s: THREE.Scene): InnScene {
     // 자는 사람에게 덮는 이불: 누운 몸보다 늘 위로 부풀고 (뒤척여도 안 뚫린다), 발끝부터 어깨까지 당겨 덮는다.
     // 발치 판(윗면 0.65)까지 덮고, 발치 너머 자락은 발치 상자(윗면 0.4)에 닿기 전에 멈춘다
     const quilt = new BodyQuilt(
-      { x0: bed.x - BED_W / 2 - 0.03, x1: bed.x + BED_W / 2 + 0.03, zHem: bed.head + 0.66, zFoot: bed.head + BED_L, top: MAT_TOP + 0.05, drape: 0.18, fall: 0.2, uvScale: 1.1 },
+      { x0: bed.x - BED_W / 2 - 0.03, x1: bed.x + BED_W / 2 + 0.03, zHem: bed.head + 0.6, zFoot: bed.head + BED_L, top: MAT_TOP + 0.05, drape: 0.18, fall: 0.2, uvScale: 1.1 },
       M.quilts[i],
     );
     s.add(quilt.mesh);
@@ -642,9 +642,9 @@ export function buildInn(s: THREE.Scene): InnScene {
       INN_BEDS.forEach((bed, i) => {
         const use = state.beds.get(i);
         foldeds[i].visible = !use;
-        // 부드럽게 당겨 덮는다 (다른 사람 rest 는 0.05 단위로 와서 그대로 쓰면 뚝뚝 끊긴다)
-        covers[i] += ((use?.cover ?? 0) - covers[i]) * 0.08;
-        if (!use && covers[i] < 0.02) covers[i] = 0;
+        // 다 누우면 발끝부터 어깨까지 0.8초에 걸쳐 고르게 당겨 덮고, 일어날 땐 0.3초에 걷는다
+        const want = use?.cover ?? 0;
+        covers[i] = want > covers[i] ? Math.min(want, covers[i] + 1 / 48) : Math.max(want, covers[i] - 1 / 18);
         blankets[i].update(covers[i], [use?.body]);
       });
     },

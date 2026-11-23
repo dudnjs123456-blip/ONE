@@ -1946,7 +1946,7 @@ export class CityWorld {
       case 'lie':
         return { phase: 'lie', rest: Math.min(1, t / SLEEP_LIE), blanket: 0, dark: Math.max(0, (t - SLEEP_LIE + 20) / 20), night: 0, slept: 0 };
       case 'sleep':
-        return { phase: 'sleep', rest: 1, blanket: Math.min(1, t / 40), dark: 1, night: Math.min(1, (this.nowMs() - s.since) / SLEEP_MAX_MS), slept: this.nowMs() - s.since };
+        return { phase: 'sleep', rest: 1, blanket: Math.min(1, t / 48), dark: 1, night: Math.min(1, (this.nowMs() - s.since) / SLEEP_MAX_MS), slept: this.nowMs() - s.since };
       case 'wake':
         return { phase: 'wake', rest: Math.max(0, 1 - Math.max(0, t - 15) / (SLEEP_WAKE - 15)), blanket: Math.max(0, 1 - t / 15), dark: Math.max(0, 1 - t / 25), night: 1, slept: s.last - s.since };
     }

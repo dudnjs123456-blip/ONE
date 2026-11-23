@@ -137,7 +137,7 @@ export class FieldRenderer {
       // 다 누운 뒤(rest 0.85 → 1)에 발끝부터 덮는다. 걸터앉아 다리를 올리는 동안엔 이불이 없다 · 이불은 누운 몸을 따라 덮인다
       const occupy = (bed: number, rest: number, f: Fighter) => {
         if (beds.has(bed)) return;
-        beds.set(bed, { cover: Math.min(1, Math.max(0, (rest - 0.85) / 0.15)), body: this.actors.get(f)?.mannequin });
+        beds.set(bed, { cover: rest >= 0.9 ? 1 : 0, body: this.actors.get(f)?.mannequin });
       };
       if (world.sleep) occupy(world.sleep.bed, world.restAmount, world.player);
       if (world.shower) booths.add(world.shower.booth);

@@ -118,7 +118,8 @@ export class BodyQuilt {
       this.measure(bodies);
       changed = true;
     }
-    if (changed) this.shape(cover);
+    // 당기는 속도: 천천히 시작해서 고르게 당기고 부드럽게 멈춘다 (확 튀어 올랐다가 끝에서 질질 끌지 않게)
+    if (changed) this.shape(cover * cover * (3 - 2 * cover));
     this.lastCover = cover;
   }
 
