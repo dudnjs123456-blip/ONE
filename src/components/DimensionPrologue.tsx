@@ -12,6 +12,8 @@ import { BEAST_NAME, PROLOGUE_SCRIPT, type ScriptLine } from '@/game/data/prolog
 import { storyPortrait } from '@/game/data/portraits';
 import { startBgm, stopBgm } from '@/game/render/bgm';
 import { playWhoosh, unlockAudioOnInput } from '@/game/render/sfx';
+import { cinematicShots } from '@/game/data/cinematics';
+import CinematicPlayer from './CinematicPlayer';
 import StoryDialog, { type DialogChoice, type DialogLine } from './StoryDialog';
 import TouchControls, { useIsTouch } from './TouchControls';
 
@@ -51,9 +53,11 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
   const [talk, setTalk] = useState<Talk | null>(null);
   const [faces, setFaces] = useState<{ me: string | null; beast: string | null }>({ me: null, beast: null });
   const [black, setBlack] = useState(false);
+  /** 그림자를 만난 대사가 끝나면 2D 컷신(도망치기 시작) → 끝나면 추격 */
+  const [cine, setCine] = useState(false);
   const talkRef = useRef(talk);
   talkRef.current = talk;
-  const api = useRef<{ next: () => void; choose: (jump: boolean) => void } | null>(null);
+  const api = useRef<{ next: () => void; choose: (jump: boolean) => void; cineEnd: () => void } | null>(null);
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
 
@@ -94,6 +98,12 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
       // 마지막 줄: 벼랑에선 선택지가 뜬다 (StoryDialog 가 버튼을 그린다). 그 밖엔 다음 단계로
       if (t.phase === 'cliff' || t.phase === 'cornered') return;
       setTalk(null);
+      // 내 캐릭터 그림으로 만든 컷신이 있으면 먼저 틀고, 끝나면 추격을 시작한다
+      if (t.phase === 'encounter' && cinematicShots('prologueChase', profile.body)) return setCine(true);
+      world.finishTalk();
+    };
+    const cineEnd = () => {
+      setCine(false);
       world.finishTalk();
     };
     const choose = (jump: boolean) => {
@@ -101,7 +111,7 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
       world.choose(jump);
       if (jump) playWhoosh(true);
     };
-    api.current = { next, choose };
+    api.current = { next, choose, cineEnd };
 
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
@@ -209,6 +219,8 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
         </div>
       )}
       {touch && control && <TouchControls kb={kb} map={P1_KEYS} />}
+
+      {cine && <CinematicPlayer id="prologueChase" body={profile.body} onEnd={() => api.current?.cineEnd()} />}
 
       {line && <StoryDialog line={line} idx={talk!.idx} total={talk!.lines.length} onNext={() => api.current?.next()} choices={choices} touch={touch} nextLabel="계속" />}
 
