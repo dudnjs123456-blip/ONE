@@ -4,13 +4,13 @@ import { bodySpecFor } from '../data/bodies';
 import { mulberry32 } from './controllers';
 import { Fighter, type FighterState } from './fighter';
 import { NEUTRAL_INPUT, makeInput, type RelInput } from './input';
-import { gainExp, type PlayerProfile } from './profile';
+import { gainExp, saveProfile, type PlayerProfile } from './profile';
 import { LIFE_WARNING, LifeTracker } from './life';
 import { FIELD_SPAWNS, MONSTERS, MONSTER_RESPAWN_FRAMES, type MonsterType } from '../data/monsters';
 import { DIR_OF_KEY, MOVES, totalFrames } from '../data/moves';
 import { expToNext } from '../data/progression';
-import { playerStats } from '../data/equipment';
-import { SPOT_RANGE, TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, VILLAGE_SPOTS, type VillageNpcDef } from '../data/village';
+import { EQUIPS, dimensionStats, ensureGear, rollDrop } from '../data/equipment';
+import { ARMS_STALL, SPOT_RANGE, TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, VILLAGE_SPOTS, type VillageNpcDef } from '../data/village';
 import { gateLocked } from '../story/chapter0';
 import { DIRT_PER_FRAME, DIRTY, dirtRate } from '../city/chores';
 import {
@@ -314,6 +314,8 @@ export interface FieldHudState {
   npc: { id: string; name: string; title: string; met: boolean } | null;
   /** 0장: 가까이 있는 살펴볼 곳 (NPC 가 더 가까우면 null) */
   spot: { id: 'board' | 'well' | 'book'; name: string; seen: boolean } | null;
+  /** 무구 노점 앞 (장비를 은화로 산다) */
+  shop: boolean;
 }
 
 const idle = (): FieldCommand => ({ move: null, input: NEUTRAL_INPUT });
@@ -471,7 +473,7 @@ export class FieldWorld {
     online = false,
   ) {
     this.rng = mulberry32(seed);
-    this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
+    this.player = new Fighter(0, 'PLAYER', { ...dimensionStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     // 접속하면 경계 마을 포탈 앞에서 시작한다 (자동사냥은 꺼 둔 채로, 켜면 북문을 나가 사냥)
     this.player.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
     // 1장에 처음 나오는 인물은 0장을 마친 사람에게만 보인다
@@ -571,6 +573,43 @@ export class FieldWorld {
       }
     }
     return best;
+  }
+
+  /** 무구 노점 앞인가 (말 걸 NPC 가 있으면 그쪽이 먼저) */
+  nearbyShop(): boolean {
+    const p = this.player;
+    return p.hp > 0 && !this.nearbyNpc() && Math.hypot(ARMS_STALL.x - p.x, ARMS_STALL.z - p.z) < SPOT_RANGE;
+  }
+
+  /** 장비를 바꿨다: 체력·공격력을 다시 계산한다 (몸 + 차원 장비) */
+  refreshStats() {
+    const st = dimensionStats(this.profile);
+    const p = this.player;
+    p.maxHp = st.maxHp;
+    p.power = st.power;
+    p.hp = Math.min(p.hp, p.maxHp);
+    saveProfile(this.profile);
+  }
+
+  /** 이야기 보수로 은화를 받는다 */
+  giveCoin(n: number, why: string) {
+    this.addCoin(n);
+    const p = this.player;
+    this.texts.push({ x: p.x, y: 2.2, z: p.z, text: `+${n} ${COIN_NAME}`, kind: 'gold' });
+    this.addLog(`${why} (+${n} ${COIN_NAME})`);
+    saveProfile(this.profile);
+  }
+
+  /** 무구 노점: 장비를 은화로 사서 가방에 */
+  buyGear(id: string): { ok: boolean; message: string } {
+    const e = EQUIPS[id];
+    if (!e?.price) return { ok: false, message: '노점에서 파는 물건이 아니에요' };
+    if (this.coin < e.price) return { ok: false, message: `${COIN_NAME}가 모자라요 (${e.price} ${COIN_NAME} · 가진 돈 ${this.coin})` };
+    this.addCoin(-e.price);
+    ensureGear(this.profile).owned.push(id);
+    saveProfile(this.profile);
+    this.addLog(`${e.icon} ${e.name} 구입 (-${e.price} ${COIN_NAME})`);
+    return { ok: true, message: `${e.icon} ${e.name}을(를) 샀다! 내 장비 탭에서 껴요` };
   }
 
   /** 0장 장면 동안 NPC 를 붙잡아 둔다 (talk() 처럼 서로 마주 보고, 끝나면 endTalk) */
@@ -1113,6 +1152,7 @@ export class FieldWorld {
         const s = this.nearbySpot();
         return s && { id: s.id, name: s.name, seen: !!this.profile.dimension?.ch0?.clues?.includes(s.id) };
       })(),
+      shop: this.nearbyShop(),
     };
   }
 
@@ -1519,12 +1559,20 @@ export class FieldWorld {
     this.texts.push({ x, y: 2.2, z, text: `+${type.exp} EXP`, kind: 'exp' });
     this.texts.push({ x, y: 1.8, z, text: `+${type.gold} ${COIN_NAME}`, kind: 'gold' });
     this.addLog(`${type.name} 처치 (+${type.exp} EXP, +${type.gold} ${COIN_NAME})`);
+    // 가끔 장비를 떨어뜨린다 (내 가방에만 — 같은 차원 사람들 몬스터 계산과 어긋나지 않게 공유 난수는 쓰지 않는다)
+    const drop = rollDrop(type.id, Math.random);
+    if (drop) {
+      const e = EQUIPS[drop];
+      ensureGear(this.profile).owned.push(drop);
+      this.texts.push({ x, y: 2.6, z, text: `${e.icon} ${e.name}`, kind: 'level' });
+      this.addLog(`${type.name}이(가) ${e.icon} ${e.name}을(를) 떨어뜨렸다! (장비창 T)`);
+    }
     this.onExp(type.exp);
   }
 
   private onExp(n: number) {
     if (gainExp(this.profile, n) === 0) return;
-    const st = playerStats(this.profile);
+    const st = dimensionStats(this.profile);
     const p = this.player;
     p.maxHp = st.maxHp;
     p.power = st.power;

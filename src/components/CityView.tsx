@@ -23,7 +23,6 @@ import RideStaffTalk from './RideStaffTalk';
 import { drawParkBase, drawParkPlayer } from './parkMapDraw';
 import JobPanel from './JobPanel';
 import CalendarPanel from './CalendarPanel';
-import GearPanel from './GearPanel';
 import WardrobeView from './WardrobeView';
 import CasinoPanel from './CasinoPanel';
 import KaraokePanel from './KaraokePanel';
@@ -262,7 +261,6 @@ export default function CityView({
   const tvFrameRef = useRef<HTMLIFrameElement>(null);
   const tvPanelRef = useRef(tvPanel);
   tvPanelRef.current = tvPanel;
-  const [gear, setGear] = useState(false);
   const [casino, setCasino] = useState(false);
   const [karaoke, setKaraoke] = useState(false);
   const [karaokeDesk, setKaraokeDesk] = useState(false);
@@ -290,8 +288,6 @@ export default function CityView({
   jobsRef.current = jobs;
   const calRef = useRef(calendar);
   calRef.current = calendar;
-  const gearRef = useRef(gear);
-  gearRef.current = gear;
   const casinoRef = useRef(casino);
   casinoRef.current = casino;
   const karaokeRef = useRef(karaoke);
@@ -329,7 +325,7 @@ export default function CityView({
     const world = new CityWorld({
       read: () => {
         const input = kb.read();
-        return menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || gearRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || homePcRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current
+        return menuRef.current || bigMapRef.current || jobsRef.current || calRef.current || casinoRef.current || karaokeRef.current || karaokeDeskRef.current || busRef.current || pcRoomRef.current || homePcRef.current || petsRef.current || wardrobeRef.current || fishDexRef.current || fishShopRef.current
           ? { move: null, run: false, interact: false }
           : input;
       },
@@ -435,7 +431,6 @@ export default function CityView({
         else if (jobsRef.current) setJobs(false);
         else if (calRef.current) setCalendar(false);
         else if (tvPanelRef.current) setTvPanel(false);
-        else if (gearRef.current) setGear(false);
         else if (casinoRef.current) setCasino(false);
         else if (karaokeRef.current) setKaraoke(false);
         else if (karaokeDeskRef.current) setKaraokeDesk(false);
@@ -452,7 +447,6 @@ export default function CityView({
       if (e.code === 'KeyJ' && !e.repeat && !world.dialog) setJobs((v) => !v);
       if (e.code === 'KeyG' && !e.repeat && world.job) world.job.toggleAuto();
       if (e.code === 'KeyP' && !e.repeat && world.job) world.job.toggleAutoPatrol();
-      if (e.code === 'KeyT' && !e.repeat && !world.dialog) setGear((v) => !v);
       if (e.code === 'KeyO' && !e.repeat && !world.dialog) setWardrobe((v) => (v ? null : { shop: false }));
       if (e.code === 'KeyK' && !e.repeat && !world.dialog) setPets((v) => (v ? null : 'care'));
       // F: 낚시 도감 · 확률표 · 낚시 방법
@@ -892,7 +886,7 @@ export default function CityView({
               {bindLabel('b1')} 왼팔 · {bindLabel('b2')} 오른팔 · {bindLabel('b3')} 왼다리 · {bindLabel('b4')} 오른다리 ({bindLabel('run')} = 아래) · Esc 메뉴에서 키 설정
             </div>
             <div>싸울 때 C 숙이기 (상단 공격 피하기)</div>
-            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · T 장비 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · B 1인칭 · V 음성 대화 · 1~9 표정 대사 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
+            <div>M 전체 지도 (누르면 자동 이동) · J 일자리 · O 코디 · I 인벤토리 · K 내 펫 · F 낚시 도감 · B 1인칭 · V 음성 대화 · 1~9 표정 대사 · 휠 / Ctrl+휠 줌 (Ctrl+0 원래대로) · Esc 메뉴</div>
           </div>
         </div>
       )}
@@ -949,16 +943,6 @@ export default function CityView({
       {bus && worldRef.current && <BusPanel world={worldRef.current} onClose={() => setBus(false)} />}
       {pcRoom && worldRef.current && onPlay && <PcRoomPanel world={worldRef.current} onPlay={onPlay} onClose={() => setPcRoom(false)} />}
       {homePc && onDimension && <HomePcPanel profile={profile} playerName={account?.username} onConnect={onDimension} onClose={() => setHomePc(false)} />}
-      {gear && worldRef.current && (
-        <GearPanel
-          world={worldRef.current}
-          onClose={() => setGear(false)}
-          onWardrobe={() => {
-            setGear(false);
-            setWardrobe({ shop: false });
-          }}
-        />
-      )}
       {wardrobe && worldRef.current && (
         <WardrobeView world={worldRef.current} shop={wardrobe.shop} startSlot={wardrobe.slot ?? null} startTry={wardrobe.tryIds} onClose={() => setWardrobe(null)} />
       )}

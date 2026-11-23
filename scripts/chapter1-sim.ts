@@ -16,6 +16,7 @@ import {
   countQuestKill,
   finishCh1,
   readRoot,
+  resumeCh1Scene,
   sceneOnLogout,
   startCh1,
   type Ch1SceneId,
@@ -64,11 +65,17 @@ check('then meet doha', s.step === 'doha' && ch1SceneForNpc('doha', s, p)?.id ==
 check('doha came by a different passage (last subway car)', ch1Scene('doha', s, p).lines.some((l) => l.text.includes('지하철')));
 finishCh1(s, 'doha');
 
+// 바위가 직접 의뢰를 맡긴다
+check('then bawi hands you the goblin quest', s.step === 'order' && ch1SceneForNpc('bawi', s, p)?.id === 'order' && ch1Objective(s)?.kind === 'npc');
+check('the quest names the reward from the board (3 silver)', ch1Scene('order', s, p).lines.some((l) => l.text.includes('은화 세 닢')));
+finishCh1(s, 'order');
+
 // 고블린 의뢰
-check('goblin quest starts at 0/3', s.step === 'quest' && s.questKills === 0 && ch1Objective(s)?.label.includes(`0/${QUEST_GOAL}`));
+check('goblin quest starts at 0/3', s.step === 'quest' && s.questKills === 0 && !!ch1Objective(s)?.label.includes(`0/${QUEST_GOAL}`));
 check('other monsters do not count', countQuestKill(s, 'bandit') === false && s.questKills === 0);
 check('goblins count, third one triggers', !countQuestKill(s, 'goblin') && !countQuestKill(s, 'goblin') && countQuestKill(s, 'goblin') && s.questKills === 3);
 check('no more counting after 3', !countQuestKill(s, 'goblin') && s.questKills === 3);
+check('leaving right after the 3rd kill replays kong on return', resumeCh1Scene(s) === 'scream');
 check('kong scream → root burst → name it', afterScene('scream').effect === 'burst' && afterScene('scream').next === 'awaken' && afterScene('awaken').effect === 'name');
 check('skill names are 1–12 chars', cleanSkillName('  한 걸음   너머 ') === '한 걸음 너머' && cleanSkillName('') === null && cleanSkillName('가'.repeat(13)) === null);
 s.skillName = '한 걸음 너머';
@@ -77,6 +84,8 @@ finishCh1(s, 'scream');
 finishCh1(s, 'awaken');
 finishCh1(s, 'named');
 check('then the badge from maru', s.step === 'badge' && ch1SceneForNpc('maru', s, p)?.id === 'badge' && afterScene('badge').next === 'final');
+check('nothing to replay once past the quest', resumeCh1Scene(s) === null);
+check('the badge scene pays the 3 silver', afterScene('badge').coin === 3);
 finishCh1(s, 'badge');
 finishCh1(s, 'final');
 check('chapter 1 done: "this is not a game"', s.step === 'done' && ch1Objective(s) === null && ch1Scene('final', s, p).lines.some((l) => l.text.includes('게임이 아니야')));

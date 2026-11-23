@@ -11,13 +11,14 @@ import type { PlayerProfile } from '../core/profile';
  *  back    바위의 몸 수련 ② 숨 고르기 (미니게임) → 땅이 울리고 포탈이 꺼져 로그아웃이 안 된다 (사건 B — "로그아웃 되잖아")
  *  noa     노아의 근 감정: 서울에서 실제로 해 온 생활(플레이 기록)을 맞힌다 (사건 C — "NPC AI") → 내 근이 정해진다
  *  doha    벤치 옆 낯선 사람 도하: 지하철 마지막 칸으로 온 먼저 온 저편 사람 (사건 D — "다 설정 대사")
+ *  order   바위가 직접 의뢰를 맡긴다 (0장 게시판의 「북문 밖 고블린 퇴치 · 보수 은화 세 닢」)
  *  quest   북문 밖 고블린 세 마리 → 몰래 따라온 콩이가 다친다 (사건 E — "NPC니까") → 근이 처음 터진다 → 기술 이름 짓기
- *  badge   촌장 마루의 정식 길드 배지 → "이건… 게임이 아니야"
+ *  badge   촌장 마루의 정식 길드 배지 + 의뢰 보수 은화 세 닢 → "이건… 게임이 아니야"
  *  done
  */
 
 export type RootId = '형' | '력' | '생' | '심' | '공' | '시';
-export type Ch1Step = 'start' | 'toSeoul' | 'back' | 'noa' | 'doha' | 'quest' | 'badge' | 'done';
+export type Ch1Step = 'start' | 'toSeoul' | 'back' | 'noa' | 'doha' | 'order' | 'quest' | 'badge' | 'done';
 
 export interface Ch1State {
   step: Ch1Step;
@@ -33,8 +34,10 @@ export interface Ch1State {
 }
 
 export const QUEST_GOAL = 3;
+/** 고블린 의뢰 보수 (은화) — 0장 게시판에 적힌 그대로 */
+export const QUEST_REWARD = 3;
 
-export type Ch1SceneId = 'intro' | 'guarded' | 'bruise' | 'breath' | 'quake' | 'read' | 'doha' | 'scream' | 'awaken' | 'named' | 'badge' | 'final';
+export type Ch1SceneId = 'intro' | 'guarded' | 'bruise' | 'breath' | 'quake' | 'read' | 'doha' | 'order' | 'scream' | 'awaken' | 'named' | 'badge' | 'final';
 
 export interface Ch1Scene {
   id: Ch1SceneId;
@@ -46,6 +49,8 @@ export interface Ch1After {
   effect?: 'guard' | 'breath' | 'burst' | 'name' | 'exit';
   next?: Ch1SceneId;
   step?: Ch1Step;
+  /** 받는 은화 (의뢰 보수) */
+  coin?: number;
 }
 
 const AFTER: Record<Ch1SceneId, Ch1After> = {
@@ -55,11 +60,12 @@ const AFTER: Record<Ch1SceneId, Ch1After> = {
   breath: { effect: 'breath', next: 'quake' },
   quake: { step: 'noa' },
   read: { step: 'doha' },
-  doha: { step: 'quest' },
+  doha: { step: 'order' },
+  order: { step: 'quest' },
   scream: { effect: 'burst', next: 'awaken' },
   awaken: { effect: 'name', next: 'named' },
   named: { step: 'badge' },
-  badge: { next: 'final' },
+  badge: { next: 'final', coin: QUEST_REWARD },
   final: { step: 'done' },
 };
 
@@ -88,6 +94,7 @@ export function ch1SceneForNpc(npcId: string, s: Ch1State | null, profile: Playe
     back: ['bawi', 'breath'],
     noa: ['noa', 'read'],
     doha: ['doha', 'doha'],
+    order: ['bawi', 'order'],
     badge: ['maru', 'badge'],
   };
   const w = want[s.step];
@@ -101,6 +108,14 @@ export function countQuestKill(s: Ch1State | null, monsterId: string): boolean {
   if (before >= QUEST_GOAL) return false;
   s.questKills = before + 1;
   return s.questKills === QUEST_GOAL;
+}
+
+/**
+ * 다시 접속했을 때 이어서 틀어야 할 장면. 고블린 셋을 다 잡은 뒤 콩이 장면 ~ 이름 짓기 사이에 나갔으면
+ * (단계는 아직 'quest' 에 3/3) 콩이 비명부터 다시 — 그러지 않으면 더 셀 고블린이 없어 1장이 멈춘다
+ */
+export function resumeCh1Scene(s: Ch1State | null): Ch1SceneId | null {
+  return s?.step === 'quest' && (s.questKills ?? 0) >= QUEST_GOAL ? 'scream' : null;
 }
 
 /** 로그아웃 버튼을 눌렀을 때: 서울에 다녀오는 차례면 서울 내 방 장면부터 */
@@ -122,6 +137,8 @@ export function ch1Objective(s: Ch1State | null): { kind: 'npc'; npc: string; la
       return { kind: 'npc', npc: 'noa', label: '노아에게 근 감정 받기' };
     case 'doha':
       return { kind: 'npc', npc: 'doha', label: '벤치 옆 낯선 사람에게 말 걸기' };
+    case 'order':
+      return { kind: 'npc', npc: 'bawi', label: '북문의 바위에게 의뢰 받기' };
     case 'quest':
       return { kind: 'hunt', label: `북문 밖 고블린 잡기 (${Math.min(s.questKills ?? 0, QUEST_GOAL)}/${QUEST_GOAL})` };
     case 'badge':
@@ -161,20 +178,27 @@ export function readRoot(p: PlayerProfile): RootReading {
   score.sort((a, b) => b[1] - a[1]);
   const root = score[0][1] > 0 ? score[0][0] : '력';
   switch (root) {
+    // 노아는 몸에 밴 흔적을 세어 말하고(숫자까지), 주인공은 그 숫자가 실제 서울 기록과 똑같아서 놀란다
     case '공':
-      return { root, fact: `한강에서 낚시한 거… ${fish}마리 잡은 것까지 안다고?`, noa: '손에서 강바람 냄새가 나요. 물가에 앉아 멀리 줄을 던지고, 오래 기다렸죠?' };
+      return { root, fact: `${fish}마리… 한강에서 잡은 거랑 딱 맞아. 그걸 어떻게 알아?`, noa: `손에서 강바람 냄새가 나요. 물가에 앉아 오래 기다렸죠? …물고기 ${fish}마리의 숨이 아직 손끝에 남아 있어요.` };
     case '형':
-      return { root, fact: `알바 ${shifts}번 뛴 걸… 그걸 어떻게 알아?`, noa: '손끝에 일한 흔적이 배어 있어요. 무언가를 나르고, 다듬고, 쌓아 온 사람.' };
+      return { root, fact: `알바 ${shifts}번… 숫자까지 정확해. 아무한테도 말한 적 없는데.`, noa: `손끝에 일한 흔적이 배어 있어요. 무언가를 나르고, 다듬고… ${shifts}번, 땀이 마를 새 없이 일했네요.` };
     case '생':
-      return { root, fact: `우리 집 펫들… ${pets}마리 키우는 걸 어떻게 알아?`, noa: '작은 숨결 냄새가 나요. 누군가를 먹이고, 씻기고, 돌봐 온 사람이죠?' };
+      return { root, fact: `우리 집 펫이 ${pets}마리인 것까지… 어떻게 알아?`, noa: `작은 숨결 냄새가 나요. 하나, 둘… 당신이 먹이고 씻겨 온 작은 숨이 ${pets}개 느껴져요.` };
     case '심':
-      return { root, fact: `동네 사람 ${friends}명이랑 친해진 것까지…?`, noa: '당신 안에 다른 사람 목소리가 많이 남아 있어요. 사람들과 오래 마음을 나눴죠?' };
+      return { root, fact: `${friends}명… 서울에서 정붙인 사람 수랑 똑같아.`, noa: `당신 안에 다른 사람 목소리가 남아 있어요. ${friends}명… 당신을 기억하는 목소리예요.` };
     default:
-      return {
-        root: '력',
-        fact: fights > 0 ? `싸운 거… 몬스터 ${p.kills ?? 0}마리, 대전 ${wins}번 이긴 것까지?` : '격투 게임 랭크 올리느라 밤새운 것까지…?',
-        noa: '주먹에 오래 겨뤄 온 사람 냄새가 배어 있어요. 누군가와 수없이 맞붙어 봤죠?',
-      };
+      return fights > 0
+        ? {
+            root: '력',
+            fact: `몬스터 ${p.kills ?? 0}마리, 대전 ${wins}번… 그 숫자 그대로야.`,
+            noa: `주먹에 오래 겨뤄 온 냄새가 배어 있어요. 쓰러뜨린 게 ${p.kills ?? 0}, 이긴 승부가 ${wins}… 수없이 맞붙어 봤죠?`,
+          }
+        : {
+            root: '력',
+            fact: '격투 게임 랭크 올리느라 밤새운 것까지…?',
+            noa: '주먹에 오래 겨뤄 온 사람 냄새가 배어 있어요. 화면 너머로 밤새 누군가와 맞붙었죠?',
+          };
   }
 }
 
@@ -276,7 +300,13 @@ const SCRIPTS: Record<Exclude<Ch1SceneId, 'read' | 'named'>, ScriptLine[]> = {
     { who: 'doha', text: '여기서 다치면 서울에서도 아파. 여기서 보낸 시간은 서울에서도 똑같이 흘러.' },
     { who: 'doha', text: '쓰러지면 포탈 앞에서 깨어나긴 해. 근데 그게 언제까지 될지는… 아무도 몰라.' },
     { who: 'me', mood: '고민', text: '……' },
-    { who: 'doha', text: '북문 밖 고블린 의뢰, 바위 아저씨가 너한테 맡긴다더라. 조심해. 걔네도 진짜로 물어.' },
+    { who: 'doha', text: '아, 바위 아저씨가 너 찾더라. 북문 밖 고블린 의뢰를 맡긴대. 조심해. 걔네도 진짜로 물어.' },
+  ],
+  order: [
+    { who: 'bawi', text: '왔냐. 게시판 봤지? 북문 밖 고블린 셋. 보수는 은화 세 닢.' },
+    { who: 'bawi', text: '이번엔 허수아비가 아니다. 진짜로 물고, 진짜로 피가 난다. 몸은 그만큼 만들었으니 해 봐.' },
+    { who: 'me', mood: '웃음', text: '드디어 첫 사냥 퀘스트네요. 고블린 셋쯤이야, 금방 끝내고 올게요!' },
+    { who: 'bawi', text: '…그 "금방"이란 말, 돌아와서도 하나 보자. 겁나면 그냥 돌아와. 그것도 실력이다.' },
   ],
   scream: [
     { who: 'me', mood: '웃음', text: '세 마리 끝! 의뢰 완료. 이 정도면 바위 아저씨도 인정하겠지.' },
@@ -295,6 +325,7 @@ const SCRIPTS: Record<Exclude<Ch1SceneId, 'read' | 'named'>, ScriptLine[]> = {
   badge: [
     { who: 'maru', text: '콩이를 구했다지. 고맙네… 정말로 고맙네.' },
     { who: 'maru', text: '이건 정식 길드 배지일세. 이제 자네는 손님이 아니라 이 마을 사람이야.' },
+    { who: 'maru', text: '그리고 이건 바위가 맡긴 의뢰 보수. 은화 세 닢이네. 콩이 몫까지 얹어 주고 싶지만, 규칙은 규칙이라.' },
     { who: 'me', mood: '고민', text: '촌장님. 저… 이제 알 것 같아요.' },
     { who: 'maru', text: '허허. 그 얼굴이면 됐네. 처음 왔을 때랑은 눈빛이 다르구먼.' },
   ],

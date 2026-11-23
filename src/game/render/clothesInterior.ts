@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import type { ClothesCorner, Rect, StoreLayout } from '../city/store';
 import { CORNER_LABEL } from '../city/store';
-import { COSMETICS, type CosmeticDef } from '../data/fashion';
-import { SHOP_GEAR, type EquipDef } from '../data/equipment';
+import { COSMETICS, shopCosmetics, type CosmeticDef } from '../data/fashion';
 
 /**
- * 옷가게 안: 서쪽은 짙은 색 '배틀 기어' 구역 (무기 벽 · 방어구 · 유리 진열장),
- * 가운데·동쪽은 밝은 '스타일' 구역 (모자 선반 · 상의 행거 · 하의 테이블 · 신발·가방 벽), 남동쪽 탈의실.
+ * 옷가게 안: 서쪽은 짙은 색 '스트리트' 구역 (신상 벽 · 가방·꼬리 무대 · 안경 유리 진열장),
+ * 가운데·동쪽은 밝은 기본 코디 구역 (모자 선반 · 상의 행거 · 하의 테이블 · 신발 벽), 남동쪽 탈의실.
+ * 서울엔 전투 장비가 없다 (장비는 차원에서만) — 전부 겉모습만 바꾸는 옷이다.
  * 파는 물건이 실제 모양·색으로 진열돼 있다.
  */
 const FONT = '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
@@ -120,14 +120,13 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
     t.rotation.y = ry;
     g.add(t);
   };
-  const gearOf = (slots: EquipDef['slot'][]) => SHOP_GEAR.filter((e) => slots.includes(e.slot));
   const cosOf = (slots: CosmeticDef['slot'][]) => COSMETICS.filter((c) => slots.includes(c.slot));
   const chrome = std(0xd9dce1, 0.2, 0.9);
   const black = std(0x1c1d21, 0.5, 0.3);
   const wood = std(0xb08a62, 0.6);
   const white = std(0xf7f6f2, 0.6);
 
-  // ── 배틀 기어 구역: 서쪽 바닥 짙은 깔개 + 벽 판넬 ──
+  // ── 스트리트 구역: 서쪽 바닥 짙은 깔개 + 벽 판넬 ──
   const rug = new THREE.Mesh(new THREE.PlaneGeometry(4.0, 4.6), std(0x2e2f35, 0.95));
   rug.rotation.x = -Math.PI / 2;
   rug.position.set(-2.95, 0.006, -1.2);
@@ -135,79 +134,63 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
   g.add(rug);
   box(0.04, 2.6, 4.6, std(0x26272c, 0.8), L.room.x0 + 0.1, 1.3, -1.2);
   box(3.2, 2.6, 0.04, std(0x26272c, 0.8), -2.8, 1.3, L.room.z0 + 0.1);
-  const bigSign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.4), new THREE.MeshBasicMaterial({ map: headerTex('⚔️ BATTLE GEAR', true), transparent: true }));
+  const bigSign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.4), new THREE.MeshBasicMaterial({ map: headerTex('🔥 NEW · STREET', true), transparent: true }));
   bigSign.position.set(-2.8, 2.65, L.room.z0 + 0.13);
   g.add(bigSign);
 
-  // 무기 벽: 구멍판 + 걸이 + 무기 (세워서 건다)
+  // 신상 벽: 구멍판에 최근 들어온 상의·하의를 앞으로 보이게 건다 (나머지 신상은 가격표만)
   {
-    const r = corner('weapon');
+    const r = corner('newIn');
     const wx = r.x1 - 0.12;
     box(0.06, 1.6, r.z1 - r.z0, std(0x3a3b41, 0.7), r.x0 + 0.17, 1.35, (r.z0 + r.z1) / 2);
     box(0.3, 0.9, r.z1 - r.z0, black, r.x0 + 0.17, 0.45, (r.z0 + r.z1) / 2);
-    const list = gearOf(['weapon']);
-    list.forEach((e, i) => {
-      const z = r.z0 + ((i + 0.5) * (r.z1 - r.z0)) / list.length;
-      const grp = new THREE.Group();
-      grp.position.set(wx, 1.4, z);
-      grp.rotation.z = 0.12;
-      g.add(grp);
-      if (e.id === 'aluBat') {
-        mesh(new THREE.CylinderGeometry(0.035, 0.016, 0.86, 16), std(0xc9ced6, 0.25, 0.9), 0, 0, 0, grp);
-        mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.18, 12), std(0x1c1d21, 0.9), 0, -0.36, 0, grp);
-      } else if (e.id === 'steelPipe') {
-        mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.9, 14), std(0x7d8187, 0.35, 0.85), 0, 0, 0, grp);
-        mesh(new THREE.TorusGeometry(0.028, 0.008, 8, 16), std(0x5d6066, 0.4, 0.8), 0, 0.45, 0, grp).rotation.x = Math.PI / 2;
+    const fresh = shopCosmetics().filter((c) => /^nd{8}-/.test(c.id));
+    const hung = fresh.filter((c) => c.slot === 'top' || c.slot === 'bottom').slice(0, 6);
+    hung.forEach((c, i) => {
+      const z = r.z0 + ((i + 0.5) * (r.z1 - r.z0)) / Math.max(1, hung.length);
+      const fab = new THREE.MeshStandardMaterial({ map: fabricTex(c), roughness: 0.9 });
+      box(0.12, 0.015, 0.015, chrome, wx - 0.04, 1.62, z);
+      if (c.slot === 'top') {
+        box(0.02, 0.42, 0.3, fab, wx, 1.36, z);
+        for (const sd of [-1, 1]) box(0.018, 0.13, 0.1, fab, wx, 1.51, z + sd * 0.18).rotation.x = sd * 0.6;
       } else {
-        // 삼단봉: 굵기가 다른 세 마디
-        [0.02, 0.016, 0.012].forEach((rr, k) => mesh(new THREE.CylinderGeometry(rr, rr, 0.24, 12), black, 0, -0.2 + k * 0.23, 0, grp));
-        mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.16, 12), std(0x8b1e1e, 0.8), 0, -0.36, 0, grp);
+        box(0.02, 0.12, 0.3, fab, wx, 1.52, z);
+        for (const sd of [-1, 1]) box(0.02, 0.5, 0.13, fab, wx, 1.22, z + sd * 0.075);
       }
-      // 걸이 둘
-      for (const dy of [-0.25, 0.25]) box(0.12, 0.015, 0.015, chrome, wx - 0.04, 1.4 + dy, z);
-      tag(e, wx + 0.02, 0.78, z, Math.PI / 2);
+      tag(c, wx + 0.02, 0.78, z, Math.PI / 2);
     });
-    header('weapon', r.x1 + 0.02, 2.25, (r.z0 + r.z1) / 2, Math.PI / 2, true);
+    header('newIn', r.x1 + 0.02, 2.25, (r.z0 + r.z1) / 2, Math.PI / 2, true);
   }
 
-  // 방어구: 북쪽 벽 낮은 단 + 토르소(재킷) · 헬멧 · 카고바지 · 전투화
+  // 가방·꼬리 무대: 북쪽 벽 낮은 단에 가방을 세우고, 꼬리는 받침 위 솜뭉치
   {
-    const r = corner('armor');
+    const r = corner('acc');
     const cz = (r.z0 + r.z1) / 2;
     box(r.x1 - r.x0, 0.25, r.z1 - r.z0, std(0x34353b, 0.6), (r.x0 + r.x1) / 2, 0.125, cz);
-    const list = gearOf(['head', 'top', 'bottom', 'shoes']);
-    list.forEach((e, i) => {
-      const x = r.x0 + ((i + 0.5) * (r.x1 - r.x0)) / list.length;
+    const list = cosOf(['bag', 'tail']);
+    list.forEach((c, i) => {
+      const x = r.x0 + ((i + 0.5) * (r.x1 - r.x0)) / Math.max(1, list.length);
       const y0 = 0.25;
-      if (e.slot === 'top') {
-        // 토르소 마네킹 + 가죽 재킷
-        mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.7, 8), chrome, x, y0 + 0.35, cz);
-        const jacket = std(0x2a1d17, 0.45, 0.1);
-        mesh(new THREE.CylinderGeometry(0.17, 0.14, 0.5, 16), jacket, x, y0 + 0.95, cz).scale.set(1, 1, 0.65);
-        for (const s of [-1, 1]) mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.42, 10), jacket, x + s * 0.2, y0 + 0.92, cz).rotation.z = s * 0.15;
-        box(0.02, 0.4, 0.01, chrome, x + 0.03, y0 + 0.95, cz + 0.1);
-      } else if (e.slot === 'head') {
-        mesh(new THREE.CylinderGeometry(0.05, 0.08, 0.5, 12), black, x, y0 + 0.25, cz);
-        const hm = mesh(new THREE.SphereGeometry(0.15, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.62), std(0xf2f2f2, 0.25, 0.3), x, y0 + 0.55, cz);
-        hm.scale.set(1, 1.05, 1.1);
-        const visor = mesh(new THREE.SphereGeometry(0.152, 20, 8, -0.9, 1.8, 1.0, 0.7), std(0x1b2a3a, 0.05, 0.6, { transparent: true, opacity: 0.8 }), x, y0 + 0.55, cz);
-        visor.scale.set(1, 1.05, 1.1);
-      } else if (e.slot === 'bottom') {
-        for (let k = 0; k < 3; k++) box(0.34, 0.06, 0.3, std(0x6b6a45, 0.85), x, y0 + 0.03 + k * 0.062, cz);
+      if (c.slot === 'bag') {
+        const mini = c.style === 'mini';
+        const bw = mini ? 0.17 : 0.24;
+        const bh = mini ? 0.2 : 0.3;
+        box(bw, bh, 0.1, std(c.color, 0.7), x, y0 + bh / 2, cz);
+        box(bw * 1.02, bh * 0.22, 0.11, std(new THREE.Color(c.color).multiplyScalar(0.75).getHex(), 0.7), x, y0 + bh * 0.9, cz);
       } else {
-        for (const s of [-1, 1]) {
-          box(0.1, 0.05, 0.26, std(0x1c1a17, 0.9), x + s * 0.07, y0 + 0.025, cz);
-          box(0.09, 0.18, 0.12, std(0x3a3226, 0.6), x + s * 0.07, y0 + 0.14, cz - 0.06);
-        }
+        mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.12, 12), chrome, x, y0 + 0.06, cz);
+        const mt = std(c.color, 0.95);
+        mesh(new THREE.IcosahedronGeometry(0.06, 1), mt, x, y0 + 0.17, cz);
+        mesh(new THREE.IcosahedronGeometry(0.035, 1), mt, x + 0.03, y0 + 0.21, cz + 0.02);
       }
-      tag(e, x, y0 + 0.08, r.z1 + 0.005);
+      tag(c, x, y0 + 0.08, r.z1 + 0.005);
     });
-    header('armor', (r.x0 + r.x1) / 2, 2.05, r.z0 + 0.14, 0, true);
+    header('acc', (r.x0 + r.x1) / 2, 2.05, r.z0 + 0.14, 0, true);
   }
 
-  // 장갑·액세서리 유리 진열장 (위에서 내려다보는 유리)
+  // 안경 유리 진열장 (위에서 내려다보는 유리)
   {
-    const r = corner('gearAcc');
+    const r = corner('glasses');
     const cx = (r.x0 + r.x1) / 2;
     const cz = (r.z0 + r.z1) / 2;
     const w = r.x1 - r.x0;
@@ -220,24 +203,18 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
     const glow = new THREE.PointLight(0xfff0d0, 1.2, 1.6, 2);
     glow.position.set(cx, 1.05, cz);
     g.add(glow);
-    const list = gearOf(['gloves', 'necklace', 'ring']);
-    list.forEach((e, i) => {
-      const x = r.x0 + ((i + 0.5) * w) / list.length;
+    const list = cosOf(['glasses']);
+    list.forEach((c, i) => {
+      const x = r.x0 + ((i + 0.5) * w) / Math.max(1, list.length);
       const y = 0.885;
-      if (e.slot === 'gloves') {
-        const mt = e.id === 'steelKnuckle' ? std(0xbfc4cc, 0.2, 0.95) : std(0x5a3a22, 0.6);
-        for (let k = 0; k < 4; k++) mesh(new THREE.TorusGeometry(0.018, 0.007, 6, 12), mt, x - 0.045 + k * 0.03, y + 0.01, cz).rotation.x = Math.PI / 2;
-        box(0.13, 0.015, 0.03, mt, x, y + 0.01, cz + 0.03);
-      } else if (e.slot === 'necklace') {
-        mesh(new THREE.TorusGeometry(0.08, 0.006, 6, 32), std(0xe2b23c, 0.2, 1), x, y + 0.006, cz).rotation.x = Math.PI / 2;
-      } else {
-        const ring = mesh(new THREE.TorusGeometry(0.022, 0.006, 8, 20), std(0xd9b44a, 0.15, 1), x, y + 0.03, cz);
-        mesh(new THREE.OctahedronGeometry(0.012), std(0xd23a5a, 0.05, 0.3, { emissive: 0x501020 }), x, y + 0.055, cz);
-        ring.rotation.y = 0.4;
+      const sun = c.style === 'sunglasses';
+      for (const sd of [-1, 1]) {
+        mesh(new THREE.TorusGeometry(0.022, 0.004, 6, 18), std(c.color, 0.3, 0.6), x + sd * 0.028, y + 0.006, cz).rotation.x = Math.PI / 2;
+        if (sun) mesh(new THREE.CircleGeometry(0.022, 18), std(0x15161c, 0.1, 0.3), x + sd * 0.028, y + 0.005, cz).rotation.x = -Math.PI / 2;
       }
-      tag(e, x, 0.65, r.z1 + 0.005);
+      tag(c, x, 0.65, r.z1 + 0.005);
     });
-    header('gearAcc', cx, 1.75, cz, 0, true);
+    header('glasses', cx, 1.75, cz, 0, true);
   }
 
   // ── 스타일 구역 ──
@@ -245,7 +222,7 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
   sign2.position.set(0.65, 2.62, L.room.z0 + 0.1);
   g.add(sign2);
 
-  // 모자·안경 선반 (북쪽 벽 세 단)
+  // 모자 선반 (북쪽 벽 두 단)
   {
     const r = corner('hat');
     const cz = (r.z0 + r.z1) / 2;
@@ -282,19 +259,6 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
         } else mesh(new THREE.SphereGeometry(0.025, 10, 8), std(0xffffff, 0.9), x, y + 0.13, cz);
       }
       tag(c, x, shelves[1] - 0.06, r.z1 + 0.005);
-    });
-    const specs = cosOf(['glasses']);
-    specs.forEach((c, i) => {
-      const x = r.x0 + 0.5 + i * 0.9;
-      const y = shelves[0] + 0.015;
-      // 얼굴 모양 받침 + 안경
-      mesh(new THREE.SphereGeometry(0.08, 16, 12), white, x, y + 0.1, cz).scale.set(0.9, 1.1, 0.7);
-      const sun = c.style === 'sunglasses';
-      for (const s of [-1, 1]) {
-        mesh(new THREE.TorusGeometry(0.026, 0.004, 6, 18), std(c.color, 0.3, 0.6), x + s * 0.034, y + 0.12, cz + 0.06);
-        if (sun) mesh(new THREE.CircleGeometry(0.026, 18), std(0x15161c, 0.1, 0.3), x + s * 0.034, y + 0.12, cz + 0.059);
-      }
-      tag(c, x, shelves[0] - 0.06, r.z1 + 0.005);
     });
     header('hat', (r.x0 + r.x1) / 2, 2.15, r.z0 + 0.1);
   }
@@ -351,7 +315,7 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
     header('bottom', cx, 1.75, cz, Math.PI);
   }
 
-  // 신발·가방 벽 (동쪽): 비스듬한 선반 세 단, 맨 위엔 가방
+  // 신발 벽 (동쪽): 비스듬한 선반
   {
     const r = corner('shoes');
     const cz = (r.z0 + r.z1) / 2;
@@ -379,25 +343,6 @@ export function buildClothesInterior(g: THREE.Group, L: StoreLayout) {
         box(0.085, c.id === 'shoes-red' ? 0.13 : 0.07, 0.13, up, 0, 0.06, -0.05, sh);
       }
       tag(c, r.x0 - 0.005, y - 0.08, z, -Math.PI / 2);
-    });
-    const bags = cosOf(['bag']);
-    bags.forEach((c, i) => {
-      const z = r.z0 + ((i + 0.5) * d) / bags.length;
-      const mini = c.style === 'mini';
-      const bw = mini ? 0.17 : 0.26;
-      const bh = mini ? 0.2 : 0.32;
-      const b = box(0.12, bh, bw, std(c.color, 0.7), (r.x0 + r.x1) / 2, 1.465 + bh / 2, z);
-      b.rotation.y = 0.05;
-      box(0.13, bh * 0.22, bw * 1.02, std(new THREE.Color(c.color).multiplyScalar(0.75).getHex(), 0.7), (r.x0 + r.x1) / 2, 1.465 + bh * 0.9, z);
-      tag(c, r.x0 - 0.005, 1.4, z, -Math.PI / 2);
-    });
-    // 꼬리: 맨 위 선반 끝에 솜뭉치
-    const tails = cosOf(['tail']);
-    tails.forEach((c, i) => {
-      const z = r.z0 + 0.12 + i * 0.16;
-      const mt = std(c.color, 0.95);
-      mesh(new THREE.IcosahedronGeometry(0.05, 1), mt, (r.x0 + r.x1) / 2, 1.515, z);
-      mesh(new THREE.IcosahedronGeometry(0.03, 1), mt, (r.x0 + r.x1) / 2 + 0.02, 1.55, z + 0.02);
     });
     header('shoes', r.x0 - 0.02, 2.2, cz, -Math.PI / 2);
   }

@@ -817,7 +817,7 @@ function crate(b: Batch, M: Mats, x: number, y: number, z: number, s = 0.55, ry 
 }
 
 /** 시장 노점 (기준 좌표에서 앞 = +z) */
-function stall(b: Batch, M: Mats, x: number, z: number, ry: number, kind: 'fruit' | 'potion', r: () => number) {
+function stall(b: Batch, M: Mats, x: number, z: number, ry: number, kind: 'fruit' | 'arms', r: () => number) {
   b.push(x, 0, z, ry);
   b.box(M.plank, 1.9, 0.9, 0.7, 0, 0.45, 0, 0, 1);
   b.box(M.beam, 2.0, 0.08, 0.8, 0, 0.94, 0);
@@ -837,14 +837,17 @@ function stall(b: Batch, M: Mats, x: number, z: number, ry: number, kind: 'fruit
         b.add(new THREE.SphereGeometry(0.075, 8, 6), fm, cx - 0.14 + (n % 3) * 0.14, 1.2 + r() * 0.03, -0.06 + Math.floor(n / 3) * 0.14);
     }
   } else {
-    for (let k = 0; k < 8; k++) {
-      const pm = M.potions[k % M.potions.length];
-      const px = -0.8 + k * 0.19;
-      b.add(new THREE.CylinderGeometry(0.06, 0.075, 0.2, 8), pm, px, 1.08, 0.1);
-      b.add(new THREE.CylinderGeometry(0.025, 0.025, 0.08, 6), M.plank, px, 1.22, 0.1);
+    // 무구 노점: 판 위에 눕힌 칼 셋 · 뒤에 세운 둥근 방패 · 투구 하나 (차원 장비는 여기서 은화로 산다)
+    for (let k = 0; k < 3; k++) {
+      const sx = -0.75 + k * 0.32;
+      b.box(M.iron, 0.05, 0.02, 0.62, sx, 0.97, 0.05);
+      b.box(M.beam, 0.16, 0.03, 0.04, sx, 0.98, -0.28);
+      b.box(M.plank, 0.04, 0.035, 0.14, sx, 0.98, -0.37);
     }
-    b.add(new THREE.SphereGeometry(0.16, 16, 12), M.crystal, 0.55, 1.15, -0.15);
-    b.add(new THREE.CylinderGeometry(0.12, 0.16, 0.08, 8), M.iron, 0.55, 1.0, -0.15);
+    b.add(new THREE.CylinderGeometry(0.32, 0.32, 0.05, 18), M.plank, 0.45, 1.3, -0.3, Math.PI / 2 - 0.25, 0, 0);
+    b.add(new THREE.SphereGeometry(0.07, 10, 8), M.iron, 0.45, 1.33, -0.26);
+    b.add(new THREE.SphereGeometry(0.15, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), M.iron, 0.05, 0.96, 0.15);
+
   }
   b.pop();
 }
@@ -1213,9 +1216,9 @@ export function buildVillage(s: THREE.Scene): VillageScene {
   bunting(lt(-3.4, 33.6), lt(3.4, 33.6));
   bunting(lt(3.4, 33.6), lt(6.6, 35));
 
-  // ── 노점 두 곳 (과일 · 물약), 통·상자·건초·수레·벤치·나무
+  // ── 노점 두 곳 (과일 · 무구 — 차원 장비 상점), 통·상자·건초·수레·벤치·나무
   stall(b, M, -6.0, 37.7, Math.PI / 2, 'fruit', r);
-  stall(b, M, 6.0, 37.7, -Math.PI / 2, 'potion', r);
+  stall(b, M, 6.0, 37.7, -Math.PI / 2, 'arms', r);
   barrel(b, M, -8.2, 33.4);
   barrel(b, M, -7.6, 33.8, 0.27);
   crate(b, M, -8.2, 0, 34.2, 0.5, 0.3);

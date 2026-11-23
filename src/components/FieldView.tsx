@@ -27,7 +27,8 @@ import StoryDialog, { type DialogLine } from './StoryDialog';
 import QuestNotebook from './QuestNotebook';
 import Chapter1Panel, { SkillNameModal } from './Chapter1Panel';
 import TrainingGame from './TrainingGame';
-import { ROOT_INFO, ch1Objective, ch1Scene, ch1SceneForNpc, countQuestKill, finishCh1, sceneOnLogout, startCh1, type Ch1SceneId, type Ch1State } from '@/game/story/chapter1';
+import GearPanel from './GearPanel';
+import { ROOT_INFO, ch1Objective, ch1Scene, ch1SceneForNpc, countQuestKill, finishCh1, resumeCh1Scene, sceneOnLogout, startCh1, type Ch1SceneId, type Ch1State } from '@/game/story/chapter1';
 import { RESCUE_SCRIPT, type ScriptLine } from '@/game/data/prologueScript';
 import { VILLAGE_DUMMY, VILLAGE_NPCS } from '@/game/data/village';
 import { MOVES } from '@/game/data/moves';
@@ -76,6 +77,10 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
   const [hud, setHud] = useState<FieldHudState | null>(null);
   const [paused, setPaused] = useState(false);
   const [inventory, setInventory] = useState(false);
+  /** 차원 장비창 (T) · 무구 노점 앞에서 E 면 노점 탭으로 */
+  const [gearUi, setGearUi] = useState<{ shop: boolean } | null>(null);
+  const gearUiRef = useRef(gearUi);
+  gearUiRef.current = gearUi;
   const [warp, setWarp] = useState(true);
   /** 경계 마을 NPC 와 대화 중 */
   const [talk, setTalk] = useState<TalkState | null>(null);
@@ -196,6 +201,9 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         saveProfile(profile);
         setCh1({ ...dim.ch1 });
       }
+      // 고블린 셋을 다 잡고 콩이 장면이 끝나기 전에 나갔으면: 들어오자마자 콩이 비명부터 다시
+      const resume = resumeCh1Scene(dim?.ch1 ?? null);
+      if (resume) storyTimer = window.setTimeout(() => playCh1(resume), WARP_MS + 600);
     }
     world.onKill = (monsterId) => {
       const c1 = profile.dimension?.ch1 ?? null;
@@ -230,6 +238,11 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     const onKey = (e: KeyboardEvent) => {
       // 식당 메뉴는 메뉴 창이 키를 받는다 (1장 미니게임 · 이름 짓기 창도)
       if (menuRef.current || overlayRef.current) return;
+      // 장비창: T · Esc 로 닫고, 떠 있는 동안 게임 키는 받지 않는다
+      if (gearUiRef.current) {
+        if (e.code === 'Escape' || (e.code === 'KeyT' && !e.repeat)) setGearUi(null);
+        return;
+      }
       // 여관 침대에서 자는 중: 아무 키나 누르면 일어난다 (씻는 중엔 기다린다)
       if (world.sleep) {
         if (!e.repeat) world.wakeUp();
@@ -266,6 +279,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (e.code === 'Escape') setPaused((p) => !p);
       if (e.code === 'KeyZ' && !e.repeat) world.toggleAuto();
       if (e.code === 'KeyI' && !e.repeat) setInventory((v) => !v);
+      if (e.code === 'KeyT' && !e.repeat && !talkRef.current && !storyRef.current) setGearUi({ shop: world.nearbyShop() });
     };
     window.addEventListener('keydown', onKey);
     // 패드: Start = 일시정지, Back = 자동사냥
@@ -284,6 +298,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       } else {
         // 여관 안: 침대에 눕기 · 샤워하기
         if (world.useInnSpot()) return;
+        // 무구 노점: 장비를 은화로 산다
+        if (world.nearbyShop()) return setGearUi({ shop: true });
         const sp = world.nearbySpot();
         if (sp && ch) return playScene(sceneForSpot(sp.id));
       }
@@ -367,6 +383,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       const c1 = profile.dimension?.ch1;
       if (!c1) return world.endTalk();
       const a = finishCh1(c1, id);
+      if (a.coin) world.giveCoin(a.coin, '고블린 의뢰 보수');
       if (id === 'quake') {
         setPortalDown(false);
         renderer.setPortalDown(false);
@@ -698,6 +715,16 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       )}
       {/* 여관 문을 지날 때: 잠깐 어두워졌다 밝아진다 */}
       {doorFade > 0 && <div key={doorFade} className="door-fade pointer-events-none absolute inset-0 z-40 bg-black" />}
+      {/* 무구 노점 */}
+      {hud?.shop && !talk && !story && !paused && !gearUi && (
+        <button
+          onClick={() => setGearUi({ shop: true })}
+          className="absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border border-amber-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg hover:bg-black/85"
+        >
+          ⚒️ 무구 노점 둘러보기{!touch && ' · E'}
+        </button>
+      )}
+      {gearUi && worldRef.current && <GearPanel key={String(gearUi.shop)} world={worldRef.current} shop={gearUi.shop} onClose={() => setGearUi(null)} />}
       {/* 0장: 살펴볼 곳 */}
       {hud?.spot && !hud.npc && ch0 && !talk && !story && !paused && (
         <button
@@ -747,6 +774,9 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         <MusicToggle compact={touch} className="!bg-black/50 hover:!bg-black/70" />
         <button onClick={() => setInventory((v) => !v)} className="rounded bg-black/50 px-3 py-1.5 text-white/80 hover:bg-black/70">
           가방{!touch && ' (I)'}
+        </button>
+        <button onClick={() => setGearUi((v) => (v ? null : { shop: !!worldRef.current?.nearbyShop() }))} className="rounded bg-black/50 px-3 py-1.5 text-white/80 hover:bg-black/70">
+          장비{!touch && ' (T)'}
         </button>
         <button onClick={() => setPaused(true)} className="rounded bg-black/50 px-3 py-1.5 text-white/80 hover:bg-black/70">
           메뉴{!touch && ' (Esc)'}

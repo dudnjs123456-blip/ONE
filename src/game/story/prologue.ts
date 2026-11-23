@@ -5,7 +5,7 @@ import { Fighter } from '../core/fighter';
 import { NEUTRAL_INPUT, makeInput } from '../core/input';
 import type { FieldCommand, FieldWorld, PlayerController } from '../core/field';
 import type { PlayerProfile } from '../core/profile';
-import { playerStats } from '../data/equipment';
+import { dimensionStats } from '../data/equipment';
 import { DIR_OF_KEY, MOVES } from '../data/moves';
 
 /**
@@ -91,7 +91,7 @@ export class PrologueWorld {
     private manual: PlayerController,
     readonly profile: PlayerProfile,
   ) {
-    this.player = new Fighter(0, 'PLAYER', { ...playerStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: false, manual: true });
+    this.player = new Fighter(0, 'PLAYER', { ...dimensionStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: false, manual: true });
     this.player.reset(LAND.x, LAND.z, 0, -1);
     this.beast = new Fighter(1, '???', { maxHp: 99999, power: 1.6, canBlock: false, runSpeed: BEAST_SPEED, size: 1.7 });
     this.beast.reset(0, 30, 0, -1);

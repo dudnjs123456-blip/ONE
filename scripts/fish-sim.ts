@@ -4,7 +4,7 @@
  */
 import { mulberry32 } from '../src/game/core/controllers';
 import { FishingSession, type FishResult } from '../src/game/city/fishing';
-import { BAITS, BAIT_BY_ID, FISHING_SHOP_NAME, FISH, FISH_BY_ID, RODS, ROD_BY_ID, biteTable, fishStrength, landOdds, midKg, type Angler, type FishSetup } from '../src/game/data/fishing';
+import { BAITS, BAIT_BY_ID, anglerOf, FISHING_SHOP_NAME, FISH, FISH_BY_ID, RODS, ROD_BY_ID, biteTable, fishStrength, landOdds, midKg, type Angler, type FishSetup } from '../src/game/data/fishing';
 import { playerStats } from '../src/game/data/equipment';
 import { newProfile } from '../src/game/core/profile';
 import { CityWorld, type CityInput } from '../src/game/city/cityWorld';
@@ -18,8 +18,7 @@ const ok = (c: boolean, msg: string) => {
 export const anglerAt = (level: number): Angler => {
   const p = newProfile();
   p.level = level;
-  p.gear = { owned: [], equipped: { weapon: 'woodBat', head: 'cap', top: 'hoodie', bottom: 'jeans', shoes: 'sneakers', gloves: 'workGloves', necklace: 'silverChain', ring: 'luckyRing' } };
-  return playerStats(p);
+  return anglerOf(playerStats(p));
 };
 
 function session(setup: FishSetup, a: Angler, rnd: () => number, hooks: { result?: (r: FishResult) => void; taken?: () => void } = {}) {

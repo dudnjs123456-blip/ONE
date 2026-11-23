@@ -24,7 +24,7 @@ export interface Rect {
 export type StoreKind = 'pet' | 'mart' | 'cafe' | 'diner' | 'clothes' | 'fishing' | 'karaoke' | 'stairs';
 
 /** 옷가게 진열 구역: 전투 장비 셋 + 코디 넷 */
-export type ClothesCorner = 'weapon' | 'gearAcc' | 'armor' | 'hat' | 'top' | 'bottom' | 'shoes';
+export type ClothesCorner = 'newIn' | 'acc' | 'glasses' | 'hat' | 'top' | 'bottom' | 'shoes';
 
 /** 진열대 하나: 메뉴(또는 펫 용품) 하나 */
 export interface Display {
@@ -213,18 +213,18 @@ function petLayout(sign: string): StoreLayout {
 
 /** 옷가게 진열 구역 이름 (E 를 누르면 그 구역 물건 목록이 열린다) */
 export const CORNER_LABEL: Record<ClothesCorner, string> = {
-  weapon: '⚔️ 무기 벽',
-  gearAcc: '🥊 장갑 · 액세서리 진열장',
-  armor: '🛡️ 방어구 코너',
-  hat: '🧢 모자 · 안경 · 머리띠 선반',
+  newIn: '✨ 신상 벽',
+  glasses: '🕶️ 안경 진열장',
+  acc: '🎒 가방 · 꼬리 무대',
+  hat: '🧢 모자 · 머리띠 선반',
   top: '👕 상의 행거',
   bottom: '👖 하의 테이블',
-  shoes: '👟 신발 · 가방 · 꼬리 벽',
+  shoes: '👟 신발 벽',
 };
 
 /**
- * 옷가게 배치 (10 × 7 m): 서쪽 = 전투 장비 (무기 벽 · 방어구 · 유리 진열장), 가운데·동쪽 = 코디
- * (모자 선반 · 상의 행거 · 하의 테이블 · 신발 벽), 북동쪽 계산대, 남동쪽 탈의실 (코디·장비 갈아입기)
+ * 옷가게 배치 (10 × 7 m): 서쪽 = 스트리트 구역 (신상 벽 · 가방·꼬리 무대 · 안경 진열장), 가운데·동쪽 = 기본 코디
+ * (모자 선반 · 상의 행거 · 하의 테이블 · 신발 벽), 북동쪽 계산대, 남동쪽 탈의실. 서울에는 전투 장비가 없다 (장비는 차원에서만)
  */
 function clothesLayout(sign: string): StoreLayout {
   const room = PET_ROOM;
@@ -239,9 +239,9 @@ function clothesLayout(sign: string): StoreLayout {
     displays.push({ item: id, x: (rect.x0 + rect.x1) / 2, z: (rect.z0 + rect.z1) / 2, y: 1.6, face });
     pois.push({ id: `store:rack:${id}`, kind: 'shop', label: `${CORNER_LABEL[id]} — 둘러보기`, x: poi.x, z: poi.z, radius: poi.r });
   };
-  corner('weapon', { x0: room.x0, x1: room.x0 + 0.35, z0: -2.8, z1: 0.4 }, 0, { x: -4.1, z: -1.2, r: 1.1 });
-  corner('armor', { x0: -4.3, x1: -1.3, z0: room.z0, z1: room.z0 + 0.5 }, 1, { x: -2.8, z: -2.45, r: 0.9 });
-  corner('gearAcc', { x0: -3.6, x1: -1.8, z0: -1.0, z1: -0.4 }, 1, { x: -2.7, z: 0.1, r: 0.8 });
+  corner('newIn', { x0: room.x0, x1: room.x0 + 0.35, z0: -2.8, z1: 0.4 }, 0, { x: -4.1, z: -1.2, r: 1.1 });
+  corner('acc', { x0: -4.3, x1: -1.3, z0: room.z0, z1: room.z0 + 0.5 }, 1, { x: -2.8, z: -2.45, r: 0.9 });
+  corner('glasses', { x0: -3.6, x1: -1.8, z0: -1.0, z1: -0.4 }, 1, { x: -2.7, z: 0.1, r: 0.8 });
   corner('hat', { x0: -0.9, x1: 2.2, z0: room.z0, z1: room.z0 + 0.4 }, 1, { x: 0.65, z: -2.55, r: 0.9 });
   corner('top', { x0: -0.5, x1: 1.9, z0: -1.5, z1: -1.0 }, 1, { x: 0.7, z: -0.5, r: 0.7 });
   corner('bottom', { x0: -0.4, x1: 1.6, z0: 1.0, z1: 1.7 }, -1, { x: 0.6, z: 0.55, r: 0.7 });
@@ -252,7 +252,7 @@ function clothesLayout(sign: string): StoreLayout {
   furniture.push({ id: 'manB', rect: { x0: -2.65, x1: -2.15, z0: 2.35, z1: 2.85 } });
   pois.push({ id: 'store:exit', kind: 'home', label: '출입문 (밖으로 나가기)', x: 0, z: room.z1 - 0.45, radius: 0.9 });
   pois.push({ id: 'store:counter', kind: 'shop', label: '계산대 — 전체 상품 보기', x: 3.65, z: -1.35, radius: 0.85 });
-  pois.push({ id: 'store:fit', kind: 'shop', label: '🚪 탈의실 — 코디 · 장비 갈아입기', x: 2.75, z: 2.85, radius: 0.7 });
+  pois.push({ id: 'store:fit', kind: 'shop', label: '🚪 탈의실 — 코디 갈아입기', x: 2.75, z: 2.85, radius: 0.7 });
   return { sign, kind: 'clothes', room, spawn: { x: 0, z: room.z1 - 1.0 }, keeper, furniture, displays, pois, spots: [], theme: THEMES.clothes };
 }
 

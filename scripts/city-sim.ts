@@ -7,7 +7,8 @@ import { ITEM_IDS } from '../src/game/data/items';
 import { LifeTracker } from '../src/game/core/life';
 import { MOVES } from '../src/game/data/moves';
 import { bjDeal, bjHit, bjStand, handValue, hlOdds, isBlackjack, rollSicBo, rouletteMultiplier, spinRoulette, spinSlots } from '../src/game/city/casino';
-import { EQUIP_SLOTS, STARTER_GEAR, equipItem, unequipSlot } from '../src/game/data/equipment';
+import { EQUIP_SLOTS, dimensionStats, ensureGear, equipItem } from '../src/game/data/equipment';
+import { loadProfile } from '../src/game/core/profile';
 import type { PlayerProfile } from '../src/game/core/profile';
 import { ROBBER_TIERS } from '../src/game/data/jobs';
 import { GUARD_SHIFT_FRAMES } from '../src/game/city/guardJob';
@@ -1071,21 +1072,27 @@ check('clock advances', w.minutes > t0, `(${w.clock})`);
     box.c = { move: null, run: false, interact: false };
   }
 
-  // 장비: 기본 8개, 끼면 능력치, 벗으면 가방으로
+  // 서울엔 장비가 없다: 서울 능력치는 몸(레벨)뿐. 차원 장비를 껴도 서울에선 그대로
   {
     const { w, prof } = mk();
     const hp0 = w.player.maxHp;
     const pw0 = w.player.power;
-    check('8 equip slots with starter gear in bag', EQUIP_SLOTS.length === 8 && prof.gear?.owned.length === 8 && Object.keys(prof.gear.equipped).length === 0);
-    equipItem(prof, 'hoodie');
-    equipItem(prof, 'woodBat');
+    check('no gear in Seoul by default', !prof.dimension?.gear && !('gear' in prof));
+    const g = ensureGear(prof);
+    g.owned.push('chainShirt', 'ironShortsword');
+    equipItem(prof, 'chainShirt');
+    equipItem(prof, 'ironShortsword');
     w.refreshStats();
-    check('equipping raises HP and power', w.player.maxHp === hp0 + 15 && Math.abs(w.player.power - pw0 * 1.08) < 1e-9, `(HP ${hp0}→${w.player.maxHp}, 공격력 ${pw0}→${w.player.power.toFixed(2)})`);
-    unequipSlot(prof, 'top');
-    w.refreshStats();
-    check('unequip returns item to bag', !prof.gear!.equipped.top && prof.gear!.owned.includes('hoodie') && w.player.maxHp === hp0);
-    for (const id of STARTER_GEAR) equipItem(prof, id);
-    check('all 8 slots filled', Object.keys(prof.gear!.equipped).length === 8 && prof.gear!.owned.length === 0);
+    check('dimension gear does nothing in Seoul', EQUIP_SLOTS.length === 8 && w.player.maxHp === hp0 && w.player.power === pw0, `(HP ${w.player.maxHp}, 공격력 ${w.player.power.toFixed(2)})`);
+    const d = dimensionStats(prof);
+    check('…but counts in the other world', d.maxHp === hp0 + 35 && Math.abs(d.power - pw0 * 1.14) < 1e-9, `(차원 HP ${d.maxHp}, 공격력 ${d.power.toFixed(2)})`);
+    // 예전 저장의 서울 장비는 불러올 때 사라진다
+    const store = new Map<string, string>();
+    (globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+    store.set('iron-fist.profile.v1', JSON.stringify({ level: 4, gear: { owned: ['woodBat'], equipped: { top: 'hoodie' } } }));
+    const old = loadProfile();
+    check('old Seoul gear is dropped on load', old.level === 4 && !('gear' in old));
+    delete (globalThis as { localStorage?: unknown }).localStorage;
   }
 
   // 자동 순찰: 데스크 → 엘리베이터 → 층마다 점검 → 계단 → 데스크에 앉기

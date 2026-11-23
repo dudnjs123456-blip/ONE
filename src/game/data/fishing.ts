@@ -261,8 +261,13 @@ export interface Angler {
   maxHp: number;
 }
 
+/**
+ * 낚시 힘 = 몸(레벨) + 낚시 기본 요령. 서울엔 장비가 없어서, 예전 기본 장비 8벌 몫(공격력 +22% · 체력 +48)을
+ * 누구나 가진 기본 요령으로 옮겼다 (밸런스는 그대로).
+ */
+const KNACK = { power: 1.22, hp: 48 };
 export function anglerOf(stats: { power: number; maxHp: number }): Angler {
-  return { power: stats.power, maxHp: stats.maxHp };
+  return { power: stats.power * KNACK.power, maxHp: stats.maxHp + KNACK.hp };
 }
 
 /** 체력 보너스 (장력이 풀리는 속도 배율) */

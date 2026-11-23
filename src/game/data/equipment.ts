@@ -2,17 +2,19 @@ import type { PlayerProfile } from '../core/profile';
 import { statsForLevel } from './progression';
 
 /**
- * 장비: 8칸 (무기·머리·상의·하의·신발·장갑·목걸이·반지).
- * 지금은 기본 장비 8개로 칸만 채워 두고, 효과는 체력(+HP)과 공격력(+%) 두 가지.
+ * 장비 — 반대편 세계(차원)에서만 쓴다. 서울에는 장비라는 개념이 없다 (docs/world-rules.md).
+ * - 차원 무구 노점에서 은화로 사거나, 몬스터가 가끔 떨어뜨린다. 영웅 장비는 떨어뜨리기만 한다.
+ * - 서울로 들고 나오지 못한다: 서울 능력치는 몸(레벨)뿐 → bodyStats. 차원 능력치는 몸 + 장비 → dimensionStats.
+ * 8칸 (무기·머리·상의·하의·신발·장갑·목걸이·반지), 효과는 체력(+HP)과 공격력(+%) 두 가지.
  */
 export type EquipSlot = 'weapon' | 'head' | 'top' | 'bottom' | 'shoes' | 'gloves' | 'necklace' | 'ring';
 
 export const EQUIP_SLOTS: { id: EquipSlot; label: string; icon: string }[] = [
   { id: 'weapon', label: '무기', icon: '🗡️' },
-  { id: 'head', label: '머리', icon: '🧢' },
-  { id: 'top', label: '상의', icon: '👕' },
+  { id: 'head', label: '머리', icon: '⛑️' },
+  { id: 'top', label: '상의', icon: '🦺' },
   { id: 'bottom', label: '하의', icon: '👖' },
-  { id: 'shoes', label: '신발', icon: '👟' },
+  { id: 'shoes', label: '신발', icon: '🥾' },
   { id: 'gloves', label: '장갑', icon: '🧤' },
   { id: 'necklace', label: '목걸이', icon: '📿' },
   { id: 'ring', label: '반지', icon: '💍' },
@@ -30,7 +32,7 @@ export interface EquipDef {
   hp?: number;
   /** 공격력 + (0.05 = +5%) */
   power?: number;
-  /** 옷가게 가격 (없으면 가게에서 안 판다) */
+  /** 무구 노점 가격 (은화). 없으면 노점에서 안 판다 (몬스터만 떨어뜨린다) */
   price?: number;
   desc: string;
 }
@@ -38,37 +40,67 @@ export interface EquipDef {
 export const EQUIPS: Record<string, EquipDef> = Object.fromEntries(
   (
     [
-      { id: 'woodBat', name: '나무 야구배트', icon: '🏏', slot: 'weapon', rarity: 'common', power: 0.08, desc: '동네 야구장에서 주웠다.' },
-      { id: 'cap', name: '검정 볼캡', icon: '🧢', slot: 'head', rarity: 'common', hp: 8, desc: '푹 눌러 쓰면 아무도 못 알아본다.' },
-      { id: 'hoodie', name: '회색 후드티', icon: '🧥', slot: 'top', rarity: 'common', hp: 15, desc: '편하고 따뜻하다.' },
-      { id: 'jeans', name: '청바지', icon: '👖', slot: 'bottom', rarity: 'common', hp: 10, desc: '질긴 데님.' },
-      { id: 'sneakers', name: '흰 운동화', icon: '👟', slot: 'shoes', rarity: 'common', hp: 5, power: 0.02, desc: '발이 가볍다.' },
-      { id: 'workGloves', name: '목장갑', icon: '🧤', slot: 'gloves', rarity: 'common', power: 0.04, desc: '주먹이 덜 아프다.' },
-      { id: 'silverChain', name: '은 목걸이', icon: '📿', slot: 'necklace', rarity: 'rare', hp: 10, power: 0.03, desc: '은은하게 빛난다.' },
-      { id: 'luckyRing', name: '행운의 반지', icon: '💍', slot: 'ring', rarity: 'rare', power: 0.05, desc: '끼면 왠지 일이 잘 풀린다.' },
-      // 옷가게 전투 장비 (공격력 위주)
-      { id: 'aluBat', name: '알루미늄 배트', icon: '🏏', slot: 'weapon', rarity: 'common', power: 0.14, price: 600, desc: '나무보다 단단하고 가볍다.' },
-      { id: 'steelPipe', name: '쇠파이프', icon: '🔧', slot: 'weapon', rarity: 'rare', power: 0.22, price: 1500, desc: '묵직한 한 방.' },
-      { id: 'fightStick', name: '삼단봉', icon: '🦯', slot: 'weapon', rarity: 'epic', power: 0.32, price: 3500, desc: '경비원들이 탐내는 전문 장비.' },
-      { id: 'leatherKnuckle', name: '가죽 너클', icon: '🥊', slot: 'gloves', rarity: 'common', power: 0.1, price: 500, desc: '주먹에 힘이 실린다.' },
-      { id: 'steelKnuckle', name: '강철 너클', icon: '🥊', slot: 'gloves', rarity: 'rare', power: 0.18, price: 1400, desc: '맞으면 아프다. 많이.' },
-      { id: 'combatBoots', name: '전투화', icon: '🥾', slot: 'shoes', rarity: 'rare', hp: 10, power: 0.08, price: 900, desc: '발차기가 매서워진다.' },
-      { id: 'riderJacket', name: '라이더 재킷', icon: '🧥', slot: 'top', rarity: 'rare', hp: 30, power: 0.05, price: 1100, desc: '두꺼운 가죽이 몸을 지켜준다.' },
-      { id: 'cargoPants', name: '전술 카고바지', icon: '👖', slot: 'bottom', rarity: 'common', hp: 18, power: 0.04, price: 600, desc: '움직이기 편하다.' },
-      { id: 'helmet', name: '오토바이 헬멧', icon: '⛑️', slot: 'head', rarity: 'common', hp: 25, price: 500, desc: '머리는 소중하니까.' },
-      { id: 'goldChain', name: '금 목걸이', icon: '📿', slot: 'necklace', rarity: 'rare', hp: 12, power: 0.08, price: 1600, desc: '자신감이 붙는다.' },
-      { id: 'fighterRing', name: '파이터 반지', icon: '💍', slot: 'ring', rarity: 'epic', power: 0.15, price: 2800, desc: '전설의 파이터가 끼던 반지.' },
+      // 일반: 무구 노점 (고블린도 가끔 떨어뜨린다)
+      { id: 'oakClub', name: '참나무 몽둥이', icon: '🪵', slot: 'weapon', rarity: 'common', power: 0.06, price: 40, desc: '마을 장작더미에서 제일 곧은 것.' },
+      { id: 'leatherWraps', name: '가죽 손싸개', icon: '🧤', slot: 'gloves', rarity: 'common', power: 0.05, price: 35, desc: '주먹 마디를 감싼다.' },
+      { id: 'leatherHood', name: '가죽 두건', icon: '🪖', slot: 'head', rarity: 'common', hp: 10, price: 30, desc: '안개 숲 바람을 막아 준다.' },
+      { id: 'quiltedVest', name: '누빔 조끼', icon: '🦺', slot: 'top', rarity: 'common', hp: 18, price: 50, desc: '솜을 두껍게 누볐다.' },
+      { id: 'clothTrousers', name: '튼튼한 천 바지', icon: '👖', slot: 'bottom', rarity: 'common', hp: 10, price: 35, desc: '무릎을 덧댔다.' },
+      { id: 'leatherBoots', name: '가죽 장화', icon: '🥾', slot: 'shoes', rarity: 'common', hp: 6, power: 0.02, price: 40, desc: '진흙길에도 미끄러지지 않는다.' },
+      // 희귀: 무구 노점 (산적·오우거·흑기사가 떨어뜨린다)
+      { id: 'ironShortsword', name: '쇠 단검', icon: '🗡️', slot: 'weapon', rarity: 'rare', power: 0.14, price: 220, desc: '마을 대장간에서 두드린 첫 칼.' },
+      { id: 'mailGloves', name: '쇠미늘 장갑', icon: '🧤', slot: 'gloves', rarity: 'rare', power: 0.1, price: 180, desc: '작은 쇠고리를 엮었다.' },
+      { id: 'ironHelm', name: '쇠 투구', icon: '⛑️', slot: 'head', rarity: 'rare', hp: 22, price: 200, desc: '북문 경비대가 쓰던 것.' },
+      { id: 'chainShirt', name: '사슬 갑옷', icon: '🦺', slot: 'top', rarity: 'rare', hp: 35, price: 260, desc: '무겁지만 든든하다.' },
+      { id: 'leatherGreaves', name: '가죽 각반', icon: '👖', slot: 'bottom', rarity: 'rare', hp: 20, power: 0.03, price: 150, desc: '정강이를 지켜 준다.' },
+      { id: 'scoutBoots', name: '정찰병 장화', icon: '🥾', slot: 'shoes', rarity: 'rare', hp: 10, power: 0.06, price: 170, desc: '발소리가 나지 않는다.' },
+      { id: 'moonPendant', name: '달빛 목걸이', icon: '📿', slot: 'necklace', rarity: 'rare', hp: 12, power: 0.04, price: 240, desc: '밤이면 희미하게 빛난다.' },
+      { id: 'copperRing', name: '구리 반지', icon: '💍', slot: 'ring', rarity: 'rare', power: 0.05, price: 160, desc: '손가락이 따뜻해진다.' },
+      // 영웅: 떨어뜨리기만 한다
+      { id: 'banditCloak', name: '산적 두목의 망토', icon: '🧥', slot: 'top', rarity: 'epic', hp: 45, power: 0.06, desc: '산적들이 보면 길을 비킨다.' },
+      { id: 'ogreKnuckle', name: '오우거 뼈 너클', icon: '🦴', slot: 'gloves', rarity: 'epic', power: 0.2, desc: '오우거 손가락뼈를 깎아 만들었다.' },
+      { id: 'blackLongsword', name: '흑기사의 장검', icon: '⚔️', slot: 'weapon', rarity: 'epic', power: 0.3, desc: '검은 칼날에 빛이 맺히지 않는다.' },
+      { id: 'fireflyRing', name: '반딧불 반지', icon: '💍', slot: 'ring', rarity: 'epic', power: 0.12, desc: '반딧불이 하나가 갇혀 있다.' },
+      { id: 'wardenAmulet', name: '북문 수호 목걸이', icon: '📿', slot: 'necklace', rarity: 'epic', hp: 20, power: 0.08, desc: '오래전 북문 기사가 걸던 것.' },
     ] satisfies EquipDef[]
   ).map((e) => [e.id, e]),
 );
 
-/** 옷가게에서 파는 전투 장비 (가격 순) */
+/** 무구 노점에서 파는 장비 (가격 순) */
 export const SHOP_GEAR: EquipDef[] = Object.values(EQUIPS)
   .filter((e) => e.price)
   .sort((a, b) => a.price! - b.price!);
 
-/** 처음 받는 기본 장비 8개 (칸마다 하나) */
-export const STARTER_GEAR = ['woodBat', 'cap', 'hoodie', 'jeans', 'sneakers', 'workGloves', 'silverChain', 'luckyRing'];
+const COMMONS = Object.values(EQUIPS).filter((e) => e.rarity === 'common').map((e) => e.id);
+const RARES = Object.values(EQUIPS).filter((e) => e.rarity === 'rare').map((e) => e.id);
+
+/** 몬스터가 떨어뜨리는 것: [확률, 고를 장비들] 을 앞에서부터 굴려 처음 걸린 것 하나 */
+const DROPS: Record<string, [number, string[]][]> = {
+  goblin: [[0.04, COMMONS]],
+  bandit: [
+    [0.01, ['banditCloak']],
+    [0.05, RARES],
+    [0.06, COMMONS],
+  ],
+  ogre: [
+    [0.02, ['ogreKnuckle']],
+    [0.01, ['fireflyRing', 'wardenAmulet']],
+    [0.1, RARES],
+  ],
+  darkKnight: [
+    [0.03, ['blackLongsword']],
+    [0.02, ['fireflyRing', 'wardenAmulet']],
+    [0.12, RARES],
+  ],
+};
+
+/** 몬스터를 잡았을 때 떨어뜨린 장비 id (없으면 null). rng 는 0~1 */
+export function rollDrop(monsterId: string, rng: () => number): string | null {
+  for (const [chance, pool] of DROPS[monsterId] ?? []) {
+    if (rng() < chance) return pool[Math.floor(rng() * pool.length)] ?? null;
+  }
+  return null;
+}
 
 export interface GearState {
   /** 가방에 있는 장비 id (같은 것 여러 개 가능) */
@@ -76,16 +108,17 @@ export interface GearState {
   equipped: Partial<Record<EquipSlot, string>>;
 }
 
-/** 장비 데이터가 없으면 기본 장비를 가방에 넣어 준다 */
+/** 차원 장비 (없으면 빈 가방). 처음 받는 기본 장비는 없다 — 노점에서 사거나 몬스터에게서 얻는다 */
 export function ensureGear(p: PlayerProfile): GearState {
-  return (p.gear ??= { owned: [...STARTER_GEAR], equipped: {} });
+  const d = (p.dimension ??= { visits: 0 });
+  return (d.gear ??= { owned: [], equipped: {} });
 }
 
 /** 낀 장비의 효과 합계 */
 export function gearBonus(p: PlayerProfile) {
   let hp = 0;
   let power = 0;
-  for (const id of Object.values(p.gear?.equipped ?? {})) {
+  for (const id of Object.values(p.dimension?.gear?.equipped ?? {})) {
     const e = id ? EQUIPS[id] : undefined;
     hp += e?.hp ?? 0;
     power += e?.power ?? 0;
@@ -93,8 +126,20 @@ export function gearBonus(p: PlayerProfile) {
   return { hp, power };
 }
 
-/** 레벨 + 장비를 합친 최종 능력치 (도시·필드·보스 공통) */
-export function playerStats(p: PlayerProfile) {
+/**
+ * 몸 능력치 (레벨만): 서울에서 쓴다. 차원에서 단련한 몸(레벨)은 서울에도 그대로 이어지지만,
+ * 장비와 근 기술은 그 땅의 것이라 서울에선 없다.
+ */
+export function bodyStats(p: PlayerProfile) {
+  const base = statsForLevel(p.level);
+  return { maxHp: base.maxHp, power: base.power };
+}
+
+/** 서울 능력치 (= 몸 능력치). 서울 코드(도시·낚시)가 쓰는 이름 */
+export const playerStats = bodyStats;
+
+/** 차원 능력치: 몸(레벨) + 차원 장비 */
+export function dimensionStats(p: PlayerProfile) {
   const base = statsForLevel(p.level);
   const b = gearBonus(p);
   return { maxHp: base.maxHp + b.hp, power: base.power * (1 + b.power) };
@@ -121,4 +166,9 @@ export function unequipSlot(p: PlayerProfile, slot: EquipSlot): boolean {
   delete g.equipped[slot];
   g.owned.push(id);
   return true;
+}
+
+/** 예전 저장의 서울 장비(배트·후드티 등)는 없앤다 — 서울엔 장비가 없다 */
+export function dropSeoulGear(p: PlayerProfile & { gear?: unknown }) {
+  if ('gear' in p) delete p.gear;
 }

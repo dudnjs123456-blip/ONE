@@ -37,7 +37,7 @@ export type FishTab = 'dex' | 'odds' | 'gear' | 'guide' | 'records';
 const TABS: [FishTab, string][] = [
   ['dex', '📖 도감'],
   ['odds', '🎲 확률표'],
-  ['gear', '🎒 내 장비'],
+  ['gear', '🎒 내 낚시 도구'],
   ['guide', '📘 낚시 방법'],
   ['records', '🏆 기록'],
 ];
@@ -312,7 +312,7 @@ function OddsTab({ world }: { world: CityWorld }) {
         <br />· 행운 = 낚싯대 행운 + 미끼 행운. 등급이 높을수록 행운의 효과가 커요 (보통 ×0.5 · 희귀 ×1 · 매우 희귀 ×1.6 · 전설 ×2.2, 잡동사니는 오히려 줄어요).
         <br />· 행운은 큰 개체가 나올 확률도 높여요. 크기는 대부분 작은 쪽으로 나오고, 큰 개체일수록 힘이 세고 비싸요.
         <br />· 미끼 궁합이 표에 없으면 0.4배, 루어는 사냥꾼이 아니면 거의 안 물어요 (0.02배).
-        <br />· &lsquo;내 실력으로&rsquo;는 평균 크기 개체를 기준으로, 지금 레벨 · 장비 공격력 · 최대 체력과 고른 낚싯대로 끌어올릴 수 있을지 어림한 거예요.
+        <br />· &lsquo;내 실력으로&rsquo;는 평균 크기 개체를 기준으로, 지금 레벨(몸) · 공격력 · 최대 체력과 고른 낚싯대로 끌어올릴 수 있을지 어림한 거예요.
       </div>
     </div>
   );
@@ -326,7 +326,7 @@ function GearTab({ world, onChange }: { world: CityWorld; onChange: () => void }
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat label="공격력 (레벨+장비)" value={`×${a.power.toFixed(2)}`} />
+        <Stat label="낚시 힘 (레벨 + 요령)" value={`×${a.power.toFixed(2)}`} />
         <Stat label="최대 체력" value={`${a.maxHp}`} />
         <Stat label="한 번 감기 (힘 1 고기)" value={rod ? `+${gainPerTap(powerRatio(a, rod, 1)).toFixed(1)}%` : '—'} />
         <Stat label="장력 풀리는 속도" value={`${relaxOf(a).toFixed(0)}/초`} />
@@ -442,7 +442,7 @@ function GuideTab({ world }: { world: CityWorld }) {
           <b>거리</b> 막대를 100% 로 채우면 잡아요. 0% 가 되면 바늘이 빠져서 도망가요. 처음엔 {FIGHT.start}% 에서 시작해요.
         </li>
         <li>
-          Space 를 한 번 누를 때마다 <b>{FIGHT.gain} × 힘비</b> % 만큼 끌려와요. <b>힘비 = (내 공격력 × 낚싯대 힘) ÷ 물고기 힘</b> — 레벨이 높고 장비 공격력이 셀수록, 좋은 낚싯대일수록 빨리 잡혀요.
+          Space 를 한 번 누를 때마다 <b>{FIGHT.gain} × 힘비</b> % 만큼 끌려와요. <b>힘비 = (내 공격력 × 낚싯대 힘) ÷ 물고기 힘</b> — 레벨이 높을수록(몸이 단련될수록), 좋은 낚싯대일수록 빨리 잡혀요.
         </li>
         <li>
           누를 때마다 <b>장력</b>이 {FIGHT.tap} × √물고기 힘 ÷ 줄 강도 만큼 올라요. <b>100 이 되면 줄이 끊어져요</b> (루어도 잃어요). 장력은 초당 {FIGHT.relax} 씩 저절로 풀리고, <b>최대 체력이 높을수록 더 빨리</b> 풀려요 (지금 {relaxOf(a).toFixed(0)}/초).
@@ -452,7 +452,7 @@ function GuideTab({ world }: { world: CityWorld }) {
         </li>
         <li>물고기는 시간이 지나면 지쳐서 덜 당기고 덜 차고 나가요 (최대 {Math.round((1 - FIGHT.tired) * 100)}% 약해짐).</li>
         <li>
-          <b>바늘털이</b>: {FIGHT.shakeAfter}초가 넘도록 못 끌어오면 고기가 몸을 털어 바늘이 빠질 수 있어요 (초마다 점점 높아져요). 너무 강한 고기는 장비부터 키워요.
+          <b>바늘털이</b>: {FIGHT.shakeAfter}초가 넘도록 못 끌어오면 고기가 몸을 털어 바늘이 빠질 수 있어요 (초마다 점점 높아져요). 너무 강한 고기는 낚싯대를 바꾸거나 레벨부터 올려요.
         </li>
         <li>
           예) 지금 내 공격력 ×{a.power.toFixed(2)} + {rod.name}(힘 ×{rod.power}) 으로 힘 1 짜리 고기: 한 번에 +{gainPerTap(powerRatio(a, rod, 1)).toFixed(1)}%, 장력 +{tensionPerTap(rod, 1).toFixed(1)}.

@@ -26,7 +26,7 @@ const uid = auth.user.id;
 
 const profile = {
   id: uid, nickname: '연결테스트', level: 3, exp: 42, gold: 777, kills: 12,
-  save: { life: { fatigue: 10, hunger: 20, hp: 150 }, gear: { owned: ['cap'], equipped: { weapon: 'woodBat' } }, fridge: [], casino: { played: 1, won: 0, lost: 10, best: 0 } },
+  save: { life: { fatigue: 10, hunger: 20, hp: 150 }, dimension: { visits: 1, gear: { owned: [], equipped: { weapon: 'oakClub' } } }, fridge: [], casino: { played: 1, won: 0, lost: 10, best: 0 } },
   saved_at: new Date().toISOString(),
 };
 const up = await sb.from('profiles').upsert(profile);
@@ -37,7 +37,7 @@ step(!bc.error, `boss_clears 저장 ${bc.error ? '— ' + bc.error.message : ''}
 
 const back = await sb.from('profiles').select('*').eq('id', uid).single();
 step(!back.error && back.data.gold === 777, `profiles 다시 읽기 → Lv.${back.data?.level} gold=${back.data?.gold}`);
-step(!back.error && back.data.save?.gear?.equipped?.weapon === 'woodBat', `save(jsonb) 다시 읽기 → 무기 ${back.data?.save?.gear?.equipped?.weapon ?? '(없음 — 0002 SQL 을 실행했나요?)'}`);
+step(!back.error && back.data.save?.dimension?.gear?.equipped?.weapon === 'oakClub', `save(jsonb) 다시 읽기 → 차원 무기 ${back.data?.save?.dimension?.gear?.equipped?.weapon ?? '(없음 — 0002 SQL 을 실행했나요?)'}`);
 
 // RLS: 다른 사람의 행은 보이지 않아야 한다
 const others = await sb.from('profiles').select('id').neq('id', uid).limit(5);

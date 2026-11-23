@@ -29,14 +29,14 @@ const mk = (patch: Partial<PlayerProfile>): PlayerProfile => ({ ...newProfile(),
 {
   const server = mk({ level: 7, exp: 10, gold: 300 });
   delete (server as Partial<PlayerProfile>).savedAt;
-  const local = mk({ level: 3, savedAt: 5, fridge: [{ name: '김밥', icon: '🍙', hunger: 25, fatigue: 0, from: '분식천국' }], gear: { owned: [], equipped: { weapon: 'woodBat' } } });
+  const local = mk({ level: 3, savedAt: 5, fridge: [{ name: '김밥', icon: '🍙', hunger: 25, fatigue: 0, from: '분식천국' }], dimension: { visits: 2, gear: { owned: [], equipped: { weapon: 'oakClub' } } } });
   const m = mergeProfiles(server, local);
-  check('old server row keeps local life data', !!m.fridge?.length && m.gear?.equipped.weapon === 'woodBat', `(Lv.${m.level})`);
+  check('old server row keeps local life data', !!m.fridge?.length && m.dimension?.gear?.equipped.weapon === 'oakClub', `(Lv.${m.level})`);
 }
 // save(jsonb) 에는 생활 데이터만
 {
-  const s = toSave(mk({ gear: { owned: ['cap'], equipped: {} }, casino: { played: 1, won: 0, lost: 0, best: 0 } }));
-  check('toSave holds life data only', 'gear' in s && 'casino' in s && 'life' in s && !('level' in s) && !('gold' in s));
+  const s = toSave(mk({ dimension: { visits: 1, gear: { owned: ['oakClub'], equipped: {} } }, casino: { played: 1, won: 0, lost: 0, best: 0 } }));
+  check('toSave holds life data only', 'dimension' in s && !('gear' in s) && 'casino' in s && 'life' in s && !('level' in s) && !('gold' in s));
 }
 
 // VS CPU 전적·연승은 계정(save jsonb)에 들어가고, 이 브라우저 기록과 합쳐진다

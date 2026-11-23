@@ -21,7 +21,6 @@ export interface PlayerProfile {
   /** 2 = 실제 시각 시계로 옮긴 뒤 (예전 근무 기록 날짜를 한 번 맞췄다) */
   clockV?: number;
   /** 장비 (가방 + 낀 장비 8칸) */
-  gear?: import('../data/equipment').GearState;
   /** 코디 옷 (겉모습만, 옷가게) */
   wardrobe?: import('../data/fashion').Wardrobe;
   /** 캐릭터 몸 (코디 창에서 고른다, 없으면 여자) */
@@ -53,6 +52,8 @@ export interface PlayerProfile {
     ch1?: import('../story/chapter1').Ch1State;
     /** 차원 돈 (은화). 몬스터를 잡아 벌고 차원 안에서만 쓴다 — 서울 돈(gold)과 따로 */
     coin?: number;
+    /** 차원 장비 (무구 노점 · 몬스터 드롭). 서울로는 못 들고 나온다 */
+    gear?: import('../data/equipment').GearState;
     /** 달빛 여관 첫 숙박(공짜)을 썼다 */
     innFree?: boolean;
     /** 여관 침대에서 자는 중: 침대 번호와 잠든 실제 시각 (ms). 창을 닫아도 계속 잔다 */
@@ -113,7 +114,12 @@ export function newProfile(): PlayerProfile {
 export function loadProfile(): PlayerProfile {
   try {
     const raw = localStorage.getItem(storageKey);
-    if (raw) return { ...newProfile(), ...JSON.parse(raw) };
+    if (raw) {
+      const p = { ...newProfile(), ...JSON.parse(raw) };
+      // 예전 서울 장비(배트·후드티 등)는 없앤다 — 서울엔 장비가 없다 (장비는 차원에서만: profile.dimension.gear)
+      delete (p as { gear?: unknown }).gear;
+      return p;
+    }
   } catch {
     // 저장소를 못 쓰는 환경 (시크릿 모드 등) → 새 프로필
   }

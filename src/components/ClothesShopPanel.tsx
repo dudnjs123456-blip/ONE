@@ -3,31 +3,22 @@
 import { useState } from 'react';
 import type { CityWorld } from '@/game/city/cityWorld';
 import type { ClothesCorner } from '@/game/city/store';
-import { EQUIPS, EQUIP_SLOTS, SHOP_GEAR, ensureGear, equipItem, type EquipDef, type Rarity } from '@/game/data/equipment';
 import { saveProfile } from '@/game/core/profile';
 import { CLOTHES_SHOP_NAME, COSMETIC_SLOTS, canWear, wearBlock, isNewToday, shopCosmetics, ensureWardrobe, wearCosmetic, type CosmeticDef, type CosmeticSlot } from '@/game/data/fashion';
 
-type Tab = 'gear' | 'style';
-type GearCat = 'weapon' | 'gearAcc' | 'armor';
-type StyleCat = 'hat' | 'top' | 'bottom' | 'shoes';
+type StyleCat = ClothesCorner;
 
-const GEAR_CATS: { id: GearCat; label: string; slots: EquipDef['slot'][] }[] = [
-  { id: 'weapon', label: '🗡️ 무기', slots: ['weapon'] },
-  { id: 'gearAcc', label: '🥊 장갑·액세서리', slots: ['gloves', 'necklace', 'ring'] },
-  { id: 'armor', label: '🛡️ 방어구', slots: ['head', 'top', 'bottom', 'shoes'] },
-];
-const STYLE_CATS: { id: StyleCat; label: string; slots: CosmeticSlot[] }[] = [
-  { id: 'hat', label: '🧢 모자·안경·머리띠', slots: ['hat', 'glasses'] },
+/** 진열 구역 = 목록 칸 (서울 옷가게는 코디만 판다. 전투 장비는 차원에서만) */
+const STYLE_CATS: { id: StyleCat; label: string; slots: CosmeticSlot[]; fresh?: boolean }[] = [
+  { id: 'newIn', label: '✨ 신상', slots: ['hat', 'glasses', 'top', 'bottom', 'shoes', 'bag', 'tail'], fresh: true },
+  { id: 'hat', label: '🧢 모자·머리띠', slots: ['hat'] },
+  { id: 'glasses', label: '🕶️ 안경', slots: ['glasses'] },
   { id: 'top', label: '👕 상의', slots: ['top'] },
   { id: 'bottom', label: '👖 하의', slots: ['bottom'] },
-  { id: 'shoes', label: '👟 신발·가방·꼬리', slots: ['shoes', 'bag', 'tail'] },
+  { id: 'shoes', label: '👟 신발', slots: ['shoes'] },
+  { id: 'acc', label: '🎒 가방·꼬리', slots: ['bag', 'tail'] },
 ];
-
-const RARITY: Record<Rarity, { label: string; cls: string }> = {
-  common: { label: '일반', cls: 'border-white/20' },
-  rare: { label: '희귀', cls: 'border-sky-400/70' },
-  epic: { label: '영웅', cls: 'border-fuchsia-400/80' },
-};
+const isFresh = (c: CosmeticDef) => /^nd{8}-/.test(c.id);
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
@@ -50,18 +41,8 @@ function Swatch({ c }: { c: CosmeticDef }) {
   );
 }
 
-const corners: Record<ClothesCorner, { tab: Tab; cat: GearCat | StyleCat }> = {
-  weapon: { tab: 'gear', cat: 'weapon' },
-  gearAcc: { tab: 'gear', cat: 'gearAcc' },
-  armor: { tab: 'gear', cat: 'armor' },
-  hat: { tab: 'style', cat: 'hat' },
-  top: { tab: 'style', cat: 'top' },
-  bottom: { tab: 'style', cat: 'bottom' },
-  shoes: { tab: 'style', cat: 'shoes' },
-};
-
 /**
- * 옷가게 (진열대·계산대에서 E): 왼쪽 탭 = 전투 장비 (공격력·체력, 가방으로), 오른쪽 탭 = 코디 (겉모습만).
+ * 옷가게 (진열대·계산대에서 E): 코디 옷만 판다 (겉모습만, 능력치 없음 — 서울엔 장비가 없다).
  * 코디는 '입어보기'로 캐릭터에 바로 입혀 본다. 입은 채로 가게를 둘러보고, 계산대에서 입은 옷을 한 번에 계산한다.
  * 창은 화면 오른쪽에 붙어 있어서 입어 본 모습이 뒤로 보인다.
  */
@@ -77,10 +58,7 @@ export default function ClothesShopPanel({
   onWardrobe: () => void;
 }) {
   const pr = world.profile;
-  const first = start === 'all' ? { tab: 'gear' as Tab, cat: 'weapon' as GearCat | StyleCat } : corners[start];
-  const [tab, setTab] = useState<Tab>(first.tab);
-  const [gearCat, setGearCat] = useState<GearCat>(first.tab === 'gear' ? (first.cat as GearCat) : 'weapon');
-  const [styleCat, setStyleCat] = useState<StyleCat>(first.tab === 'style' ? (first.cat as StyleCat) : 'top');
+  const [styleCat, setStyleCat] = useState<StyleCat>(start === 'all' ? 'newIn' : start);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [, redraw] = useState(0);
   /** 입어보는 중인 칸 → 옷 id (게임에 남아서, 입은 채 가게 안을 돌아다닌다) */
@@ -90,61 +68,10 @@ export default function ClothesShopPanel({
     redraw((n) => n + 1);
   };
   const wd = ensureWardrobe(pr);
-  const gear = ensureGear(pr);
 
   const say = (r: { ok: boolean; message: string }) => {
     setMsg({ ok: r.ok, text: r.message });
     redraw((n) => n + 1);
-  };
-
-  const GearRow = ({ e }: { e: EquipDef }) => {
-    const cur = gear.equipped[e.slot] ? EQUIPS[gear.equipped[e.slot]!] : undefined;
-    const dp = Math.round(((e.power ?? 0) - (cur?.power ?? 0)) * 100);
-    const dh = (e.hp ?? 0) - (cur?.hp ?? 0);
-    const inBag = gear.owned.filter((x) => x === e.id).length;
-    const worn = gear.equipped[e.slot] === e.id;
-    const afford = pr.gold >= (e.price ?? 0);
-    return (
-      <div className={`flex items-center gap-3 rounded-lg border bg-white/5 p-2 ${RARITY[e.rarity].cls}`}>
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-black/30 text-2xl">{e.icon}</span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-bold">
-            {e.name} <span className="text-[10px] font-normal text-white/50">{EQUIP_SLOTS.find((s) => s.id === e.slot)!.label} · {RARITY[e.rarity].label}</span>
-          </div>
-          <div className="text-[11px] text-emerald-300">
-            {[e.power ? `⚔️ 공격력 +${Math.round(e.power * 100)}%` : '', e.hp ? `❤️ HP +${e.hp}` : ''].filter(Boolean).join(' · ')}
-          </div>
-          <div className="text-[10px] text-white/50">
-            {worn ? '지금 끼고 있어요' : `지금 장비보다 ${[dp ? `공격력 ${dp > 0 ? '+' : ''}${dp}%` : '', dh ? `HP ${dh > 0 ? '+' : ''}${dh}` : ''].filter(Boolean).join(' · ') || '차이 없음'}`}
-            {inBag ? ` · 가방에 ${inBag}개` : ''}
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="text-xs font-bold text-amber-300">{e.price!.toLocaleString()}G</span>
-          <div className="flex gap-1">
-            {inBag > 0 && !worn && (
-              <button
-                onClick={() => {
-                  equipItem(pr, e.id);
-                  world.refreshStats();
-                  say({ ok: true, message: `${e.icon} ${e.name}을(를) 꼈다!` });
-                }}
-                className="rounded bg-sky-600 px-2 py-1 text-[11px] font-bold hover:bg-sky-500"
-              >
-                끼기
-              </button>
-            )}
-            <button
-              disabled={!afford}
-              onClick={() => say(world.buyGear(e.id))}
-              className="rounded bg-amber-500 px-2 py-1 text-[11px] font-bold text-black hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/40"
-            >
-              사기
-            </button>
-          </div>
-        </div>
-      </div>
-    );
   };
 
   const StyleRow = ({ c }: { c: CosmeticDef }) => {
@@ -227,8 +154,8 @@ export default function ClothesShopPanel({
     );
   };
 
-  const gearList = SHOP_GEAR.filter((e) => GEAR_CATS.find((c) => c.id === gearCat)!.slots.includes(e.slot));
-  const styleList = shopCosmetics().filter((c) => STYLE_CATS.find((s) => s.id === styleCat)!.slots.includes(c.slot));
+  const cat = STYLE_CATS.find((s) => s.id === styleCat)!;
+  const styleList = shopCosmetics().filter((c) => cat.slots.includes(c.slot) && (!cat.fresh || isFresh(c)));
 
   // 계산대: 입어본 (안 산) 옷을 한 번에 계산
   const unpaid = world.unpaidTrial();
@@ -302,36 +229,18 @@ export default function ClothesShopPanel({
             👀 입어보는 중 {unpaid.length}벌 ({unpaidTotal.toLocaleString()}G) — 입은 채로 둘러보고 <b>계산대</b>에서 한 번에 계산해요
           </div>
         ))}
-      <div className="mb-2 grid grid-cols-2 gap-1 rounded-lg bg-black/30 p-1 text-sm font-bold">
-        {(
-          [
-            ['gear', '⚔️ 전투 장비'],
-            ['style', '👗 코디'],
-          ] as const
-        ).map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} className={`rounded-md py-1.5 ${tab === id ? (id === 'gear' ? 'bg-amber-500 text-black' : 'bg-pink-500') : 'text-white/60 hover:bg-white/10'}`}>
-            {label}
+      <div className="mb-2 flex flex-wrap gap-1">
+        {STYLE_CATS.map((c) => (
+          <button key={c.id} onClick={() => setStyleCat(c.id)} className={`rounded-full px-2.5 py-1 text-xs ${styleCat === c.id ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20'}`}>
+            {c.label}
           </button>
         ))}
       </div>
-      <div className="mb-2 flex flex-wrap gap-1">
-        {tab === 'gear'
-          ? GEAR_CATS.map((c) => (
-              <button key={c.id} onClick={() => setGearCat(c.id)} className={`rounded-full px-2.5 py-1 text-xs ${gearCat === c.id ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20'}`}>
-                {c.label}
-              </button>
-            ))
-          : STYLE_CATS.map((c) => (
-              <button key={c.id} onClick={() => setStyleCat(c.id)} className={`rounded-full px-2.5 py-1 text-xs ${styleCat === c.id ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20'}`}>
-                {c.label}
-              </button>
-            ))}
-      </div>
       <div className="text-[11px] text-white/50">
-        {tab === 'gear' ? '전투 장비: 공격력·체력이 올라요. 사면 가방으로 → 장비창(T) 왼쪽 칸에 껴요.' : '코디: 겉모습만 바뀌어요. 장비와 따로 입어요 → 장비창(T) 오른쪽 코디 칸.'}
+        코디: 겉모습만 바뀌어요 (능력치 없음). 산 옷은 옷장(O)에서 갈아입어요.
       </div>
       <div className="mt-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
-        {tab === 'gear' ? gearList.map((e) => <GearRow key={e.id} e={e} />) : styleList.map((c) => <StyleRow key={c.id} c={c} />)}
+        {styleList.length ? styleList.map((c) => <StyleRow key={c.id} c={c} />) : <div className="py-6 text-center text-xs text-white/45">지금 걸린 옷이 없어요</div>}
       </div>
       {msg && <div className={`mt-2 rounded-lg px-3 py-2 text-xs ${msg.ok ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200'}`}>{msg.text}</div>}
       <div className="mt-2 flex items-center justify-between text-[11px] text-white/50">

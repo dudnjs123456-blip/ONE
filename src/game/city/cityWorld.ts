@@ -30,7 +30,7 @@ const KARAOKE_TALK = [
   '30초 넘게 부르면 점수 나와요! 100점 나오면 사진 찍어 가세요~',
 ];
 import { MOVES, totalFrames, type MoveDef } from '../data/moves';
-import { EQUIPS, ensureGear, playerStats } from '../data/equipment';
+import { playerStats } from '../data/equipment';
 import { COSMETIC_BY_ID, ensureWardrobe, wornList, type CosmeticDef, type CosmeticSlot } from '../data/fashion';
 import { JOB_BY_ID, ROBBER_TIERS } from '../data/jobs';
 import { GuardShift, LOBBY_PATH, type LobbyPerson, type NetJobScene, type ShiftEnd } from './guardJob';
@@ -907,7 +907,6 @@ export class CityWorld {
     this.roadRects = roadSolids(this.map);
     // 체력은 레벨에 따라 오르고, 도시에서 남은 체력은 프로필에 이어진다
     // 길거리에선 철권식 자동 가드가 없다: 피하거나 먼저 때려야 한다
-    ensureGear(profile);
     this.player = new Fighter(0, 'ME', { ...playerStats(profile), tempo: PLAYER_TEMPO, canBlock: false, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     this.senior = new Fighter(899, 'npc', { canBlock: false, body: BODY_SPECS.npc, autoDodge: true });
     this.seniorAI = new SeniorAI(this, this.senior);
@@ -3639,19 +3638,6 @@ export class CityWorld {
     }
     this.pushSpeech({ x: L.keeper.x, z: L.keeper.z, text: hi });
     this.say(L.kind === 'karaoke' ? `🎤 2층 ${sign}에 들어왔다 — 카운터에서 방을 받으세요` : `🚪 ${sign}에 들어왔다`, 2.5);
-  }
-
-  /** 옷가게: 전투 장비 사기 (가방으로) */
-  buyGear(id: string): { ok: boolean; message: string } {
-    const e = EQUIPS[id];
-    if (!e?.price) return { ok: false, message: '파는 물건이 아니에요' };
-    const pr = this.profile;
-    if (pr.gold < e.price) return { ok: false, message: `${(e.price - pr.gold).toLocaleString()}G 가 모자라요` };
-    pr.gold -= e.price;
-    ensureGear(pr).owned.push(id);
-    saveProfile(pr);
-    this.thankShopper();
-    return { ok: true, message: `${e.icon} ${e.name}을(를) 샀다! 장비창(T)이나 탈의실에서 낄 수 있어요` };
   }
 
   /** 옷가게: 코디 옷 사기 (한 벌씩만) */

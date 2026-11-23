@@ -29,6 +29,8 @@ export const VILLAGE_SPOTS: { id: 'board' | 'well' | 'book'; name: string; x: nu
   { id: 'well', name: '우물', x: -5.2, z: 30.2 },
   { id: 'book', name: '여관 방명록', x: -8.25, z: 32.45 },
 ];
+/** 무구 노점 (광장 동쪽 노점 앞): 차원 장비를 은화로 산다 */
+export const ARMS_STALL = { x: 5.0, z: 37.7, name: '무구 노점' } as const;
 /** 살펴볼 수 있는 거리 (우물은 담 둘레까지) */
 export const SPOT_RANGE = 1.9;
 /** 북문 기사 바위 옆 허수아비 (0장: 주먹이 반만 닿는다) */
