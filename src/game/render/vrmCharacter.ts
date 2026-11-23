@@ -124,6 +124,7 @@ const _qC = new THREE.Quaternion();
 const _eA = new THREE.Euler();
 const _vA = new THREE.Vector3();
 const _vB = new THREE.Vector3();
+const _vS = new THREE.Vector3();
 /** 침대에 눕다가 옆으로 기울어 팔꿈치를 짚는 각도 (라디안, 약 60°) */
 const LEAN_ANGLE = 1.05;
 
@@ -812,6 +813,32 @@ export class VrmCharacter implements CharacterView {
 
   /** 옆으로 돌아누운 정도 0~1 (이불을 그만큼 들어 올린다) */
   sleepSide = 0;
+
+  bodyHeights(x0: number, z0: number, cw: number, cd: number, nx: number, nz: number, out: Float32Array): boolean {
+    const vrm = this.vrm;
+    if (!vrm) return false;
+    out.fill(-Infinity);
+    vrm.scene.updateMatrixWorld(true);
+    vrm.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return;
+      const pos = m.geometry.attributes.position as THREE.BufferAttribute | undefined;
+      if (!pos) return;
+      const sk = (m as THREE.SkinnedMesh).isSkinnedMesh ? (m as THREE.SkinnedMesh) : null;
+      // 몇 점 건너 하나씩만 (이불 모양엔 충분하고 가볍다)
+      for (let i = 0; i < pos.count; i += 3) {
+        _vS.fromBufferAttribute(pos, i);
+        if (sk) sk.applyBoneTransform(i, _vS);
+        m.localToWorld(_vS);
+        const ix = Math.floor((_vS.x - x0) / cw);
+        const iz = Math.floor((_vS.z - z0) / cd);
+        if (ix < 0 || iz < 0 || ix >= nx || iz >= nz) continue;
+        const k = iz * nx + ix;
+        if (_vS.y > out[k]) out[k] = _vS.y;
+      }
+    });
+    return true;
+  }
   /** 자는 표정 (applySleep 이 정한다) */
   private sleepFace: { aa: number; happy: number } | null = null;
 

@@ -953,6 +953,10 @@ export interface CharacterView {
   casual?: boolean;
   /** 눕는 중이면 그 자세 (없으면 평소) */
   rest?: RestPose | null;
+  /** 돌아누운 정도 (0 = 바로 누움 · 1 = 옆으로) */
+  sleepSide?: number;
+  /** 누운 몸 윗면 높이: 바닥 격자(x0, z0 에서 cw × cd 칸, nx × nz 개) 칸마다 몸이 가장 높은 곳 (몸이 없으면 -Infinity). 이불이 몸을 따라 덮이게 */
+  bodyHeights?(x0: number, z0: number, cw: number, cd: number, nx: number, nz: number, out: Float32Array): boolean;
   update(f: Fighter, clock: FrameClock): void;
 }
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { CharacterView } from './mannequin';
 import { Batch, blockTex, canvasTex, glowTex, plankTex, plasterTex, signTexture } from './villageScene';
 import { BED_L, BED_W, BOOTH_D, BOOTH_W, INN, INN_BEDS, INN_BOOTHS, INN_EXIT, INN_HALL_Z, INN_ROOM_DOORS, INN_ROOMS } from '../data/inn';
 
@@ -214,15 +215,112 @@ const priceTex = () =>
     false,
   );
 
+/** 침대를 쓰는 사람: cover 이불이 덮인 정도 (0 = 걸터앉는 중 · 1 = 다 덮음), body 누운 사람 (이불이 그 몸을 따라 덮인다) */
+export interface InnBedUse {
+  cover: number;
+  body?: CharacterView;
+}
+
 export interface InnSceneState {
-  /** 누가 자는 침대 (이불이 덮인다) */
-  beds: Set<number>;
+  /** 누가 쓰는 침대 → cover: 이불이 덮인 정도 (0 = 걸터앉는 중 · 1 = 다 덮음), side: 돌아누운 정도 (몸이 높아진 만큼 이불이 부푼다) */
+  beds: Map<number, InnBedUse>;
   /** 누가 씻는 샤워 칸 (커튼이 닫히고 김이 오른다) */
   booths: Set<number>;
 }
 
 export interface InnScene {
   update(t: number, state: InnSceneState): void;
+}
+
+// ── 자는 사람에게 덮는 이불: 매트리스 위 격자를 누운 몸 윗면보다 조금 높게 부풀려서 몸을 따라 덮는다 (뒤척여도 뚫리지 않게)
+const MAT_TOP = 0.62;
+const QUILT_GAP = 0.035;
+/** 이불이 덮는 곳: 머리판에서 Q_Z0 (어깨) ~ 발치 끝 */
+const Q_Z0 = 0.66;
+const QN_X = 10;
+const QN_Z = 16;
+const Q_CW = BED_W / QN_X;
+const Q_CD = (BED_L - Q_Z0) / QN_Z;
+const sampleBuf = new Float32Array(QN_X * QN_Z);
+const tmpH = new Float32Array(QN_X * QN_Z);
+/** 격자 꼭짓점: 가로 (칸 경계 QN_X+1 + 양옆으로 늘어진 자락 2), 세로 (칸 경계 QN_Z+1 + 발치 자락 1) */
+const VX = QN_X + 3;
+const VZ = QN_Z + 2;
+
+function quiltGeometry() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(VX * VZ * 3), 3));
+  const uv = new Float32Array(VX * VZ * 2);
+  for (let r = 0; r < VZ; r++)
+    for (let c = 0; c < VX; c++) {
+      uv[(r * VX + c) * 2] = (c / (VX - 1)) * 1.2;
+      uv[(r * VX + c) * 2 + 1] = (r / (VZ - 1)) * 2;
+    }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const idx: number[] = [];
+  for (let r = 0; r < VZ - 1; r++)
+    for (let c = 0; c < VX - 1; c++) {
+      const a = r * VX + c;
+      idx.push(a, a + VX, a + 1, a + 1, a + VX, a + VX + 1);
+    }
+  g.setIndex(idx);
+  return g;
+}
+
+/** 잰 몸 높이 → 이불 높이: 몸보다 조금 위, 이웃 칸으로 번지게 (이불은 몸 위에서 완만하게 처진다) */
+function fitQuilt(h: Float32Array, body: Float32Array, snap: boolean) {
+  const at = (x: number, z: number) => body[Math.max(0, Math.min(QN_Z - 1, z)) * QN_X + Math.max(0, Math.min(QN_X - 1, x))];
+  for (let z = 0; z < QN_Z; z++)
+    for (let x = 0; x < QN_X; x++) {
+      let m = at(x, z);
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (dx || dz) m = Math.max(m, at(x + dx, z + dz) - 0.06);
+      for (const [dx, dz] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) m = Math.max(m, at(x + dx, z + dz) - 0.13);
+      tmpH[z * QN_X + x] = Math.max(MAT_TOP, m) + QUILT_GAP;
+    }
+  // 뒤척여서 몸이 높아지면 바로 따라 올라가고, 낮아지면 천천히 가라앉는다
+  for (let k = 0; k < h.length; k++) h[k] = snap || tmpH[k] >= h[k] ? tmpH[k] : h[k] + (tmpH[k] - h[k]) * 0.3;
+}
+
+/** 이불 모양: 발끝부터 cover 만큼 당겨 덮는다 */
+function shapeQuilt(q: THREE.Mesh, bed: { x: number; head: number }, h: Float32Array, cover: number) {
+  const pos = q.geometry.attributes.position as THREE.BufferAttribute;
+  const a = pos.array as Float32Array;
+  const foot = bed.head + BED_L;
+  const len = (BED_L - Q_Z0) * cover;
+  const cell = (x: number, z: number) => h[Math.max(0, Math.min(QN_Z - 1, z)) * QN_X + Math.max(0, Math.min(QN_X - 1, x))];
+  for (let r = 0; r < VZ; r++) {
+    const last = r === VZ - 1;
+    const rr = Math.min(r, QN_Z);
+    // 덮인 곳의 z (어깨 쪽 끝 → 발끝) · 맨 끝 줄은 발치 너머로 늘어진 자락
+    const z = last ? foot + 0.07 : foot - len * (1 - rr / QN_Z);
+    // 꼭짓점 앞뒤 칸
+    const zc = Math.round((z - bed.head - Q_Z0) / Q_CD);
+    for (let c = 0; c < VX; c++) {
+      const k = (r * VX + c) * 3;
+      let x: number;
+      let y: number;
+      if (c === 0 || c === VX - 1) {
+        // 양옆 자락: 매트리스 가장자리 밖으로 늘어진다
+        x = bed.x + (c === 0 ? -1 : 1) * (BED_W / 2 + 0.07);
+        y = MAT_TOP - 0.14;
+      } else {
+        const j = c - 1;
+        x = bed.x - BED_W / 2 + j * Q_CW;
+        // 꼭짓점 = 둘레 네 칸 중 가장 높은 곳 (가장자리 꼭짓점은 조금 낮춰 매트리스 모서리를 감싼다)
+        y = Math.max(cell(j - 1, zc), cell(j, zc), cell(j - 1, zc - 1), cell(j, zc - 1));
+        if (j === 0 || j === QN_X) y = Math.max(MAT_TOP + 0.03, y - 0.05);
+        // 어깨 쪽 끝단은 접혀 내려가서 얼굴을 가리지 않는다
+        if (rr <= 1) y = Math.max(MAT_TOP + 0.03, y - (rr === 0 ? 0.12 : 0.05));
+      }
+      if (last) y = Math.min(y, MAT_TOP - 0.1);
+      a[k] = x;
+      a[k + 1] = y;
+      a[k + 2] = z;
+    }
+  }
+  pos.needsUpdate = true;
+  q.geometry.computeVertexNormals();
+  q.geometry.computeBoundingSphere();
 }
 
 export function buildInn(s: THREE.Scene): InnScene {
@@ -467,6 +565,16 @@ export function buildInn(s: THREE.Scene): InnScene {
 
   // ── 자는 곳: 침대 6개 (머리판 · 매트리스 · 베개 · 개어 둔 이불) · 협탁과 촛불 · 침대 발치 상자
   const blankets: THREE.Mesh[] = [];
+  const foldeds: THREE.Mesh[] = [];
+  const covers = INN_BEDS.map(() => 0);
+  const quiltH: Float32Array[] = [];
+  const measured = INN_BEDS.map(() => false);
+  const quiltMats = M.quilts.map((m) => {
+    const c = m.clone();
+    c.side = THREE.DoubleSide;
+    return c;
+  });
+  let frame = 0;
   INN_BEDS.forEach((bed, i) => {
     const bz = bed.head + BED_L / 2;
     for (const sx of [-1, 1]) for (const sz of [0.08, BED_L - 0.08]) b.box(M.beam, 0.08, 0.34, 0.08, bed.x + sx * (BED_W / 2 - 0.04), 0.17, bed.head + sz);
@@ -474,14 +582,20 @@ export function buildInn(s: THREE.Scene): InnScene {
     b.box(M.wood, BED_W + 0.06, 1.05, 0.08, bed.x, 0.62, bed.head + 0.04, 0, 1);
     b.box(M.beam, BED_W + 0.12, 0.08, 0.12, bed.x, 1.16, bed.head + 0.04);
     b.box(M.wood, BED_W + 0.04, 0.5, 0.06, bed.x, 0.4, bed.head + BED_L - 0.03, 0, 1);
-    b.box(M.sheet, BED_W - 0.08, 0.2, BED_L - 0.14, bed.x, 0.5, bz + 0.03);
-    b.box(M.pillow, BED_W - 0.3, 0.12, 0.38, bed.x, 0.66, bed.head + 0.35);
-    // 낮에는 발치에 개어 둔 이불
-    b.box(M.quilts[i], BED_W - 0.06, 0.1, 0.55, bed.x, 0.65, bed.head + BED_L - 0.42);
-    // 자는 사람이 있으면 덮이는 이불 (어깨 아래부터 발끝까지)
-    const quilt = new THREE.Mesh(new THREE.BoxGeometry(BED_W - 0.02, 0.16, BED_L - 0.75), M.quilts[i]);
-    quilt.position.set(bed.x, 0.84, bed.head + 0.62 + (BED_L - 0.75) / 2);
-    quilt.castShadow = true;
+    // 매트리스 윗면 0.62 (서울 집 침대와 같은 높이 · 누운 몸이 그 위에 닿는다)
+    b.box(M.sheet, BED_W - 0.08, 0.22, BED_L - 0.14, bed.x, 0.51, bz + 0.03);
+    // 베개: 누운 머리 바로 밑
+    b.box(M.pillow, BED_W - 0.3, 0.13, 0.44, bed.x, 0.685, bed.head + 0.43);
+    // 낮에는 발치에 개어 둔 이불 (누가 침대를 쓰면 치운다 · 다리가 뚫고 지나가지 않게)
+    const folded = new THREE.Mesh(new THREE.BoxGeometry(BED_W - 0.06, 0.1, 0.55), M.quilts[i]);
+    folded.position.set(bed.x, 0.67, bed.head + BED_L - 0.42);
+    folded.castShadow = folded.receiveShadow = true;
+    s.add(folded);
+    foldeds.push(folded);
+    // 자는 사람에게 덮는 두툼한 이불: 누운 몸보다 높게 부풀고, 발끝부터 어깨까지 당겨 덮는다
+    const quilt = new THREE.Mesh(quiltGeometry(), quiltMats[i]);
+    quiltH.push(new Float32Array(QN_X * QN_Z).fill(MAT_TOP + 0.3));
+    quilt.castShadow = quilt.receiveShadow = true;
     quilt.visible = false;
     s.add(quilt);
     blankets.push(quilt);
@@ -619,7 +733,28 @@ export function buildInn(s: THREE.Scene): InnScene {
         sp.position.y = 0.7 + u * 1.1;
         sp.material.opacity = 0.14 * Math.sin(u * Math.PI);
       });
-      blankets.forEach((q, i) => (q.visible = state.beds.has(i)));
+      frame++;
+      INN_BEDS.forEach((bed, i) => {
+        const use = state.beds.get(i);
+        foldeds[i].visible = !use;
+        // 부드럽게 당겨 덮는다 (다른 사람 rest 는 0.05 단위로 와서 그대로 쓰면 뚝뚝 끊긴다)
+        covers[i] += ((use?.cover ?? 0) - covers[i]) * 0.08;
+        if (!use && covers[i] < 0.02) covers[i] = 0;
+        const c = covers[i];
+        const q = blankets[i];
+        q.visible = c > 0.01;
+        if (!q.visible) return;
+        // 누운 몸 높이는 몇 프레임마다 잰다 (침대마다 번갈아) · 처음엔 바로 잰다
+        const body = use?.body;
+        if (body?.bodyHeights && (!measured[i] || (frame + i) % 4 === 0)) {
+          if (body.bodyHeights(bed.x - BED_W / 2, bed.head + Q_Z0, Q_CW, Q_CD, QN_X, QN_Z, sampleBuf)) {
+            fitQuilt(quiltH[i], sampleBuf, !measured[i]);
+            measured[i] = true;
+          }
+        }
+        if (!use) measured[i] = false;
+        shapeQuilt(q, bed, quiltH[i], c);
+      });
     },
   };
 }

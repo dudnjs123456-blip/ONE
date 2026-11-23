@@ -15,7 +15,7 @@ import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playCoin, playHit, playLevelUp } from './sfx';
 import { buildVillage, type VillageScene } from './villageScene';
 import { VILLAGE } from '../data/village';
-import { buildInn, type InnScene } from './innScene';
+import { buildInn, type InnBedUse, type InnScene } from './innScene';
 import { INN_BEDS, bedPose } from '../data/inn';
 
 /** 16:10 화면에서 45° 일 때 보이는 옆 시야각 — 세로 화면도 이만큼은 보이게 */
@@ -132,13 +132,18 @@ export class FieldRenderer {
     this.village?.update(clock.t, world.player.x, world.player.z);
     // 달빛 여관: 자는 사람 침대엔 이불, 씻는 사람 칸엔 커튼 · 김
     if (this.inn) {
-      const beds = new Set<number>();
+      const beds = new Map<number, InnBedUse>();
       const booths = new Set<number>();
-      if (world.sleep && world.restAmount >= 0.9) beds.add(world.sleep.bed);
+      // 다 누운 뒤(rest 0.85 → 1)에 발끝부터 덮는다. 걸터앉아 다리를 올리는 동안엔 이불이 없다 · 이불은 누운 몸을 따라 덮인다
+      const occupy = (bed: number, rest: number, f: Fighter) => {
+        if (beds.has(bed)) return;
+        beds.set(bed, { cover: Math.min(1, Math.max(0, (rest - 0.85) / 0.15)), body: this.actors.get(f)?.mannequin });
+      };
+      if (world.sleep) occupy(world.sleep.bed, world.restAmount, world.player);
       if (world.shower) booths.add(world.shower.booth);
       for (const h of world.hunters.values()) {
         if (!h.target) continue;
-        if (h.bed !== null && h.rest >= 0.9) beds.add(h.bed);
+        if (h.bed !== null && h.rest > 0) occupy(h.bed, h.rest, h.fighter);
         if (h.booth !== null) booths.add(h.booth);
       }
       this.inn.update(clock.t, { beds, booths });

@@ -76,7 +76,8 @@ export const bedStand = (b: InnBed) => ({ x: b.x - BED_W / 2 - 0.37, z: b.head +
 /** 걸터앉는 골반 · 누운 자리 (렌더러 RestPose 기준, 서울 집 침대와 같은 비율) */
 export const bedPose = (b: InnBed) => ({
   sit: { x: b.x - 0.5, z: b.head + 1.09, yaw: -Math.PI / 2 },
-  lie: { x: b.x, y: 0.8, z: b.head + 1.95, yaw: 0 },
+  // 누운 등이 매트리스 윗면(0.62)에 닿는 높이
+  lie: { x: b.x, y: 0.75, z: b.head + 1.95, yaw: 0 },
 });
 
 /** 샤워 칸 (북쪽 벽에 붙은 세 칸). 커튼이 남쪽 */
