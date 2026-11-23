@@ -25,8 +25,7 @@ export const CINEMATICS = {
         // 겁에 질린 얼굴 클로즈업: 숨을 몰아쉬며 떨고 두리번거리다 돌아선다
         { video: '/cinematics/prologue-chase/panic.mp4', poster: '/cinematics/prologue-chase/still-2.jpg' },
         // 숲길을 달려 도망, 바로 뒤로 덮쳐 오는 검은 손톱 (5초) → 그대로 추격 조작으로
-        // (끝 0.6초는 손이 몸을 덮어 잘라 낸다)
-        { video: '/cinematics/prologue-chase/run.mp4', until: 4.4 },
+        { video: '/cinematics/prologue-chase/run.mp4' },
       ],
     },
   },
