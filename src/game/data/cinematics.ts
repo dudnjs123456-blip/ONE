@@ -21,9 +21,10 @@ export const CINEMATICS = {
     byBody: {
       smallSilverGirl: [
         // 안개 속 그림자의 붉은 눈 → 뒤돌아보며 물러선다 (5초)
-        { video: '/cinematics/prologue-chase/meet.mp4', poster: '/cinematics/prologue-chase/still-1.jpg' },
-        // 겁에 질린 얼굴 클로즈업: 숨을 몰아쉬며 떨고 두리번거리다 돌아선다
-        { video: '/cinematics/prologue-chase/panic.mp4', poster: '/cinematics/prologue-chase/still-2.jpg' },
+        // (1.7초 뒤엔 고개를 돌리며 옆얼굴이 일그러져 잘라 낸다)
+        { video: '/cinematics/prologue-chase/meet.mp4', poster: '/cinematics/prologue-chase/still-1.jpg', until: 1.7 },
+        // 겁에 질린 얼굴 클로즈업 (몬스터는 안 보이게): 숨을 몰아쉬며 떨고 두리번거린다
+        { video: '/cinematics/prologue-chase/panic.mp4' },
         // 숲길을 달려 도망, 바로 뒤로 덮쳐 오는 검은 손톱 (5초) → 그대로 추격 조작으로
         { video: '/cinematics/prologue-chase/run.mp4' },
       ],
