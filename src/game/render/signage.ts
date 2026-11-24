@@ -522,41 +522,8 @@ export function swingDoors(parent: THREE.Object3D, cx: number, z: number, width:
   };
 }
 
-/** 글자 모양 그림 (흰 글자 + 투명 바탕). 입체 글자의 앞면·옆면 모두 이 그림으로 오려 낸다 */
-function letterMask(text: string, w: number, h: number, weight: number, spacing: number, family: string = FONT) {
-  return canvasTex(w, h, (cg) => {
-    cg.clearRect(0, 0, w, h);
-    cg.textAlign = 'center';
-    cg.textBaseline = 'middle';
-    fit(cg, text, w * 0.96, Math.round(h * 0.82), weight, spacing, family);
-    cg.fillStyle = '#ffffff';
-    cg.fillText(text, w / 2, h * 0.54);
-  });
-}
-
 /**
- * 입체 채널 글자: 같은 글자 그림을 얇은 판 여러 장으로 겹쳐 두께를 만든다 (앞면은 금속, 옆면은 짙게).
- * 비스듬히 봐도 글자에 두께가 보인다.
- */
-function channelLetters(mask: THREE.Texture, w: number, h: number, depth: number, face: THREE.MeshStandardMaterial, side: THREE.MeshStandardMaterial) {
-  const g = new THREE.Group();
-  const geo = new THREE.PlaneGeometry(w, h);
-  const LAYERS = 7;
-  for (let i = 0; i <= LAYERS; i++) {
-    const m = new THREE.Mesh(geo, i === LAYERS ? face : side);
-    m.position.z = (i / LAYERS) * depth;
-    m.castShadow = i === LAYERS;
-    g.add(m);
-  }
-  for (const m of [face, side]) {
-    m.map = mask;
-    m.alphaTest = 0.5;
-  }
-  return g;
-}
-
-/**
- * 행복빌라 현관 (내 집 건물): 짙은 금속 포털 프레임 + 위 보에 입체 황동 글자 (밤엔 글자 뒤 후광) +
+ * 행복빌라 현관 (내 집 건물): 짙은 금속 포털 프레임 + 간판 없는 보 +
  * 원목 루버 벽 + 여닫는 유리 양문 + 안쪽 전실 불빛 + 도어락 + 벽등 + 파란 도로명 주소판.
  * 정면(+z) 기준으로 g 안에 만든다.
  * @returns 문 (여닫기), 밤에 켜질 재질 (opacity = 밤 정도)
@@ -692,53 +659,7 @@ export function buildVillaEntrance(g: THREE.Group, b: Building): { door: DoorCon
     }
   }
 
-  // 간판: 보 앞면에 입체 황동 글자 '행복빌라' + 작은 영문, 밤엔 글자 뒤로 따뜻한 후광
-  const beamFront = PD + 0.001;
-  const beamY = PH - beamH / 2;
-  const nameW = 1.9;
-  const nameH = nameW / 4;
-  const nameX = -0.32;
-  const nameMask = letterMask('행복빌라', 1024, 256, 600, 0.14, SIGN_FONT.serif);
-  const brass = new THREE.MeshStandardMaterial({ color: 0xe0c48e, roughness: 0.32, metalness: 0.55, emissive: 0x3a2a10, emissiveIntensity: 0.6 });
-  const brassSide = new THREE.MeshStandardMaterial({ color: 0x6b5330, roughness: 0.5, metalness: 0.4 });
-  const letters = channelLetters(nameMask, nameW, nameH, 0.035, brass, brassSide);
-  letters.position.set(nameX, beamY + 0.02, beamFront + 0.025);
-  f.add(letters);
-  const halo = canvasTex(1024, 256, (cg) => {
-    cg.clearRect(0, 0, 1024, 256);
-    cg.textAlign = 'center';
-    cg.textBaseline = 'middle';
-    fit(cg, '행복빌라', 1024 * 0.96, Math.round(256 * 0.82), 600, 0.14, SIGN_FONT.serif);
-    cg.shadowColor = 'rgba(255,255,255,1)';
-    cg.shadowBlur = 30;
-    cg.fillStyle = 'rgba(255,255,255,0.9)';
-    for (let i = 0; i < 3; i++) cg.fillText('행복빌라', 512, 256 * 0.54);
-  });
-  const haloMat = new THREE.MeshBasicMaterial({ color: 0xfff0dc, map: halo, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
-  glow.push(haloMat);
-  const haloM = new THREE.Mesh(new THREE.PlaneGeometry(nameW * 1.08, nameH * 1.3), haloMat);
-  haloM.position.set(nameX, beamY + 0.02, beamFront + 0.004);
-  f.add(haloM);
-  // 오른쪽: 가는 세로선 + 영문 이름 · 번지
-  box(0.012, nameH * 0.8, 0.01, brass, 0.78, beamY + 0.02, beamFront + 0.005);
-  const sub = plane(
-    0.8,
-    0.2,
-    canvasTex(512, 128, (cg) => {
-      cg.clearRect(0, 0, 512, 128);
-      cg.textBaseline = 'middle';
-      cg.fillStyle = '#d9c08a';
-      fit(cg, 'HAPPY VILLA', 480, 42, 600, 0.38, SIGN_FONT.latin);
-      cg.fillText('HAPPY VILLA', 8, 42);
-      cg.fillStyle = '#9b9ea4';
-      fit(cg, 'HANGANG-RO 12', 480, 28, 500, 0.42, SIGN_FONT.latin);
-      cg.fillText('HANGANG-RO 12', 8, 94);
-    }),
-    { cutout: true },
-  );
-  sub.position.set(1.22, beamY + 0.02, beamFront + 0.006);
-  f.add(sub);
-
+  // 간판(행복빌라 글자·영문 판)은 없앴다
   // 파란 도로명 주소판 (한국식) — 왼쪽 기둥 바깥 벽
   const addr = canvasTex(512, 160, (cg) => {
     cg.fillStyle = '#1f4ea3';
