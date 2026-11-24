@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { pixelRatioFor } from './graphics';
 import { mulberry32 } from '../core/controllers';
 import { smooth, type FrameClock } from './clock';
@@ -10,6 +11,7 @@ import { createCharacter } from './vrmCharacter';
 import { checkLeaks, disposeObject, trackRenderer } from './dispose';
 import { playHit, playWhoosh } from './sfx';
 import { headshot } from './portraitShot';
+import { ShadowBeast } from './shadowBeast';
 import { CLIFF_Z, PATH, PATH_HALF, type PrologueWorld } from '../story/prologue';
 import { BEAST_NAME } from '../data/prologueScript';
 
@@ -25,11 +27,8 @@ export class PrologueRenderer {
   private camera = new THREE.PerspectiveCamera(48, 1, 0.1, 400);
   private moon: THREE.DirectionalLight;
   private player: View;
-  private beast: View;
+  private beast: ShadowBeast;
   private beastPlate = new Nameplate(true);
-  private eyes = new THREE.Group();
-  private eyesPlaced = false;
-  private darkened = false;
   private wind: THREE.LineSegments;
   /** 게임 스폰 빛기둥 (처음 나타날 때만) */
   private pillar: THREE.Group;
@@ -44,6 +43,10 @@ export class PrologueRenderer {
   private camLook = new THREE.Vector3(0, 1, 0);
   private shake = 0;
   private villageGlow: THREE.Sprite;
+  /** 매 프레임 살랑이는 것들 (반딧불 · 땅 안개 · 버섯 빛) */
+  private ambient: ((t: number, dt: number) => void)[] = [];
+  /** 그린 배경 띠 (카메라를 둘러싼 원통): 숲 전경 + 벼랑 쪽 전망 */
+  private band!: { root: THREE.Group; north: THREE.MeshBasicMaterial; vista: THREE.MeshBasicMaterial };
 
   constructor(canvas: HTMLCanvasElement, world: PrologueWorld) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -51,11 +54,12 @@ export class PrologueRenderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    const sky = 0x1d1436;
-    this.scene.background = new THREE.Color(sky);
-    this.scene.fog = new THREE.Fog(sky, 10, 46);
-    this.scene.add(new THREE.HemisphereLight(0xb9a6ff, 0x1a2230, 0.95));
-    this.moon = new THREE.DirectionalLight(0xcfc2ff, 1.6);
+    // 컷신과 같은 색: 푸른 달빛 안개 숲 (먼 곳일수록 안개 색에 묻힌다)
+    const fogColor = 0x1b2a3d;
+    this.scene.background = skyTexture();
+    this.scene.fog = new THREE.Fog(fogColor, 7, 44);
+    this.scene.add(new THREE.HemisphereLight(0x9fb8ff, 0x10161c, 0.9));
+    this.moon = new THREE.DirectionalLight(0xcfdcff, 1.7);
     this.moon.castShadow = true;
     this.moon.shadow.mapSize.set(2048, 2048);
     const sc = this.moon.shadow.camera;
@@ -66,32 +70,25 @@ export class PrologueRenderer {
 
     this.buildForest();
     this.villageGlow = this.buildAbyss();
+    this.band = this.buildSkyBand();
     this.sparks = new SparkSystem(this.scene);
     this.texts = new FloatingTexts(this.scene);
 
     this.player = createCharacter(playerLook(wornList(world.profile.wardrobe), world.profile.body));
     this.player.casual = true;
-    this.beast = createCharacter(0x150b20);
-    this.beast.root.scale.setScalar(1.7);
+    // 이름 없는 그림자: 컷신 속 모습대로 만든 전용 짐승 모델 (사슴뿔 · 붉은 눈 · 긴 팔과 갈퀴 손톱 · 그림자 가닥)
+    this.beast = new ShadowBeast();
     this.beast.root.visible = false;
     this.beastPlate.sprite.visible = false;
     this.beastPlate.sprite.scale.multiplyScalar(1.3);
-    // 그림자의 붉은 눈 (안개 속에서도 보이게 안개 영향을 받지 않는다)
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2a3a, fog: false });
-    for (const sx of [-1, 1]) {
-      const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), eyeMat);
-      e.position.x = sx * 0.055;
-      this.eyes.add(e);
-    }
-    this.beast.root.add(this.eyes);
-    // 그림자에서 피어오르는 검은 연기
-    const n = 120;
+    // 그림자에서 피어오르는 검은 연기 (발밑에서 머리 위까지 천천히 솟아 흩어진다)
+    const n = 160;
     const pos = new Float32Array(n * 3);
     const rng = mulberry32(5);
-    for (let i = 0; i < n; i++) pos.set([(rng() - 0.5) * 1.4, rng() * 2.6, (rng() - 0.5) * 1.4], i * 3);
+    for (let i = 0; i < n; i++) pos.set([(rng() - 0.5) * 2.0, rng() * 3.4, (rng() - 0.5) * 1.8], i * 3);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.aura = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x07030c, size: 0.55, map: softDot(), transparent: true, opacity: 0.8, depthWrite: false }));
+    this.aura = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x030106, size: 1.15, map: softDot(), transparent: true, opacity: 0.42, depthWrite: false }));
     this.aura.visible = false;
     this.scene.add(this.player.root, this.beast.root, this.beastPlate.sprite, this.aura);
 
@@ -101,7 +98,7 @@ export class PrologueRenderer {
     for (let i = 0; i < m; i++) mp.set([(rng() - 0.5) * 30, rng() * 6, 8 - rng() * 62], i * 3);
     const mg = new THREE.BufferGeometry();
     mg.setAttribute('position', new THREE.BufferAttribute(mp, 3));
-    this.mist = new THREE.Points(mg, new THREE.PointsMaterial({ color: 0xc8b8ff, size: 0.12, map: softDot(), transparent: true, opacity: 0.45, depthWrite: false }));
+    this.mist = new THREE.Points(mg, new THREE.PointsMaterial({ color: 0xb8c8e8, size: 0.12, map: softDot(), transparent: true, opacity: 0.45, depthWrite: false }));
     this.scene.add(this.mist);
 
     // 바람 줄기 (떨어질 때만): 몸 둘레 원통 안에 짧은 선들
@@ -170,7 +167,7 @@ export class PrologueRenderer {
     if (who === 'me' && this.player.loaded === false) return null;
     const vis = v.root.visible;
     v.root.visible = true;
-    const shot = headshot(this.renderer, this.scene, v.root, { x: f.fx, z: f.fz }, { zoom: who === 'beast' ? 1.6 : 1, hide: [who === 'me' ? this.beast.root : this.player.root, this.aura] });
+    const shot = headshot(this.renderer, this.scene, v.root, { x: f.fx, z: f.fz }, { zoom: who === 'beast' ? 0.55 : 1, hide: [who === 'me' ? this.beast.root : this.player.root, this.aura] });
     v.root.visible = vis;
     return shot;
   }
@@ -203,36 +200,16 @@ export class PrologueRenderer {
     this.beastPlate.sprite.visible = out;
     if (out) {
       this.beast.update(b, clock);
-      if (!this.darkened) {
-        // 온몸이 빛을 먹는 검은 그림자 (살색 머리·옷 색이 보이지 않게)
-        this.beast.root.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (!m.isMesh || this.eyes.children.includes(m)) return;
-          const mats = (Array.isArray(m.material) ? m.material : [m.material]).map((mt) => {
-            const c = mt.clone() as THREE.MeshStandardMaterial;
-            c.color?.setHex(0x0a0510);
-            if (c.emissive) c.emissive.setHex(0x12051c);
-            c.map = null;
-            return c;
-          });
-          m.material = Array.isArray(m.material) ? mats : mats[0];
-        });
-        this.darkened = true;
-      }
-      if (!this.eyesPlaced) {
-        // 모델 키에 맞춰 눈 자리를 잡는다 (얼굴 앞쪽 = 몸 기준 +z)
-        const box = new THREE.Box3().setFromObject(this.beast.root);
-        const h = (box.max.y - box.min.y) / this.beast.root.scale.y;
-        if (h > 0.5) {
-          this.eyes.position.set(0, h * 0.885, 0.13);
-          this.eyesPlaced = true;
-        }
-      }
       const bp = b.lerped(clock.alpha);
       this.aura.position.set(bp.x, 0, bp.z);
       this.aura.rotation.y = clock.t * 0.01;
+      // 연기 알갱이가 위로 솟아 머리 위에서 다시 발밑으로
+      const ap = this.aura.geometry.attributes.position as THREE.BufferAttribute;
+      const aa = ap.array as Float32Array;
+      for (let i = 1; i < aa.length; i += 3) aa[i] = (aa[i] + clock.dt * 0.5) % 3.4;
+      ap.needsUpdate = true;
       this.beastPlate.draw(BEAST_NAME, 1, 1);
-      this.beastPlate.sprite.position.set(bp.x, 3.9, bp.z);
+      this.beastPlate.sprite.position.set(bp.x, 4.4, bp.z);
     }
 
     for (const e of world.drainEvents()) {
@@ -246,8 +223,9 @@ export class PrologueRenderer {
     world.shake = 0;
 
     // 마을 불빛이 숨 쉬듯 일렁인다
-    this.villageGlow.material.opacity = 0.55 + Math.sin(clock.t * 0.03) * 0.15;
+    this.villageGlow.material.opacity = 0.22 + Math.sin(clock.t * 0.03) * 0.06;
     this.mist.rotation.y = Math.sin(clock.t * 0.002) * 0.05;
+    for (const a of this.ambient) a(clock.t / 60, clock.dt);
 
     this.updateWind(world, clock);
     this.updateCamera(world, clock);
@@ -336,9 +314,9 @@ export class PrologueRenderer {
       case 'cliff':
       case 'fight':
       case 'cornered':
-        // 그림자 등 뒤 위에서: 벼랑 끝에 선 나, 그 너머 낭떠러지와 아래 마을 불빛
-        wantPos.set(p.x + 3, 7.5, CLIFF_Z + 6.5);
-        wantLook.set(p.x - 0.5, -8.5, CLIFF_Z - 10);
+        // 그림자 등 뒤에서: 벼랑 끝에 선 나, 그 너머 구름 바다와 멀리 마을 · 산 · 달 (그린 배경)
+        wantPos.set(p.x + 1.6, 4.6, CLIFF_Z + 10);
+        wantLook.set(p.x + 0.6, -2.2, CLIFF_Z - 14);
         k = 0.05;
         break;
       case 'jump':
@@ -356,13 +334,13 @@ export class PrologueRenderer {
         }
         break;
       default:
-        // 평소: 등 뒤 위에서 길 앞쪽을 보는 추적 카메라 (쫓길 땐 조금 더 낮고 멀리)
+        // 평소: 어깨 너머 낮은 자리에서 길 앞쪽 숲을 바라보는 추적 카메라 (안개 속 숲과 그린 배경이 보이게). 쫓길 땐 조금 더 멀리
         if (world.phase === 'chase') {
-          wantPos.set(p.x, 6.2, p.z + 8.8);
-          wantLook.set(p.x, 0.8, p.z - 2.5);
+          wantPos.set(p.x, 4, p.z + 7.6);
+          wantLook.set(p.x, 1.2, p.z - 5);
         } else {
-          wantPos.set(p.x, 7.2, p.z + 8.2);
-          wantLook.set(p.x, 0.8, p.z - 1.5);
+          wantPos.set(p.x, 3.8, p.z + 7);
+          wantLook.set(p.x, 1.3, p.z - 5);
         }
     }
     const s = smooth(k, clock.dt);
@@ -373,6 +351,7 @@ export class PrologueRenderer {
     this.shake *= Math.pow(0.86, clock.dt * 60);
     this.camera.position.set(this.camPos.x + sx, this.camPos.y + sy, this.camPos.z);
     this.camera.lookAt(this.camLook);
+    this.updateSkyBand(world);
     const fp = world.player;
     this.moon.position.set(fp.x + 6, 18, fp.z + 4);
     this.moon.target.position.set(fp.x, 0, fp.z - 2);
@@ -381,94 +360,419 @@ export class PrologueRenderer {
   private buildForest() {
     const s = this.scene;
     const rng = mulberry32(77);
-    // 땅: 벼랑 끝(CLIFF_Z)에서 뚝 끊긴다
-    const len = 70;
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, len), new THREE.MeshStandardMaterial({ color: 0x272238, roughness: 1 }));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, 0, CLIFF_Z + len / 2);
-    ground.receiveShadow = true;
-    s.add(ground);
-    // 길 (흙길 조각들)
-    const pathMat = new THREE.MeshStandardMaterial({ color: 0x3d3446, roughness: 1 });
-    for (let i = 0; i + 1 < PATH.length; i++) {
-      const a = PATH[i];
-      const c = PATH[i + 1];
-      const l = Math.hypot(c.x - a.x, c.z - a.z);
-      const seg = new THREE.Mesh(new THREE.PlaneGeometry(PATH_HALF * 1.6, l + 1.5), pathMat);
-      seg.rotation.x = -Math.PI / 2;
-      seg.rotation.z = -Math.atan2(c.x - a.x, -(c.z - a.z));
-      seg.position.set((a.x + c.x) / 2, 0.01, (a.z + c.z) / 2);
-      seg.receiveShadow = true;
-      s.add(seg);
-    }
-    // 벼랑 면: 깎아지른 바위벽이 아래로 끝없이
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(90, 60, 2), new THREE.MeshStandardMaterial({ color: 0x1b1626, roughness: 1 }));
-    wall.position.set(0, -30.02, CLIFF_Z + 1); // 땅 밑에 (낭떠러지 쪽으로 튀어나오면 아래가 안 보인다)
-    s.add(wall);
-    // 벼랑 끝 울퉁불퉁한 바위
-    const rockGeo = new THREE.DodecahedronGeometry(0.6, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x3a3450, roughness: 1 });
-    for (let i = 0; i < 26; i++) {
-      const r = new THREE.Mesh(rockGeo, rockMat);
-      const x = -16 + i * 1.3 + (rng() - 0.5);
-      if (Math.abs(x) < 2.2) continue; // 뛰어내리는 자리는 비운다
-      r.position.set(x, 0.1, CLIFF_Z + 0.2 + rng() * 0.6);
-      r.scale.set(0.6 + rng(), 0.4 + rng() * 0.8, 0.6 + rng());
-      r.rotation.y = rng() * Math.PI;
-      r.castShadow = r.receiveShadow = true;
-      s.add(r);
-    }
-    // 뒤틀린 보랏빛 나무: 길 양옆으로 빽빽이
-    const trees: { x: number; z: number; s: number }[] = [];
-    const nearPath = (x: number, z: number) =>
-      PATH.slice(1).some((c, i) => {
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const e = new THREE.Euler();
+    /** 길 한가운데 선까지 거리 */
+    const pathDist = (x: number, z: number) => {
+      let best = Infinity;
+      for (let i = 0; i + 1 < PATH.length; i++) {
         const a = PATH[i];
+        const c = PATH[i + 1];
         const vx = c.x - a.x;
         const vz = c.z - a.z;
         const u = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / (vx * vx + vz * vz)));
-        return Math.hypot(x - (a.x + vx * u), z - (a.z + vz * u)) < PATH_HALF + 1.2;
-      });
-    while (trees.length < 260) {
-      const x = (rng() - 0.5) * 60;
-      const z = 12 - rng() * (12 - CLIFF_Z - 2);
-      if (nearPath(x, z) || z < CLIFF_Z + 1.5) continue;
-      trees.push({ x, z, s: 0.9 + rng() * 1.1 });
+        best = Math.min(best, Math.hypot(x - (a.x + vx * u), z - (a.z + vz * u)));
+      }
+      return best;
+    };
+    const nearPath = (x: number, z: number, pad = 1.2) => pathDist(x, z) < PATH_HALF + pad;
+    /** 숲 바닥 높낮이: 길과 벼랑 끝은 평평, 그 밖은 완만하게 울퉁불퉁 */
+    const bump = (x: number, z: number) => {
+      const away = Math.min(1, Math.max(0, (pathDist(x, z) - PATH_HALF - 1.5) / 4)) * Math.min(1, Math.max(0, (z - CLIFF_Z - 2) / 4));
+      return away * (Math.sin(x * 0.35 + z * 0.12) * 0.35 + Math.sin(x * 0.9 - z * 0.7) * 0.15 + Math.cos(z * 0.45) * 0.2 + 0.2);
+    };
+
+    // 땅: 이끼 낀 숲 바닥에 흙·낙엽 얼룩 (꼭짓점 색). 벼랑 끝(CLIFF_Z)에서 뚝 끊긴다
+    const len = 70;
+    const gg = new THREE.PlaneGeometry(90, len, 120, 96);
+    gg.rotateX(-Math.PI / 2);
+    gg.translate(0, 0, CLIFF_Z + len / 2);
+    const gp = gg.attributes.position as THREE.BufferAttribute;
+    const cols = new Float32Array(gp.count * 3);
+    const moss = new THREE.Color(0x1c2a2a);
+    const leaf = new THREE.Color(0x2a2626);
+    const dirt = new THREE.Color(0x3a332f);
+    const c = new THREE.Color();
+    for (let i = 0; i < gp.count; i++) {
+      const x = gp.getX(i);
+      const z = gp.getZ(i);
+      gp.setY(i, bump(x, z));
+      const pd = pathDist(x, z);
+      const n = Math.sin(x * 1.7 + z * 0.9) * 0.5 + Math.sin(x * 0.4 - z * 1.3) * 0.5;
+      c.copy(moss).lerp(leaf, 0.5 + n * 0.5);
+      // 길: 밟아 다져진 흙. 가장자리는 이끼와 섞인다
+      const k = Math.max(0, Math.min(1, (PATH_HALF + 0.9 - pd) / 1.4));
+      c.lerp(dirt, k * (0.85 + n * 0.1));
+      c.toArray(cols, i * 3);
     }
-    const mtx = new THREE.Matrix4();
-    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.26, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0x241a2e }), trees.length);
-    const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.3, 0), new THREE.MeshStandardMaterial({ color: 0x3a1f5e, roughness: 0.9, emissive: 0x140826, flatShading: true }), trees.length);
-    const q = new THREE.Quaternion();
-    trees.forEach((t, i) => {
-      q.setFromEuler(new THREE.Euler((rng() - 0.5) * 0.25, rng() * 6, (rng() - 0.5) * 0.25));
-      const sc = new THREE.Vector3(t.s, t.s * (1 + rng() * 0.6), t.s);
-      trunk.setMatrixAt(i, mtx.compose(new THREE.Vector3(t.x, 1.2 * sc.y, t.z), q, sc));
-      crown.setMatrixAt(i, mtx.compose(new THREE.Vector3(t.x, 2.9 * sc.y, t.z), q, new THREE.Vector3(t.s, t.s * 0.8, t.s)));
+    gg.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    gg.computeVertexNormals();
+    const ground = new THREE.Mesh(gg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+    ground.receiveShadow = true;
+    s.add(ground);
+
+    // 길가 자갈
+    const pebbleGeo = new THREE.DodecahedronGeometry(0.09, 0);
+    const pebbles: THREE.Matrix4[] = [];
+    while (pebbles.length < 420) {
+      const x = (rng() - 0.5) * 20;
+      const z = 6 - rng() * (6 - CLIFF_Z - 1);
+      const pd = pathDist(x, z);
+      if (pd > PATH_HALF + 0.9 || pd < PATH_HALF - 0.9) continue;
+      e.set(rng() * 3, rng() * 3, rng() * 3);
+      const r = 0.6 + rng() * 1.6;
+      pebbles.push(new THREE.Matrix4().compose(v.set(x, 0.03, z), q.setFromEuler(e), sc.set(r, r * 0.6, r)));
+    }
+    s.add(instanced(pebbleGeo, new THREE.MeshStandardMaterial({ color: 0x4a4c55, roughness: 0.95 }), pebbles, false, true));
+
+    // 침엽수: 층층이 쌓인 뾰족한 잎 덩어리 (컷신의 안개 속 전나무). 두 가지 모양을 섞는다
+    const pine = (tiers: number, wide: number) => {
+      const parts: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < tiers; i++) {
+        const u = i / tiers;
+        const r = wide * (1 - u * 0.72);
+        const g = new THREE.ConeGeometry(r, 1.5 - u * 0.4, 8, 1);
+        const pa = g.attributes.position as THREE.BufferAttribute;
+        // 아래 가장자리를 들쭉날쭉하게 (가지 끝처럼)
+        for (let j = 0; j < pa.count; j++) {
+          if (pa.getY(j) < 0) {
+            const w = 1 + (rng() - 0.5) * 0.35;
+            pa.setX(j, pa.getX(j) * w);
+            pa.setZ(j, pa.getZ(j) * w);
+            pa.setY(j, pa.getY(j) - rng() * 0.15);
+          }
+        }
+        g.translate(0, 1.6 + i * 0.95, 0);
+        parts.push(g.toNonIndexed());
+      }
+      const m = mergeGeometries(parts)!;
+      m.computeVertexNormals();
+      for (const p of parts) p.dispose();
+      return m;
+    };
+    const pineA = pine(5, 1.25);
+    const pineB = pine(4, 1.0);
+    const trunkGeo = new THREE.CylinderGeometry(0.1, 0.24, 2.6, 7);
+    trunkGeo.translate(0, 1.3, 0);
+    const needleMat = new THREE.MeshStandardMaterial({ color: 0x1a3135, roughness: 0.95, flatShading: true });
+    const needleFar = new THREE.MeshStandardMaterial({ color: 0x172631, roughness: 1, flatShading: true });
+    const barkMat = new THREE.MeshStandardMaterial({ color: 0x1c1618, roughness: 1 });
+    const near: { a: THREE.Matrix4[]; b: THREE.Matrix4[]; t: THREE.Matrix4[] } = { a: [], b: [], t: [] };
+    const far: { a: THREE.Matrix4[]; t: THREE.Matrix4[] } = { a: [], t: [] };
+    let tries = 0;
+    while (near.a.length + near.b.length < 230 && tries++ < 5000) {
+      const x = (rng() - 0.5) * 44;
+      const z = 12 - rng() * (12 - CLIFF_Z - 2);
+      if (nearPath(x, z, 3.4) || z < CLIFF_Z + 2) continue;
+      const k = 0.8 + rng() * 0.9;
+      const h = k * (0.9 + rng() * 0.5);
+      const y = bump(x, z) - 0.05;
+      const m = new THREE.Matrix4().compose(v.set(x, y, z), q.setFromEuler(e.set((rng() - 0.5) * 0.06, rng() * 6, (rng() - 0.5) * 0.06)), sc.set(k, h, k));
+      (rng() < 0.55 ? near.a : near.b).push(m);
+      near.t.push(m.clone());
+    }
+    // 멀리 겹겹이 선 숲 (길에서 먼 양옆과 등 뒤): 크고 짙어 안개 속 실루엣이 된다
+    while (far.a.length < 160) {
+      const side = rng() < 0.5 ? -1 : 1;
+      const x = side * (22 + rng() * 22);
+      const z = 16 - rng() * (16 - CLIFF_Z - 3);
+      const k = 1.5 + rng() * 1.2;
+      const m = new THREE.Matrix4().compose(v.set(x, bump(x, z), z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k * (1.1 + rng() * 0.5), k));
+      far.a.push(m);
+      far.t.push(m.clone());
+    }
+    for (let i = 0; i < 40; i++) {
+      const x = (rng() - 0.5) * 50;
+      const z = 13 + rng() * 10;
+      const k = 1.4 + rng();
+      const m = new THREE.Matrix4().compose(v.set(x, 0, z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k * 1.3, k));
+      far.a.push(m);
+      far.t.push(m.clone());
+    }
+    s.add(
+      instanced(pineA, needleMat, near.a, true, false),
+      instanced(pineB, needleMat, near.b, true, false),
+      instanced(trunkGeo, barkMat, near.t, true, false),
+      instanced(pineA, needleFar, far.a, false, false),
+      instanced(trunkGeo, barkMat, far.t, false, false),
+    );
+
+    // 마른 나무: 잎 없이 뒤틀린 가지 (길가 몇 그루 · 벼랑 끝 한 그루). 이 숲이 어딘가 이상하다는 느낌
+    const deadMat = new THREE.MeshStandardMaterial({ color: 0x241d22, roughness: 1 });
+    const deadTree = (x: number, z: number, k: number, seed: number) => {
+      const r2 = mulberry32(seed);
+      const parts: THREE.BufferGeometry[] = [];
+      const grow = (m: THREE.Matrix4, l: number, r: number, d: number) => {
+        const g = new THREE.CylinderGeometry(r * 0.65, r, l, 6);
+        g.translate(0, l / 2, 0);
+        g.applyMatrix4(m);
+        parts.push(g);
+        if (d <= 0) return;
+        const top = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(0, l, 0));
+        const n = d > 2 ? 2 : 2 + Math.floor(r2() * 2);
+        for (let i = 0; i < n; i++) {
+          const rot = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((r2() - 0.5) * 1.4, r2() * 6, (r2() - 0.5) * 1.4));
+          grow(new THREE.Matrix4().multiplyMatrices(top, rot), l * (0.55 + r2() * 0.2), r * 0.6, d - 1);
+        }
+      };
+      grow(new THREE.Matrix4().makeRotationZ((r2() - 0.5) * 0.2), 2.2, 0.2, 4);
+      const g = mergeGeometries(parts.map((p) => p.toNonIndexed()))!;
+      for (const p of parts) p.dispose();
+      const t = new THREE.Mesh(g, deadMat);
+      t.position.set(x, bump(x, z), z);
+      t.scale.setScalar(k);
+      t.castShadow = true;
+      s.add(t);
+    };
+    for (const [x, z, k, seed] of [[-4.2, -3, 1, 3], [5, -12, 1.2, 5], [-6, -20, 1.1, 8], [6.5, -29, 1.3, 11], [-5.5, -36, 1, 14], [-4, CLIFF_Z + 1.3, 1.25, 21]] as const) deadTree(x, z, k, seed);
+
+    // 덤불 · 고사리 · 풀포기: 숲 바닥을 채운다 (길 한가운데는 비운다)
+    const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
+    const fernGeo = (() => {
+      const parts: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < 6; i++) {
+        const leafG = new THREE.ConeGeometry(0.12, 0.8, 4, 1);
+        leafG.translate(0, 0.4, 0);
+        leafG.scale(1, 1, 0.25);
+        leafG.rotateX(1.05);
+        leafG.rotateY((i / 6) * Math.PI * 2);
+        parts.push(leafG.toNonIndexed());
+      }
+      return mergeGeometries(parts)!;
+    })();
+    const grassGeo = (() => {
+      const parts: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < 5; i++) {
+        const b = new THREE.ConeGeometry(0.025, 0.38 + (i % 3) * 0.1, 3, 1);
+        b.translate((i - 2) * 0.04, 0.19, ((i * 7) % 5 - 2) * 0.03);
+        b.rotateZ((i - 2) * 0.18);
+        parts.push(b.toNonIndexed());
+      }
+      return mergeGeometries(parts)!;
+    })();
+    const scatter = (count: number, pad: number, spread: number, make: (x: number, z: number) => THREE.Matrix4) => {
+      const out: THREE.Matrix4[] = [];
+      let n = 0;
+      while (out.length < count && n++ < count * 20) {
+        const x = (rng() - 0.5) * spread;
+        const z = 10 - rng() * (10 - CLIFF_Z - 0.6);
+        if (nearPath(x, z, pad) || z < CLIFF_Z + 0.6) continue;
+        out.push(make(x, z));
+      }
+      return out;
+    };
+    const bushes = scatter(170, 0.6, 40, (x, z) => {
+      const k = 0.6 + rng() * 0.9;
+      return new THREE.Matrix4().compose(v.set(x, bump(x, z) + 0.15 * k, z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k * 1.3, k * 0.8, k * 1.2));
     });
-    trunk.castShadow = crown.castShadow = true;
-    s.add(trunk, crown);
+    const ferns = scatter(320, 0.15, 34, (x, z) => {
+      const k = 0.7 + rng() * 0.8;
+      return new THREE.Matrix4().compose(v.set(x, bump(x, z), z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k * (0.8 + rng() * 0.5), k));
+    });
+    const grass = scatter(1600, -0.4, 30, (x, z) => {
+      const k = 0.7 + rng() * 0.9;
+      return new THREE.Matrix4().compose(v.set(x, bump(x, z), z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k, k));
+    });
+    s.add(
+      instanced(bushGeo, new THREE.MeshStandardMaterial({ color: 0x1b2b2a, roughness: 1, flatShading: true }), bushes, true, true),
+      instanced(fernGeo, new THREE.MeshStandardMaterial({ color: 0x24403a, roughness: 1, side: THREE.DoubleSide }), ferns, false, true),
+      instanced(grassGeo, new THREE.MeshStandardMaterial({ color: 0x2d4638, roughness: 1 }), grass, false, true),
+    );
+
+    // 이끼 낀 바위와 쓰러진 통나무
+    const stoneGeo = new THREE.DodecahedronGeometry(0.5, 1);
+    const stones = scatter(70, 0.4, 36, (x, z) => {
+      const k = 0.5 + rng() * 1.3;
+      return new THREE.Matrix4().compose(v.set(x, bump(x, z) + 0.1 * k, z), q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3)), sc.set(k, k * (0.5 + rng() * 0.4), k * (0.8 + rng() * 0.4)));
+    });
+    s.add(instanced(stoneGeo, new THREE.MeshStandardMaterial({ color: 0x353c42, roughness: 1, flatShading: true }), stones, true, true));
+    const logGeo = new THREE.CylinderGeometry(0.28, 0.32, 4, 9);
+    logGeo.rotateZ(Math.PI / 2);
+    const logs = scatter(9, 1.5, 26, (x, z) => new THREE.Matrix4().compose(v.set(x, bump(x, z) + 0.26, z), q.setFromEuler(e.set(0, rng() * 6, (rng() - 0.5) * 0.1)), sc.set(0.7 + rng() * 0.6, 1, 1)));
+    s.add(instanced(logGeo, barkMat, logs, true, true));
+
+    // 희미하게 빛나는 버섯 무리 (불을 켜지 않고 스스로 빛나 보이게): 길가 군데군데
+    const capGeo = new THREE.SphereGeometry(0.07, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+    const stemGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.1, 5);
+    stemGeo.translate(0, -0.05, 0);
+    const caps: THREE.Matrix4[] = [];
+    for (let i = 0; i < 22; i++) {
+      let x = 0;
+      let z = 0;
+      for (let n = 0; n < 40; n++) {
+        x = (rng() - 0.5) * 14;
+        z = 4 - rng() * (4 - CLIFF_Z - 3);
+        const pd = pathDist(x, z);
+        if (pd > PATH_HALF + 0.6 && pd < PATH_HALF + 3) break;
+      }
+      for (let j = 0; j < 3 + Math.floor(rng() * 4); j++) {
+        const k = 0.6 + rng() * 1.2;
+        const xx = x + (rng() - 0.5) * 0.5;
+        const zz = z + (rng() - 0.5) * 0.5;
+        caps.push(new THREE.Matrix4().compose(v.set(xx, bump(xx, zz) + 0.1 * k, zz), q.setFromEuler(e.set((rng() - 0.5) * 0.3, 0, (rng() - 0.5) * 0.3)), sc.set(k, k, k)));
+      }
+    }
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x5fe0e8, emissive: 0x2ad0e0, emissiveIntensity: 1.2, roughness: 0.5 });
+    s.add(instanced(capGeo, capMat, caps, false, false), instanced(stemGeo, new THREE.MeshStandardMaterial({ color: 0x9fd8d8, emissive: 0x206068, roughness: 0.8 }), caps.map((m) => m.clone()), false, false));
+    this.ambient.push((t) => {
+      capMat.emissiveIntensity = 1.0 + Math.sin(t * 1.3) * 0.3;
+    });
+
     // 숲속에 떠 있는 희미한 수정 (이 세계가 이상하다는 표시)
     const crystal = new THREE.MeshStandardMaterial({ color: 0x9b7cff, emissive: 0x5a2cff, emissiveIntensity: 1.1, roughness: 0.3 });
+    const crystals: THREE.Mesh[] = [];
     for (const [x, z] of [[-5, -6], [5.5, -16], [-5.5, -25], [6, -33], [-5, -41]] as const) {
-      const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.35, 0), crystal);
-      c.scale.y = 2;
-      c.position.set(x, 1.4, z);
-      s.add(c);
+      const cm = new THREE.Mesh(new THREE.OctahedronGeometry(0.35, 0), crystal);
+      cm.scale.y = 2;
+      cm.position.set(x, 1.4, z);
+      s.add(cm);
+      crystals.push(cm);
       const l = new THREE.PointLight(0x8a5cff, 3, 7, 2);
       l.position.set(x, 1.6, z);
       s.add(l);
     }
+    this.ambient.push((t) => crystals.forEach((cm, i) => {
+      cm.position.y = 1.4 + Math.sin(t * 0.9 + i) * 0.12;
+      cm.rotation.y = t * 0.4 + i;
+    }));
+
+    // 달빛 줄기: 나무 사이로 비스듬히 내리는 희미한 빛
+    const rayTex = rayTexture();
+    for (let i = 0; i < 9; i++) {
+      const ray = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.6 + rng() * 1.4, 16),
+        new THREE.MeshBasicMaterial({ map: rayTex, color: 0xa8c4ff, transparent: true, opacity: 0.07 + rng() * 0.05, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+      );
+      ray.position.set((rng() - 0.5) * 14, 6, 2 - i * 5.2 - rng() * 2);
+      ray.rotation.set(0, (rng() - 0.5) * 0.8, 0.35);
+      s.add(ray);
+    }
+
+    // 땅에 낮게 깔려 흐르는 안개
+    const fogTex = softDot();
+    const lowFog: THREE.Sprite[] = [];
+    for (let i = 0; i < 46; i++) {
+      const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: fogTex, color: 0x9fb4d0, transparent: true, opacity: 0.1 + rng() * 0.08, depthWrite: false }));
+      f.position.set((rng() - 0.5) * 26, 0.4 + rng() * 0.6, 8 - rng() * (8 - CLIFF_Z));
+      f.scale.set(6 + rng() * 6, 1.6 + rng(), 1);
+      s.add(f);
+      lowFog.push(f);
+    }
+    const fogBase = lowFog.map((f) => f.position.x);
+    this.ambient.push((t) => lowFog.forEach((f, i) => {
+      f.position.x = fogBase[i] + Math.sin(t * 0.12 + i * 1.7) * 1.6;
+    }));
+
+    // 반딧불 같은 포자: 푸르스름하게 떠다니며 깜빡인다
+    const fn = 140;
+    const fp = new Float32Array(fn * 3);
+    const fb = new Float32Array(fn * 3);
+    for (let i = 0; i < fn; i++) {
+      fb.set([(rng() - 0.5) * 20, 0.3 + rng() * 2.8, 6 - rng() * (6 - CLIFF_Z)], i * 3);
+    }
+    fp.set(fb);
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute('position', new THREE.BufferAttribute(fp, 3));
+    const flyMat = new THREE.PointsMaterial({ color: 0xa8fff0, size: 0.09, map: softDot(), transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+    s.add(new THREE.Points(fg, flyMat));
+    this.ambient.push((t) => {
+      for (let i = 0; i < fn; i++) {
+        fp[i * 3] = fb[i * 3] + Math.sin(t * 0.5 + i) * 0.5;
+        fp[i * 3 + 1] = fb[i * 3 + 1] + Math.sin(t * 0.8 + i * 2.3) * 0.3;
+        fp[i * 3 + 2] = fb[i * 3 + 2] + Math.cos(t * 0.4 + i * 1.1) * 0.5;
+      }
+      fg.attributes.position.needsUpdate = true;
+      flyMat.opacity = 0.7 + Math.sin(t * 2.1) * 0.2;
+    });
+
   }
 
-  /** 벼랑 아래: 깊은 안개 바다와 멀리 경계 마을 불빛 */
+  /**
+   * 그린 배경 띠: 카메라를 둘러싼 커다란 원통 안쪽에 Firefly 로 그린 그림을 붙인다 (하늘 상자처럼 카메라를 따라온다).
+   * 아래쪽은 안개 색으로 번져 있어 3D 숲이 안개에 묻히는 색과 이어진다.
+   * 북쪽(벼랑 방향) 한 칸은 두 장을 겹쳐 두고, 벼랑에 다가갈수록 숲 그림 → 벼랑 너머 전망(구름 바다 · 마을 · 산 · 달)으로 바뀐다.
+   */
+  private buildSkyBand() {
+    const R = 60;
+    const H = 52;
+    // 그림 한 장이 차지하는 각도 (가로세로 비율을 지킨다)
+    const span = (H * (3168 / 1344)) / R;
+    const load = (url: string, repeat: number) => {
+      const t = new THREE.TextureLoader().load(url);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = THREE.MirroredRepeatWrapping;
+      t.repeat.x = repeat;
+      t.anisotropy = 4;
+      return t;
+    };
+    const mat = (map: THREE.Texture) => new THREE.MeshBasicMaterial({ map, color: 0xb4c0cc, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true });
+    const seg = (start: number, len: number, m: THREE.MeshBasicMaterial) => {
+      const g = new THREE.CylinderGeometry(R, R, H, 48, 1, true, start, len);
+      const mesh = new THREE.Mesh(g, m);
+      mesh.renderOrder = -10;
+      mesh.frustumCulled = false;
+      return mesh;
+    };
+    const root = new THREE.Group();
+    // 원통 각도 0 = +z(등 뒤), π = -z(벼랑 쪽)
+    const nStart = Math.PI - span / 2;
+    const rest = Math.PI * 2 - span;
+    const forest = mat(load('/prologue/forest-pano.webp', rest / span));
+    const north = mat(load('/prologue/forest-pano.webp', 1));
+    const vista = mat(load('/prologue/cliff-vista.webp', 1));
+    vista.opacity = 0;
+    root.add(seg(nStart + span, rest, forest), seg(nStart, span, north), seg(nStart, span, vista));
+    this.scene.add(root);
+    return { root, north, vista };
+  }
+
+  /** 배경 띠를 카메라에 붙이고, 벼랑에 가까울수록 북쪽 그림을 전망으로 바꾼다 */
+  private updateSkyBand(world: PrologueWorld) {
+    const cam = this.camera.position;
+    // 그림의 지평선(아래 1/3 안개 띠 위)이 눈높이 조금 아래에 오게
+    const k = Math.min(1, Math.max(0, (world.player.z - (CLIFF_Z + 6)) / 16));
+    this.band.root.position.set(cam.x, cam.y - 6 - (1 - k) * 2, cam.z);
+    this.band.north.opacity = k;
+    this.band.vista.opacity = 1 - k;
+  }
+
+  /** 벼랑: 들쭉날쭉한 바위 절벽 · 벼랑 끝 바위 · 깊은 안개 바다와 멀리 경계 마을 불빛 (건너편 산·달은 그린 배경 그림) */
   private buildAbyss(): THREE.Sprite {
     const s = this.scene;
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0xffc98a, fog: false });
     const rng = mulberry32(9);
-    for (let i = 0; i < 44; i++) {
-      const l = new THREE.Mesh(new THREE.SphereGeometry(0.18 + rng() * 0.22, 8, 6), lightMat);
-      l.position.set((rng() - 0.5) * 22, -24 + rng() * 2, CLIFF_Z - 26 - rng() * 12);
-      s.add(l);
+    // 벼랑 면: 깎아지른 바위벽 (땅 밑에 둬서 낭떠러지 쪽으로 튀어나오지 않게) + 그 앞에 울퉁불퉁한 바위 덩어리
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(90, 60, 2), new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 1 }));
+    wall.position.set(0, -30.02, CLIFF_Z + 1);
+    s.add(wall);
+    const rockGeo = new THREE.DodecahedronGeometry(1, 1);
+    const rp = rockGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < rp.count; i++) {
+      const k = 0.8 + rng() * 0.35;
+      rp.setXYZ(i, rp.getX(i) * k, rp.getY(i) * k, rp.getZ(i) * k);
     }
+    rockGeo.computeVertexNormals();
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x343a46, roughness: 1, flatShading: true });
+    const face: THREE.Matrix4[] = [];
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    for (let y = -1.6; y > -40; y -= 2.4) {
+      for (let x = -24; x < 24; x += 2 + rng() * 1.5) {
+        const k = 1.0 + rng() * 0.6;
+        face.push(new THREE.Matrix4().compose(new THREE.Vector3(x, y + (rng() - 0.5), CLIFF_Z + 1.25 + rng() * 0.3), q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3)), new THREE.Vector3(k * 1.3, k, Math.min(1.3, k))));
+      }
+    }
+    s.add(instanced(rockGeo, rockMat, face, false, true));
+    // 벼랑 끝 바위 (뛰어내리는 자리는 비운다)
+    const edge: THREE.Matrix4[] = [];
+    for (let x = -18; x < 18; x += 0.9 + rng() * 0.8) {
+      if (Math.abs(x) < 2.2) continue;
+      const k = 0.35 + rng() * 0.45;
+      edge.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0.05, CLIFF_Z + 0.35 + rng() * 0.5), q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3)), new THREE.Vector3(k * 1.4, k * (0.6 + rng() * 0.8), k)));
+    }
+    s.add(instanced(rockGeo, rockMat, edge, true, true));
+
     // 불빛 무리 둘레의 따뜻한 번짐
     const cv = document.createElement('canvas');
     cv.width = cv.height = 64;
@@ -479,19 +783,23 @@ export class PrologueRenderer {
     g.fillStyle = gr;
     g.fillRect(0, 0, 64, 64);
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, fog: false }));
-    glow.scale.set(40, 18, 1);
-    glow.position.set(0, -23, CLIFF_Z - 32);
+    glow.scale.set(34, 12, 1);
+    glow.position.set(0, -23, CLIFF_Z - 33);
     s.add(glow);
-    // 안개 바다 (벼랑 아래를 덮는 반투명 판 몇 겹)
-    for (let i = 0; i < 4; i++) {
-      const m = new THREE.Mesh(
-        new THREE.PlaneGeometry(160, 120),
-        new THREE.MeshBasicMaterial({ color: 0x6a5a9a, transparent: true, opacity: 0.05, depthWrite: false, fog: false }),
-      );
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(0, -14 - i * 6, CLIFF_Z - 55);
-      s.add(m);
+    // 안개 바다: 벼랑 아래를 천천히 흐르는 구름 덩어리 (마을·산·달은 그린 배경 그림에 있다)
+    const tex = softDot();
+    const clouds: THREE.Sprite[] = [];
+    for (let i = 0; i < 26; i++) {
+      const cl = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xa9bad6, transparent: true, opacity: 0.16 + rng() * 0.12, depthWrite: false, fog: false }));
+      cl.position.set((rng() - 0.5) * 90, -12 - rng() * 12, CLIFF_Z - 8 - rng() * 70);
+      cl.scale.set(18 + rng() * 20, 5 + rng() * 4, 1);
+      s.add(cl);
+      clouds.push(cl);
     }
+    const base = clouds.map((cl) => cl.position.x);
+    this.ambient.push((t) => clouds.forEach((cl, i) => {
+      cl.position.x = base[i] + Math.sin(t * 0.05 + i) * 6;
+    }));
     return glow;
   }
 
@@ -526,3 +834,53 @@ function softDot(): THREE.Texture {
   dot = new THREE.CanvasTexture(cv);
   return dot;
 }
+
+/** 같은 모양을 여러 자리에 한 번에 그린다 */
+function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.Matrix4[], cast: boolean, receive: boolean): THREE.InstancedMesh {
+  const m = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length));
+  list.forEach((x, i) => m.setMatrixAt(i, x));
+  m.count = list.length;
+  m.castShadow = cast;
+  m.receiveShadow = receive;
+  m.computeBoundingSphere();
+  return m;
+}
+
+/** 하늘: 위는 짙은 남색, 지평선 쪽은 안개 색으로 (안개에 묻힌 먼 숲과 이어지게) */
+function skyTexture(): THREE.Texture {
+  const cv = document.createElement('canvas');
+  cv.width = 4;
+  cv.height = 256;
+  const g = cv.getContext('2d')!;
+  const gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#070b16');
+  gr.addColorStop(0.55, '#14213a');
+  gr.addColorStop(1, '#1b2a3d');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** 달빛 줄기: 위가 밝고 아래로 흐려지며 양옆이 부드러운 띠 */
+function rayTexture(): THREE.Texture {
+  const cv = document.createElement('canvas');
+  cv.width = 64;
+  cv.height = 256;
+  const g = cv.getContext('2d')!;
+  const gx = g.createLinearGradient(0, 0, 64, 0);
+  gx.addColorStop(0, 'rgba(255,255,255,0)');
+  gx.addColorStop(0.5, 'rgba(255,255,255,1)');
+  gx.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gx;
+  g.fillRect(0, 0, 64, 256);
+  g.globalCompositeOperation = 'destination-in';
+  const gy = g.createLinearGradient(0, 0, 0, 256);
+  gy.addColorStop(0, 'rgba(0,0,0,1)');
+  gy.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gy;
+  g.fillRect(0, 0, 64, 256);
+  return new THREE.CanvasTexture(cv);
+}
+
