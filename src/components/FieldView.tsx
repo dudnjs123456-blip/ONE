@@ -41,6 +41,8 @@ import InnMenuPanel from './InnMenuPanel';
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
 
+/** 여관 앞 깨어나는 자리 (프롤로그 구조 · 1장 고블린 떼 뒤) */
+const INN_WAKE = { x: -6.7, z: 31.3, fx: -1, fz: -0.25 };
 /** 차원 상호작용 키 (서울의 E 자리를 근 기술이 쓴다) */
 const INTERACT_CODE = 'KeyF';
 /** 근 기술 칸: Q W E R = 주 근 (R = 궁극기), A S D = 부 근 (주 근을 다 배운 뒤 깨어난다) */
@@ -238,9 +240,12 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         saveProfile(profile);
         setCh1({ ...dim.ch1 });
       }
-      // 고블린 셋을 다 잡고 콩이 장면이 끝나기 전에 나갔으면: 들어오자마자 콩이 비명부터 다시
+      // 고블린 떼 ~ 이름 짓기 사이에 나갔으면: 들어오자마자 여관 침대에서 깨어나는 장면부터 (도하가 데려다 놓았다)
       const resume = resumeCh1Scene(dim?.ch1 ?? null);
-      if (resume) storyTimer = window.setTimeout(() => playCh1(resume), WARP_MS + 600);
+      if (resume) {
+        world.player.reset(INN_WAKE.x, INN_WAKE.z, INN_WAKE.fx, INN_WAKE.fz);
+        storyTimer = window.setTimeout(() => playCh1(resume), WARP_MS + 600);
+      }
     }
     world.onKill = (monsterId) => {
       const c1 = profile.dimension?.ch1 ?? null;
@@ -248,12 +253,13 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       const done = countQuestKill(c1, monsterId);
       saveProfile(profile);
       setCh1({ ...c1 });
-      // 세 마리째: 자동사냥을 끄고 콩이의 비명
+      // 세 마리째: 자동사냥을 끄고, 숲에서 고블린 떼가 몰려온다
       if (done) {
         if (world.auto) world.toggleAuto();
         questAutoRef.current = false;
         setQuestAuto(false);
-        storyTimer = window.setTimeout(() => playCh1('scream'), 900);
+        world.storyShield = true;
+        storyTimer = window.setTimeout(() => playCh1('swarm'), 900);
       }
     };
     const savePlace = () => {
@@ -443,15 +449,49 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       setCh1({ ...c1 });
       if (a.effect === 'guard' || a.effect === 'breath') return setTraining({ mode: a.effect, next: a.next, npc });
       if (a.effect === 'name') return setNaming({ next: a.next });
-      if (a.effect === 'burst') {
-        // 근이 처음 터진다: 그 근의 빛이 화면을 덮고, 둘레 고블린이 튕겨 나간다
-        const info = ROOT_INFO[c1.root ?? '력'];
-        world.rootBurst(`${c1.root ?? '력'}(${info.hanja}) 발현!`);
-        playHit('counter', true, 1);
-        setBurst({ color: info.color, key: Date.now() });
+      if (a.effect === 'swarm') {
+        // 고블린 떼에 물린다: 체력이 바닥 근처로 (이야기 동안은 쓰러지지 않는다)
+        const p = world.player;
+        world.storyShield = true;
+        p.hp = Math.max(1, Math.round(p.maxHp * 0.15));
+        [0, 260, 520].forEach((t) => window.setTimeout(() => playHit('hit', true, 0.9), t));
+        setBurst({ color: '#b3202a', key: Date.now() });
         setShaking(true);
         window.setTimeout(() => setShaking(false), 900);
-        storyTimer = window.setTimeout(() => a.next && playCh1(a.next, 'noa'), 1700);
+        storyTimer = window.setTimeout(() => a.next && playCh1(a.next), 1300);
+        return;
+      }
+      if (a.effect === 'burst') {
+        // 근이 처음 깨어난다. 아직 미숙해서 바로 둘레만 조금 밀어낸다
+        const info = ROOT_INFO[c1.root ?? '력'];
+        world.rootBurst(`${c1.root ?? '력'}(${info.hanja})`, 2.6);
+        playHit('counter', true, 0.7);
+        setBurst({ color: info.color, key: Date.now() });
+        setShaking(true);
+        window.setTimeout(() => setShaking(false), 600);
+        storyTimer = window.setTimeout(() => a.next && playCh1(a.next), 1400);
+        return;
+      }
+      if (a.effect === 'rescue') {
+        // 도하의 흙벽(형 근): 땅이 솟고 고블린이 멀리 물러난다
+        world.rootBurst('흙벽', 14);
+        playHit('block', true, 1);
+        setBurst({ color: ROOT_INFO['형'].color, key: Date.now() });
+        setShaking(true);
+        window.setTimeout(() => setShaking(false), 700);
+        storyTimer = window.setTimeout(() => a.next && playCh1(a.next), 1200);
+        return;
+      }
+      if (a.effect === 'inn') {
+        // 암전 → 도하가 업어 데려간 여관 침대에서 깨어난다
+        setDoorFade((v) => v + 1);
+        window.setTimeout(() => {
+          const p = world.player;
+          p.reset(INN_WAKE.x, INN_WAKE.z, INN_WAKE.fx, INN_WAKE.fz);
+          p.hp = Math.round(p.maxHp * 0.5);
+          world.storyShield = false;
+        }, 350);
+        storyTimer = window.setTimeout(() => a.next && playCh1(a.next), 1500);
         return;
       }
       if (a.effect === 'exit') {

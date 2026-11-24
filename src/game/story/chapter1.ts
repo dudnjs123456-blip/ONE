@@ -2,8 +2,9 @@ import type { ScriptLine } from '../data/prologueScript';
 import type { PlayerProfile } from '../core/profile';
 
 /**
- * 1장 「기운 수련」: 0장 내내 "잘 만든 게임"이라고 믿던 주인공이, 수련 사이사이 터지는 사건들로 핑계를 하나씩 잃고
- * 마지막에 "이건 게임이 아니야"를 받아들인다. 순수 로직 + 대사 (그리기·미니게임은 FieldView · TrainingGame).
+ * 1장 「기운 수련」: 게임처럼 편하게 즐기던 주인공이, 수련 사이사이 터지는 사건들로 그 편한 마음을 하나씩 잃고
+ * 마지막에 "이건 게임이 아니야"를 받아들인다. 주인공은 "게임이니까" 를 말로 되풀이하지 않는다 — 행동으로 보여 주고,
+ * 현실이 세게 부딪히는 순간(멍 · 로그아웃 · 빈사)에만 짧게 흔들린다. 순수 로직 + 대사 (그리기·미니게임은 FieldView · TrainingGame).
  *
  * 순서 (step):
  *  start   바위의 몸 수련 ① 버티기 (미니게임) → 마지막 한 대는 세게 맞는다
@@ -12,8 +13,9 @@ import type { PlayerProfile } from '../core/profile';
  *  noa     노아의 근 감정: 서울에서 실제로 해 온 생활(플레이 기록)을 맞힌다 (사건 C — "NPC AI") → 내 근이 정해진다
  *  doha    벤치 옆 낯선 사람 도하: 지하철 마지막 칸으로 온 먼저 온 저편 사람 (사건 D — "다 설정 대사")
  *  order   바위가 직접 의뢰를 맡긴다 (0장 게시판의 「북문 밖 고블린 퇴치 · 보수 은화 세 닢」)
- *  quest   북문 밖 고블린 세 마리 → 몰래 따라온 콩이가 다친다 (사건 E — "NPC니까") → 근이 처음 터진다 → 기술 이름 짓기
- *  badge   촌장 마루의 정식 길드 배지 + 의뢰 보수 은화 세 닢 → "이건… 게임이 아니야"
+ *  quest   북문 밖 고블린 세 마리 (두 마리째부터 물린다) → 숲에서 떼로 몰려온다 → 빈사 → 근이 처음 깨어나지만
+ *          아직 미숙해 다 밀어내지 못한다 → 도하가 흙벽(형 근)으로 구해 준다 → 여관에서 깨어나 기술 이름 짓기 · 바위의 보수 은화 세 닢
+ *  badge   촌장 마루의 정식 길드 배지 → "…이건 게임이 아니야"
  *  done
  */
 
@@ -37,16 +39,20 @@ export const QUEST_GOAL = 3;
 /** 고블린 의뢰 보수 (은화) — 0장 게시판에 적힌 그대로 */
 export const QUEST_REWARD = 3;
 
-export type Ch1SceneId = 'intro' | 'guarded' | 'bruise' | 'breath' | 'quake' | 'read' | 'doha' | 'order' | 'scream' | 'awaken' | 'named' | 'badge' | 'final';
+export type Ch1SceneId = 'intro' | 'guarded' | 'bruise' | 'breath' | 'quake' | 'read' | 'doha' | 'order' | 'swarm' | 'cornered' | 'tooWeak' | 'rescue' | 'wake' | 'named' | 'badge' | 'final';
 
 export interface Ch1Scene {
   id: Ch1SceneId;
   lines: ScriptLine[];
 }
 
-/** 장면이 끝난 뒤 할 일: 미니게임 · 근 폭발 연출 · 이름 짓기 · 서울로 나가기, 다음 장면, 넘어갈 단계 */
+/**
+ * 장면이 끝난 뒤 할 일: 미니게임 · 서울로 나가기 · 이름 짓기, 그리고 고블린 떼 연출
+ * swarm = 떼에 물려 체력이 바닥 근처로 · burst = 근이 처음 깨어나 둘레를 조금 밀어냄 (미숙) ·
+ * rescue = 도하의 흙벽이 솟고 고블린이 물러남 · inn = 암전 뒤 여관 침대에서 깨어남
+ */
 export interface Ch1After {
-  effect?: 'guard' | 'breath' | 'burst' | 'name' | 'exit';
+  effect?: 'guard' | 'breath' | 'name' | 'exit' | 'swarm' | 'burst' | 'rescue' | 'inn';
   next?: Ch1SceneId;
   step?: Ch1Step;
   /** 받는 은화 (의뢰 보수) */
@@ -62,10 +68,13 @@ const AFTER: Record<Ch1SceneId, Ch1After> = {
   read: { step: 'doha' },
   doha: { step: 'order' },
   order: { step: 'quest' },
-  scream: { effect: 'burst', next: 'awaken' },
-  awaken: { effect: 'name', next: 'named' },
-  named: { step: 'badge' },
-  badge: { next: 'final', coin: QUEST_REWARD },
+  swarm: { effect: 'swarm', next: 'cornered' },
+  cornered: { effect: 'burst', next: 'tooWeak' },
+  tooWeak: { effect: 'rescue', next: 'rescue' },
+  rescue: { effect: 'inn', next: 'wake' },
+  wake: { effect: 'name', next: 'named' },
+  named: { step: 'badge', coin: QUEST_REWARD },
+  badge: { next: 'final' },
   final: { step: 'done' },
 };
 
@@ -101,7 +110,7 @@ export function ch1SceneForNpc(npcId: string, s: Ch1State | null, profile: Playe
   return w && w[0] === npcId ? ch1Scene(w[1], s, profile) : null;
 }
 
-/** 고블린을 잡았다: 의뢰 중이면 센다. 다 잡은 순간 true (콩이 비명 장면) */
+/** 고블린을 잡았다: 의뢰 중이면 센다. 다 잡은 순간 true (고블린 떼 장면) */
 export function countQuestKill(s: Ch1State | null, monsterId: string): boolean {
   if (!s || s.step !== 'quest' || monsterId !== 'goblin') return false;
   const before = s.questKills ?? 0;
@@ -111,11 +120,11 @@ export function countQuestKill(s: Ch1State | null, monsterId: string): boolean {
 }
 
 /**
- * 다시 접속했을 때 이어서 틀어야 할 장면. 고블린 셋을 다 잡은 뒤 콩이 장면 ~ 이름 짓기 사이에 나갔으면
- * (단계는 아직 'quest' 에 3/3) 콩이 비명부터 다시 — 그러지 않으면 더 셀 고블린이 없어 1장이 멈춘다
+ * 다시 접속했을 때 이어서 틀어야 할 장면. 고블린 셋을 다 잡은 뒤 고블린 떼 ~ 이름 짓기 사이에 나갔으면
+ * (단계는 아직 'quest' 에 3/3) 도하가 데려다 놓은 여관 침대에서 깨어나는 장면부터 — 그러지 않으면 더 셀 고블린이 없어 1장이 멈춘다
  */
 export function resumeCh1Scene(s: Ch1State | null): Ch1SceneId | null {
-  return s?.step === 'quest' && (s.questKills ?? 0) >= QUEST_GOAL ? 'scream' : null;
+  return s?.step === 'quest' && (s.questKills ?? 0) >= QUEST_GOAL ? 'wake' : null;
 }
 
 /** 로그아웃 버튼을 눌렀을 때: 서울에 다녀오는 차례면 서울 내 방 장면부터 */
@@ -231,10 +240,10 @@ export function ch1Scene(id: Ch1SceneId, s: Ch1State, profile: PlayerProfile): C
         { who: 'noa', text: '……(노아의 손끝에서 희미한 빛이 번져, 주인공의 손목을 타고 올라온다)' },
         { who: 'noa', text: r.noa },
         { who: 'me', mood: '놀람', face: 'shocked', text: r.fact },
-        { who: 'me', mood: '고민', face: 'doubt', text: '…계정 연동? 아니, 그런 걸로 설명이 돼? 이 사람은 그냥 손만 잡았을 뿐인데.' },
+        { who: 'me', mood: '고민', face: 'doubt', text: '…손만 잡았는데. 이걸 어떻게 아는 거지.' },
         { who: 'noa', text: `당신의 근은 「${r.root}(${info.hanja})」. ${info.desc}` },
         { who: 'noa', text: '근은 그 사람이 살아온 모양대로 피어나요. 그래서 같은 근이라도 사람마다 다 달라요. 오직 당신만의 힘이에요.' },
-        { who: 'noa', text: '아직은 잠들어 있어요. 무언가가 정말 간절해지는 순간, 처음으로 깨어날 거예요.' },
+        { who: 'noa', text: '아직은 잠들어 있어요. 정말 필요해지는 순간, 처음으로 깨어날 거예요. 그다음부터는 길들이기 나름이고요.' },
         { who: 'noa', text: '…아, 그리고 여관 쪽 벤치에 있는 사람. 한번 만나 봐요. 당신이랑 같은 데서 왔어요.' },
       ],
     };
@@ -244,10 +253,12 @@ export function ch1Scene(id: Ch1SceneId, s: Ch1State, profile: PlayerProfile): C
     return {
       id,
       lines: [
-        { who: 'noa', text: `「${name}」… 좋은 이름이에요. 이제 그 힘은 당신이 부르면 대답할 거예요.` },
-        { who: 'kong', text: '…고마워. 진짜, 진짜 무서웠어. 흐윽…' },
-        { who: 'me', mood: '울음', face: 'gentle', text: '울지 마, 콩이야. 다친 데는…? 달래 언니한테 가자. 내가 업어 줄게.' },
-        { who: 'noa', text: '콩이는 제가 데려갈게요. 당신은 촌장님께 가 봐요. 다 보셨을 거예요.' },
+        { who: 'noa', text: `「${name}」… 좋아요. 이제 부르면 대답할 거예요. 아직은 작게지만.` },
+        { who: 'noa', text: '오늘 본 것처럼, 깨어났다고 바로 강해지는 건 아니에요. 길들이는 데 시간이 걸려요.' },
+        { who: 'bawi', text: '셋은 잡았더군. 의뢰는 의뢰다. 은화 세 닢.' },
+        { who: 'bawi', text: '…다음엔 "금방"이란 말은 빼고 나가라.' },
+        { who: 'me', mood: '고민', face: 'tired', text: '…네.' },
+        { who: 'doha', text: '촌장님이 찾으셔. 몸 좀 추스르고 가 봐.' },
       ],
     };
   }
@@ -258,45 +269,44 @@ const SCRIPTS: Record<Exclude<Ch1SceneId, 'read' | 'named'>, ScriptLine[]> = {
   intro: [
     { who: 'bawi', text: '왔냐. 약속대로 몸부터 만든다.' },
     { who: 'bawi', text: '내가 이 목검을 휘두르면, 막아. 다섯 번이다. 눈 감지 말고, 끝까지 봐.' },
-    { who: 'me', mood: '웃음', face: 'confident', text: '타이밍 맞춰 누르는 미니게임이네요. 이런 거 자신 있어요.' },
+    { who: 'me', mood: '웃음', face: 'confident', text: '막기만 하면 되죠? 이런 거 자신 있어요.' },
   ],
   guarded: [
-    { who: 'me', mood: '울음', face: 'hurt', text: '아야야…! 마지막 건 진짜 세게 쳤잖아요! 팔이 저려…' },
+    { who: 'me', mood: '울음', face: 'hurt', text: '아야야…! 마지막 건 진짜 세게 치셨잖아요. 팔 저려…' },
     { who: 'bawi', text: '일부러 그랬다. 맞아 봐야 아는 것도 있지.' },
     { who: 'bawi', text: '오늘은 여기까지. 서울 집에도 한번 들렀다 와. 몸은 쉬어야 큰다.' },
-    { who: 'me', mood: '고민', face: 'doubt', text: '(햅틱 진동이 이렇게까지 아플 수 있나… 아니, 요즘 기술이면 되겠지.)' },
   ],
   bruise: [
     { who: 'me', mood: '고민', text: '(서울, 내 방. 의자에서 일어나자 팔이 욱신거린다)' },
-    { who: 'me', mood: '놀람', face: 'shocked', text: '…어? 팔에 멍이 들었어. 바위 아저씨 목검에 맞은 자리랑 똑같은 데에.' },
-    { who: 'me', mood: '울음', face: 'scared', text: '햅틱 진동으로 멍이 들 리가 없잖아… 나 책상에 부딪힌 적도 없는데.' },
-    { who: 'me', mood: '고민', face: 'tired', text: '…피곤해. 몸이 진짜로 운동한 것처럼 무거워. 이거, 대체 뭐야.' },
+    { who: 'me', mood: '놀람', face: 'shocked', text: '…멍이 들었어. 목검에 맞은 자리랑 똑같은 데에.' },
+    { who: 'me', mood: '울음', face: 'scared', text: '책상에 부딪힌 적도 없는데. …진동 같은 걸로 멍이 들 리가 없잖아.' },
+    { who: 'me', mood: '고민', face: 'tired', text: '몸도 무거워. 진짜로 운동한 것처럼.' },
   ],
   breath: [
     { who: 'bawi', text: '멍은 좀 어떠냐.' },
-    { who: 'me', mood: '고민', face: 'think2', text: '…서울에서도 그대로였어요. 같은 자리에. 햅틱이 멍까지 만들진 않잖아요.' },
-    { who: 'bawi', text: '햅틱인지 뭔지는 모르겠고. 오늘은 숨이다.' },
+    { who: 'me', mood: '고민', face: 'think2', text: '…서울에서도 그대로였어요. 같은 자리에.' },
+    { who: 'bawi', text: '그렇겠지. 오늘은 숨이다.' },
     { who: 'bawi', text: '들이쉴 땐 땅 기운을 발끝부터 끌어올리고, 내쉴 땐 몸 끝까지 보내. 원이 커질 때 들이쉬고, 작아질 때 내쉬어.' },
   ],
   quake: [
-    { who: 'me', mood: '놀람', face: 'startled', text: '…어? 땅이 울려. 뭐야, 지진?!' },
+    { who: 'me', mood: '놀람', face: 'startled', text: '…어? 땅이 울려.' },
     { who: 'bawi', text: '숙여! 북쪽 틈이 운다!' },
     { who: 'noa', text: '포탈이…! 포탈 빛이 꺼지고 있어요!' },
-    { who: 'me', mood: '울음', face: 'panic', text: '로그아웃… 로그아웃 버튼이 안 눌려…! 왜 안 돼, 왜!' },
-    { who: 'me', mood: '울음', face: 'sob', text: '나… 못 돌아가는 거야? 집에 못 가는 거야…?' },
-    { who: 'noa', text: '괜찮아요, 제가 붙잡고 있어요…! 조금만, 조금만 버텨요…!' },
+    { who: 'me', mood: '울음', face: 'panic', text: '로그아웃이… 안 눌려. 왜 안 돼.' },
+    { who: 'me', mood: '울음', face: 'sob', text: '나… 못 돌아가는 거야?' },
+    { who: 'noa', text: '괜찮아요, 제가 붙잡고 있어요…! 조금만 버텨요…!' },
     { who: 'noa', text: '……휴. 다시 열렸어요. 가끔 이래요. 북쪽 틈이 크게 숨을 쉴 때면.' },
-    { who: 'me', mood: '고민', face: 'scared', text: '(손이 떨려… 게임이면, 로그아웃이 안 될 리가 없잖아.)' },
+    { who: 'me', mood: '고민', face: 'scared', text: '(손이 떨려. …나가고 싶어도 못 나갈 수가 있구나.)' },
     { who: 'bawi', text: '오늘 수련은 여기까지. 노아, 이 녀석 근 좀 봐 줘라. 이제 몸은 버틸 거다.' },
   ],
   doha: [
-    { who: 'doha', text: '…너도 저편에서 왔구나. 표정 보니 아직 반쯤은 게임이라고 생각하지?' },
-    { who: 'me', mood: '놀람', face: 'curious', text: '…그쪽도 플레이어예요? 아니, NPC가 이런 말까지 하나…' },
-    { who: 'doha', text: '나 도하. 서울 사는 대학생이야. NPC 아니고.' },
+    { who: 'doha', text: '…너도 저편에서 왔구나. 처음 왔을 때 표정이네. 아직 반쯤은 놀이 같지?' },
+    { who: 'me', mood: '놀람', face: 'curious', text: '…저편? 그쪽도요?' },
+    { who: 'doha', text: '나 도하. 서울 사는 대학생이야.' },
     { who: 'doha', text: '난 컴퓨터로 안 왔어. 막차 지하철 마지막 칸에서 졸다가 눈 떴더니 여기였어. 석 달 전에.' },
-    { who: 'me', mood: '놀람', face: 'shocked', text: '지하철…? 게임을 켜지도 않았는데 왔다고요?' },
+    { who: 'me', mood: '놀람', face: 'shocked', text: '지하철…? 아무것도 안 켰는데 왔다고요?' },
     { who: 'doha', text: '길은 사람마다 다르게 열린대. 노아가 그러더라. 너는 컴퓨터, 나는 지하철 마지막 칸.' },
-    { who: 'doha', text: '나도 처음엔 꿈인 줄 알았어. 그다음엔 몰래카메라, 그다음엔 게임. …다 아니더라.' },
+    { who: 'doha', text: '나도 처음엔 꿈인 줄 알았어. 그다음엔 몰래카메라. …다 아니더라.' },
     { who: 'doha', text: '여기서 다치면 서울에서도 아파. 여기서 보낸 시간은 서울에서도 똑같이 흘러.' },
     { who: 'doha', text: '쓰러지면 포탈 앞에서 깨어나긴 해. 근데 그게 언제까지 될지는… 아무도 몰라.' },
     { who: 'me', mood: '고민', text: '……' },
@@ -305,34 +315,49 @@ const SCRIPTS: Record<Exclude<Ch1SceneId, 'read' | 'named'>, ScriptLine[]> = {
   order: [
     { who: 'bawi', text: '왔냐. 게시판 봤지? 북문 밖 고블린 셋. 보수는 은화 세 닢.' },
     { who: 'bawi', text: '이번엔 허수아비가 아니다. 진짜로 물고, 진짜로 피가 난다. 몸은 그만큼 만들었으니 해 봐.' },
-    { who: 'me', mood: '웃음', face: 'cheer', text: '드디어 첫 사냥 퀘스트네요. 고블린 셋쯤이야, 금방 끝내고 올게요!' },
+    { who: 'me', mood: '웃음', face: 'cheer', text: '셋이요? 금방 다녀올게요.' },
     { who: 'bawi', text: '…그 "금방"이란 말, 돌아와서도 하나 보자. 겁나면 그냥 돌아와. 그것도 실력이다.' },
   ],
-  scream: [
-    { who: 'me', mood: '웃음', face: 'laugh', text: '세 마리 끝! 의뢰 완료. 이 정도면 바위 아저씨도 인정하겠지.' },
-    { who: 'kong', text: '꺄아아아악——!!' },
-    { who: 'me', mood: '놀람', face: 'shocked', text: '콩이…?! 너 왜 문 밖에 있어!' },
-    { who: 'kong', text: '몰래 따라왔는데… 고블린이… 다리가, 다리가 아파… 흐아앙…!' },
-    { who: 'me', mood: '울음', face: 'scared', text: '(피가 나. 울고 있어. 숨이 막 가빠지고…)' },
-    { who: 'me', mood: '울음', face: 'sob', text: 'NPC니까… 그냥 프로그램이니까… 아니야. 아니야, 아니라고!' },
-    { who: 'me', mood: '화남', face: 'rage', text: '콩이한테서 떨어져어어어——!!' },
+  swarm: [
+    { who: 'me', mood: '고민', face: 'tired', text: '…셋. 끝났다. 두 번째부터 계속 물렸네. 팔이 화끈거려.' },
+    { who: 'me', mood: '놀람', face: 'startled', text: '(숲 쪽 덤불이 흔들린다. 하나, 둘… 더 나온다)' },
+    { who: 'me', mood: '놀람', face: 'scared', text: '…셋이라고 했잖아.' },
   ],
-  awaken: [
-    { who: 'me', mood: '놀람', text: '…방금, 뭐였지. 몸 안에서 뭔가가 터져 나왔어.' },
-    { who: 'noa', text: '봤어요. 저 멀리 포탈 앞에서도 느껴졌어요. 당신 근이 깨어났어요. 첫 발현이에요.' },
+  cornered: [
+    { who: 'me', mood: '울음', face: 'hurt', text: '(다리를 물려 넘어졌다. 사방에서 이빨 소리)' },
+    { who: 'me', mood: '울음', face: 'scared', text: '…일어나야 하는데. 다리가 안 움직여.' },
+    { who: 'me', mood: '고민', face: 'determined', text: '(…밀어내. 저리 가.)' },
+  ],
+  tooWeak: [
+    { who: 'me', mood: '놀람', face: 'shocked', text: '(몸 안에서 뭔가 터져 나왔다. 둘레 고블린이 밀려났다)' },
+    { who: 'me', mood: '울음', face: 'tired', text: '…근데, 또 와. 숨이 안 돼.' },
+  ],
+  rescue: [
+    { who: 'doha', text: '엎드려 있어!' },
+    { who: 'me', mood: '놀람', face: 'startled', text: '(땅이 솟아올라 흙벽이 앞을 막는다. 벽 너머에서 고블린 비명)' },
+    { who: 'doha', text: '…괜찮아? 혼자 나가면 어떡해. 여기 고블린은 떼로 다녀.' },
+    { who: 'me', mood: '울음', face: 'sob', text: '…도하.' },
+    { who: 'doha', text: '말하지 마. 업힐 수 있지? 마을까지 가자.' },
+  ],
+  wake: [
+    { who: 'me', mood: '고민', face: 'tired', text: '(여관 침대. 처음 깨어났던 그 자리다. 팔과 다리에 붕대가 감겨 있다)' },
+    { who: 'doha', text: '깼네. 달래 씨가 약 발라 줬어. 며칠은 쑤실 거야.' },
+    { who: 'me', mood: '고민', face: 'think2', text: '…아까 그 벽. 너야?' },
+    { who: 'doha', text: '내 근이야. 형(形). 이 정도 하는 데 석 달 걸렸어. 처음엔 나도 맞기만 했어.' },
+    { who: 'noa', text: '당신 것도 봤어요. 근이 깨어났어요. 작았지만, 분명히.' },
     { who: 'noa', text: '처음 피어난 힘엔 이름을 붙여 줘요. 이름이 있어야 다시 부를 수 있거든요.' },
   ],
   badge: [
-    { who: 'maru', text: '콩이를 구했다지. 고맙네… 정말로 고맙네.' },
-    { who: 'maru', text: '이건 정식 길드 배지일세. 이제 자네는 손님이 아니라 이 마을 사람이야.' },
-    { who: 'maru', text: '그리고 이건 바위가 맡긴 의뢰 보수. 은화 세 닢이네. 콩이 몫까지 얹어 주고 싶지만, 규칙은 규칙이라.' },
-    { who: 'me', mood: '고민', text: '촌장님. 저… 이제 알 것 같아요.' },
-    { who: 'maru', text: '허허. 그 얼굴이면 됐네. 처음 왔을 때랑은 눈빛이 다르구먼.' },
+    { who: 'maru', text: '왔는가. 몸은 좀 어떤가.' },
+    { who: 'maru', text: '살아 돌아왔으니 됐네. 이건 정식 길드 배지일세. 이제 자네는 손님이 아니야.' },
+    { who: 'me', mood: '고민', text: '…감사합니다.' },
+    { who: 'maru', text: '허허. 처음 왔을 때랑은 눈빛이 다르구먼.' },
   ],
   final: [
-    { who: 'me', mood: '고민', text: '아팠던 것도, 서울까지 따라온 멍도, 닫혀 버린 포탈도, 내 서울 생활을 읽어 낸 손도.' },
-    { who: 'me', mood: '울음', text: '그리고 콩이의 눈물도. 다 진짜였어.' },
+    { who: 'me', mood: '고민', face: 'tired', text: '(맞으면 아팠고, 그 멍은 서울까지 따라왔다)' },
+    { who: 'me', mood: '고민', text: '(나가고 싶어도 못 나갈 때가 있었고, 모르는 사람이 내 삶을 알고 있었다)' },
+    { who: 'me', mood: '고민', face: 'scared', text: '(오늘은, 진짜로 쓰러질 뻔했다)' },
     { who: 'me', mood: '놀람', face: 'doubt', text: '(…멀리 안개 숲 쪽에서, 누군가 지켜보는 시선이 느껴진다)' },
-    { who: 'me', mood: '화남', face: 'determined', text: '이건… 게임이 아니야.' },
+    { who: 'me', mood: '고민', face: 'determined', text: '…이건 게임이 아니야.' },
   ],
 };

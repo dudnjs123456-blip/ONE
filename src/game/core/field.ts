@@ -1513,6 +1513,12 @@ export class FieldWorld {
     }
 
     const p = this.player;
+    // 이야기 장면(1장 고블린 떼 등) 동안은 쓰러지지 않는다: 바닥 직전에서 버틴다
+    if (this.storyShield && p.hp <= 0) {
+      p.reset(p.x, p.z, p.fx, p.fz);
+      p.hp = 1;
+      this.playerDeadFrames = 0;
+    }
     if (p.hp <= 0 && p.state === 'ko') {
       if (++this.playerDeadFrames >= PLAYER_RESPAWN_FRAMES) {
         this.playerDeadFrames = 0;
@@ -1526,6 +1532,8 @@ export class FieldWorld {
 
   /** 몬스터를 잡을 때마다 (이야기 의뢰 세기용, 화면이 단다) */
   onKill: ((monsterId: string) => void) | null = null;
+  /** 이야기 장면 중: 체력이 0 이 되어도 쓰러지지 않고 1 에서 버틴다 (빈사 연출) */
+  storyShield = false;
 
   /**
    * 근이 처음 터진다 (1장 첫 발현): 둘레 몬스터를 크게 밀쳐 내고 빛 글자. 몬스터 계산을 맡은 사람만 실제로 민다

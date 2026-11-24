@@ -75,24 +75,30 @@ check('goblin quest starts at 0/3', s.step === 'quest' && s.questKills === 0 && 
 check('other monsters do not count', countQuestKill(s, 'bandit') === false && s.questKills === 0);
 check('goblins count, third one triggers', !countQuestKill(s, 'goblin') && !countQuestKill(s, 'goblin') && countQuestKill(s, 'goblin') && s.questKills === 3);
 check('no more counting after 3', !countQuestKill(s, 'goblin') && s.questKills === 3);
-check('leaving right after the 3rd kill replays kong on return', resumeCh1Scene(s) === 'scream');
-check('kong scream → root burst → name it', afterScene('scream').effect === 'burst' && afterScene('scream').next === 'awaken' && afterScene('awaken').effect === 'name');
+check('leaving right after the 3rd kill wakes you at the inn on return', resumeCh1Scene(s) === 'wake');
+check('swarm → near death → a weak first awakening → doha rescues → inn → name it',
+  afterScene('swarm').effect === 'swarm' && afterScene('swarm').next === 'cornered' &&
+  afterScene('cornered').effect === 'burst' && afterScene('cornered').next === 'tooWeak' &&
+  afterScene('tooWeak').effect === 'rescue' && afterScene('tooWeak').next === 'rescue' &&
+  afterScene('rescue').effect === 'inn' && afterScene('rescue').next === 'wake' &&
+  afterScene('wake').effect === 'name' && afterScene('wake').next === 'named');
+check('kong is no longer hurt in chapter 1', !(['swarm', 'cornered', 'tooWeak', 'rescue', 'wake'] as Ch1SceneId[]).some((id) => ch1Scene(id, s, p).lines.some((l) => l.who === 'kong')));
+check('doha saves you with an earth wall (형)', ch1Scene('rescue', s, p).lines.some((l) => l.who === 'doha') && ch1Scene('wake', s, p).lines.some((l) => l.text.includes('형(形)')));
 check('skill names are 1–12 chars', cleanSkillName('  한 걸음   너머 ') === '한 걸음 너머' && cleanSkillName('') === null && cleanSkillName('가'.repeat(13)) === null);
 s.skillName = '한 걸음 너머';
 check('noa repeats the name you chose', ch1Scene('named', s, p).lines[0].text.includes('「한 걸음 너머」'));
-finishCh1(s, 'scream');
-finishCh1(s, 'awaken');
+for (const id of ['swarm', 'cornered', 'tooWeak', 'rescue', 'wake'] as Ch1SceneId[]) finishCh1(s, id);
+check('bawi pays the 3 silver at the inn', afterScene('named').coin === 3 && ch1Scene('named', s, p).lines.some((l) => l.who === 'bawi' && l.text.includes('은화 세 닢')));
 finishCh1(s, 'named');
 check('then the badge from maru', s.step === 'badge' && ch1SceneForNpc('maru', s, p)?.id === 'badge' && afterScene('badge').next === 'final');
 check('nothing to replay once past the quest', resumeCh1Scene(s) === null);
-check('the badge scene pays the 3 silver', afterScene('badge').coin === 3);
 finishCh1(s, 'badge');
 finishCh1(s, 'final');
 check('chapter 1 done: "this is not a game"', s.step === 'done' && ch1Objective(s) === null && ch1Scene('final', s, p).lines.some((l) => l.text.includes('게임이 아니야')));
 check('every root has a suggested name', Object.values(ROOT_INFO).every((r) => r.suggest.length > 0));
 
 // 대사: 말하는 사람은 모두 나 아니면 마을 사람 (초상화를 찍을 수 있는 사람만)
-const ids: Ch1SceneId[] = ['intro', 'guarded', 'bruise', 'breath', 'quake', 'read', 'doha', 'scream', 'awaken', 'named', 'badge', 'final'];
+const ids: Ch1SceneId[] = ['intro', 'guarded', 'bruise', 'breath', 'quake', 'read', 'doha', 'order', 'swarm', 'cornered', 'tooWeak', 'rescue', 'wake', 'named', 'badge', 'final'];
 const sp = new Set(ids.flatMap((id) => ch1Scene(id, s, p).lines.map((l) => l.who)));
 check('every speaker is me or a villager (portrait rule)', [...sp].every((w) => w === 'me' || VILLAGE_NPCS.some((n) => n.id === w)), [...sp].join(','));
 const all = ids.flatMap((id) => ch1Scene(id, s, p).lines.map((l) => l.text)).join(' ');

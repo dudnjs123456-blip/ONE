@@ -33,7 +33,7 @@ const CH1_STEPS: { step: Ch1Step; label: string }[] = [
   { step: 'noa', label: '④ 노아의 근 감정' },
   { step: 'doha', label: '⑤ 벤치의 도하' },
   { step: 'order', label: '⑥ 바위의 고블린 의뢰' },
-  { step: 'quest', label: '⑦ 고블린 셋 → 콩이 → 첫 발현' },
+  { step: 'quest', label: '⑦ 고블린 셋 → 고블린 떼 → 도하의 흙벽' },
   { step: 'badge', label: '⑧ 마루의 길드 배지 → 마무리' },
 ];
 
