@@ -41,7 +41,7 @@ export default function CinematicPlayer({ id, body, onEnd }: { id: CinematicId; 
     const at = performance.now();
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || performance.now() - at < KEY_GRACE_MS) return;
-      if (e.code === 'Escape' || e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyE') {
+      if (e.code === 'Escape' || e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyE' || e.code === 'KeyF') {
         e.preventDefault();
         e.stopImmediatePropagation();
         finish();
