@@ -2,9 +2,9 @@ import { mulberry32 } from './controllers';
 import { FIELD_HALF } from './field';
 import { VILLAGE_GATE_OUT } from '../data/village';
 import type { FieldCommand, FieldWorld, PlayerController } from './field';
-import { Keyboard, NEUTRAL_INPUT, P1_KEYS, dirFrom, makeInput, mergeRaw, padHeld, readGamepad, type KeyMap, type RelInput } from './input';
+import { DIM_ATTACK_KEYS, Keyboard, NEUTRAL_INPUT, P1_KEYS, dirFrom, makeInput, mergeRaw, padHeld, readGamepad, type KeyMap, type RelInput } from './input';
 import { bindCodes } from './keybinds';
-import type { Button, Dir } from './types';
+import type { Button, Buttons, Dir } from './types';
 
 const P = (dir: Dir, button: Button) => makeInput(dir, button);
 const H = (dir: Dir, frames: number): RelInput[] => Array.from({ length: frames }, () => makeInput(dir));
@@ -69,6 +69,44 @@ export class AutoHuntController implements PlayerController {
  * 버튼을 누를 때 이동키 방향을 캐릭터 기준 앞/뒤로, Shift 를 '아래' 로 해석한다.
  * (예: Shift + 타겟 쪽 + W = df+2 어퍼)
  */
+/**
+ * 차원(반대편 세계) 조작: 방향키 걷기 · Shift 달리기 · Space 점프 · Ctrl 기본 공격.
+ * Ctrl 을 누를 때마다 왼팔·오른팔·왼다리·오른다리 중 하나가 무작위로 나간다 (누르고 있는 동안은 같은 것).
+ * 숙이기는 없다 (서울과 다른 몸 쓰기). 근 기술(Q W E R · A S D)과 상호작용(F)은 화면(FieldView)이 받는다.
+ * 패드는 예전처럼 버튼 1~4 를 따로 쓴다.
+ */
+export class DimensionKeyboardController implements PlayerController {
+  private held = -1;
+  constructor(
+    private kb: Keyboard,
+    private padIndex?: number,
+    private rnd: () => number = Math.random,
+  ) {}
+
+  read(w: FieldWorld): FieldCommand {
+    const map: KeyMap = { up: P1_KEYS.up, down: P1_KEYS.down, left: P1_KEYS.left, right: P1_KEYS.right, buttons: [DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[1], '', ''], jump: P1_KEYS.jump };
+    const key = this.kb.read(map);
+    const attack = key.buttons[0] || key.buttons[1];
+    if (!attack) this.held = -1;
+    else if (this.held < 0) this.held = Math.floor(this.rnd() * 4);
+    const buttons: Buttons = [false, false, false, false];
+    if (this.held >= 0) buttons[this.held] = true;
+    const raw = this.padIndex === undefined ? { ...key, buttons } : mergeRaw({ ...key, buttons }, readGamepad(this.padIndex));
+    const runKey = bindCodes('run').some((k) => this.kb.has(k));
+    const mx = (raw.right ? 1 : 0) - (raw.left ? 1 : 0);
+    const mz = (raw.down ? 1 : 0) - (raw.up ? 1 : 0);
+    const anyButton = raw.buttons.some(Boolean);
+    const p = w.player;
+    let h: -1 | 0 | 1 = 0;
+    if (mx || mz) {
+      const d = (mx * p.fx + mz * p.fz) / Math.hypot(mx, mz);
+      h = d > 0.5 ? 1 : d < -0.5 ? -1 : 0;
+    }
+    const move = !anyButton && (mx || mz) ? { x: mx, z: mz } : null;
+    return { move, run: runKey, input: { dir: dirFrom(h, 0), buttons: raw.buttons, jump: raw.jump } };
+  }
+}
+
 export class FieldKeyboardController implements PlayerController {
   constructor(
     private kb: Keyboard,

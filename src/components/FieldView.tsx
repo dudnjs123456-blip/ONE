@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { FRAME_MS } from '@/game/core/constants';
 import { makeClock } from '@/game/render/clock';
 import { FieldWorld, type FieldHudState } from '@/game/core/field';
-import { AutoHuntController, FieldKeyboardController } from '@/game/core/fieldControllers';
-import { Keyboard, P1_KEYS, watchPad, watchPadButtons } from '@/game/core/input';
+import { AutoHuntController, DimensionKeyboardController } from '@/game/core/fieldControllers';
+import { DIM_ATTACK_KEYS, Keyboard, P1_KEYS, watchPad, watchPadButtons, type KeyMap } from '@/game/core/input';
 import { saveProfile, type PlayerProfile } from '@/game/core/profile';
 import { FieldRenderer } from '@/game/render/fieldRenderer';
 import FieldHud from './FieldHud';
@@ -20,7 +20,6 @@ import InventoryPanel from './InventoryPanel';
 import { attachZoomControls } from './zoomControls';
 import { DimensionLink } from '@/game/net/dimension';
 import type { Account } from '@/game/net/auth';
-import { bindCodes } from '@/game/core/keybinds';
 import VillageTalk, { type TalkState } from './VillageTalk';
 import DimensionPrologue from './DimensionPrologue';
 import StoryDialog, { type DialogLine } from './StoryDialog';
@@ -41,6 +40,25 @@ import InnMenuPanel from './InnMenuPanel';
 
 /** 접속 연출 시간 (ms) */
 const WARP_MS = 1600;
+
+/** 차원 상호작용 키 (서울의 E 자리를 근 기술이 쓴다) */
+const INTERACT_CODE = 'KeyF';
+/** 근 기술 칸: Q W E R = 주 근 (R = 궁극기), A S D = 부 근 (주 근을 다 배운 뒤 깨어난다) */
+type SkillSlot = 'q' | 'w' | 'e' | 'r' | 'a' | 's' | 'd';
+const SKILL_SLOTS: { id: SkillSlot; key: string; sub: boolean; locked: string }[] = [
+  { id: 'q', key: 'Q', sub: false, locked: '주 근 첫 기술은 1장에서 근이 처음 깨어날 때 생겨요' },
+  { id: 'w', key: 'W', sub: false, locked: '주 근 두 번째 기술 — 아직 배우지 않았어요' },
+  { id: 'e', key: 'E', sub: false, locked: '주 근 세 번째 기술 — 아직 배우지 않았어요' },
+  { id: 'r', key: 'R', sub: false, locked: '주 근 궁극기 — 아직 배우지 않았어요' },
+  { id: 'a', key: 'A', sub: true, locked: '부 근 — 주 근 기술을 다 배운 뒤에 깨어나요' },
+  { id: 's', key: 'S', sub: true, locked: '부 근 — 주 근 기술을 다 배운 뒤에 깨어나요' },
+  { id: 'd', key: 'D', sub: true, locked: '부 근 — 주 근 기술을 다 배운 뒤에 깨어나요' },
+];
+const SKILL_CODES = ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyA', 'KeyS', 'KeyD'] as const;
+/** 첫 발현 기술 재사용 대기 */
+const SKILL_COOLDOWN_MS = 10_000;
+/** 터치: 방향 패드 + 공격 한 버튼(Ctrl) + 점프 */
+const DIM_TOUCH_KEYS: KeyMap = { ...P1_KEYS, buttons: [DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[0]] };
 
 /**
  * 다른 차원: 서울 집 컴퓨터로 접속하는 사냥터. 로그인했으면 같은 차원에 들어온 사람들과 같은 몬스터를 본다.
@@ -101,7 +119,21 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     exit: () => void;
     trained: (score: number) => void;
     named: (name: string) => void;
+    skill: (slot: SkillSlot) => void;
   } | null>(null);
+  /** 근 기술 칸 (Q W E R = 주 근 · A S D = 부 근). 주 근 첫 기술(Q)이 끝나는 시각 (재사용 대기) */
+  const [skillReadyAt, setSkillReadyAt] = useState(0);
+  const skillReadyRef = useRef(0);
+  const [, tickSkill] = useState(0);
+  // 재사용 대기 중이면 남은 초를 화면에 다시 그린다
+  useEffect(() => {
+    if (!skillReadyAt) return;
+    const id = window.setInterval(() => {
+      tickSkill((n) => n + 1);
+      if (performance.now() >= skillReadyAt) window.clearInterval(id);
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [skillReadyAt]);
   /** 이야기 장면 대사 (여러 사람이 번갈아 말한다). scene 이 없으면 구조 장면(RESCUE), 있으면 0장 장면 */
   const [story, setStory] = useState<{ lines: ScriptLine[]; idx: number; scene?: SceneId | `c1:${Ch1SceneId}`; npc?: string; choices?: { label: string; value: string }[] } | null>(null);
   /** 0장 의문 수첩 (화면 표시용 사본) · 방금 채운 줄 (반짝) · 알림 */
@@ -151,7 +183,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     const unlock = unlockAudioOnInput();
     startBgm('field');
 
-    const world = new FieldWorld(new FieldKeyboardController(kb, P1_KEYS, 0), new AutoHuntController(), profile, Date.now() & 0xffff, !!account);
+    const world = new FieldWorld(new DimensionKeyboardController(kb, 0), new AutoHuntController(), profile, Date.now() & 0xffff, !!account);
     worldRef.current = world;
     // 개발 중 화면 점검용 (배포판에는 없다)
     if (process.env.NODE_ENV === 'development') (window as unknown as { __field?: FieldWorld }).__field = world;
@@ -240,6 +272,18 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     resize();
     window.addEventListener('resize', resize);
 
+    // Ctrl(기본 공격)을 누른 채 기술 키를 눌러도 브라우저 단축키(Ctrl+R 새로고침 · Ctrl+S 저장 · Ctrl+D 즐겨찾기 등)가 안 뜨게.
+    // Ctrl+W(탭 닫기)는 브라우저가 막지 못하게 해 두어서, 차원 안에선 나가기 전에 한 번 묻는다
+    const onCtrlCombo = (e: KeyboardEvent) => {
+      if (e.ctrlKey && ((SKILL_CODES as readonly string[]).includes(e.code) || e.code === INTERACT_CODE)) e.preventDefault();
+    };
+    window.addEventListener('keydown', onCtrlCombo, true);
+    const askBeforeLeave = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', askBeforeLeave);
+
     const onKey = (e: KeyboardEvent) => {
       // 식당 메뉴는 메뉴 창이 키를 받는다 (1장 미니게임 · 이름 짓기 창도)
       if (menuRef.current || overlayRef.current) return;
@@ -254,9 +298,10 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         return;
       }
       if (world.shower) return;
-      // 대화 중: E · Enter · Space 다음 줄, Esc 닫기 (게임 키는 대화창이 먹는다)
+      // 대화 중: F · Enter · Space 다음 줄, Esc 닫기 (게임 키는 대화창이 먹는다)
       const t = talkRef.current;
-      const interact = bindCodes('interact').includes(e.code);
+      // 차원의 상호작용은 F (E 는 주 근 기술). 서울은 키 설정 그대로
+      const interact = e.code === INTERACT_CODE;
       const st = storyRef.current;
       if (st) {
         if (e.repeat) return;
@@ -275,11 +320,12 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         return;
       }
       if (e.code === 'KeyG' && !e.repeat) toggleQuestAuto();
-      // 서울과 같은 키: 상호작용(E) = 말 걸기, R · X · Y = 작은은발소녀 전용 기술
+      // 차원 키: F = 말 걸기 · 살펴보기, Q W E R = 주 근 기술, A S D = 부 근 기술 (캐릭터 전용 무술 기술은 서울에서만)
       if (interact && !e.repeat) startTalk();
-      if (!e.repeat && (e.code === 'KeyR' || e.code === 'KeyX' || e.code === 'KeyY')) {
+      const slot = SKILL_CODES.indexOf(e.code as (typeof SKILL_CODES)[number]);
+      if (slot >= 0 && !e.repeat) {
         e.preventDefault();
-        world.useSkill(e.code === 'KeyR' ? 'flyingKick' : e.code === 'KeyX' ? 'tornadoKick' : 'backTurnKick');
+        castSkill(SKILL_SLOTS[slot].id);
       }
       if (e.code === 'Escape') setPaused((p) => !p);
       if (e.code === 'KeyZ' && !e.repeat) world.toggleAuto();
@@ -545,7 +591,32 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       if (t.idx + 1 < t.lines.length) setTalk({ ...t, idx: t.idx + 1 });
       else closeTalk();
     }
-    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory, pick: pickChoice, quest: toggleQuestAuto, exit: tryExit, trained, named };
+    /**
+     * 근 기술 (Q W E R · A S D). 지금은 1장에서 이름 지은 첫 발현 기술(Q)만 쓸 수 있다:
+     * 둘레 몬스터를 밀쳐 내는 근의 빛 (재사용 대기 10초). 나머지 칸은 이야기가 나아가면 열린다 (docs/world-rules.md 근 시스템)
+     */
+    function castSkill(slot: SkillSlot) {
+      if (talkRef.current || storyRef.current || world.player.hp <= 0) return;
+      const c1 = profile.dimension?.ch1;
+      const learned = slot === 'q' && !!c1?.skillName;
+      if (!learned) {
+        world.addLog(SKILL_SLOTS.find((s) => s.id === slot)!.locked);
+        return;
+      }
+      const now = performance.now();
+      if (now < skillReadyRef.current) {
+        world.addLog(`「${c1!.skillName}」 다시 쓰려면 ${Math.ceil((skillReadyRef.current - now) / 1000)}초`);
+        return;
+      }
+      const root = c1!.root ?? '력';
+      const info = ROOT_INFO[root];
+      world.rootBurst(`「${c1!.skillName}」`);
+      playHit('counter', true, 0.8);
+      setBurst({ color: info.color, key: Date.now() });
+      skillReadyRef.current = now + SKILL_COOLDOWN_MS;
+      setSkillReadyAt(skillReadyRef.current);
+    }
+    talkApi.current = { start: startTalk, next: nextLine, close: closeTalk, story: nextStory, pick: pickChoice, quest: toggleQuestAuto, exit: tryExit, trained, named, skill: castSkill };
 
     let raf = 0;
     let last = performance.now();
@@ -606,6 +677,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       saveProfile(profile);
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onCtrlCombo, true);
+      window.removeEventListener('beforeunload', askBeforeLeave);
       unwatchPad();
       kb.detach(window);
       unlock();
@@ -647,7 +720,32 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       {hud && <FieldHud hud={hud} onToggleAuto={() => worldRef.current?.toggleAuto()} touch={touch} portrait={portrait} />}
 
       {/* 수동 조작일 때만 터치 버튼 (자동사냥 중엔 필요 없음) */}
-      {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && !talk && !menu && !hud.sleep && hud.shower === null && <TouchControls kb={kb} map={P1_KEYS} />}
+      {touch && hud && !hud.auto && !hud.dead && !paused && !inventory && !talk && !menu && !hud.sleep && hud.shower === null && <TouchControls kb={kb} map={DIM_TOUCH_KEYS} attackOnly />}
+      {/* 근 기술 칸: Q W E R (주 근) · A S D (부 근). 배운 칸만 밝다. 누르면 쓴다 (터치도) */}
+      {hud && !hud.dead && !paused && !inventory && !talk && !story && !gearUi && !hud.sleep && (
+        <div className={`pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-end gap-1 ${touch ? 'top-14' : 'bottom-3'}`}>
+          {SKILL_SLOTS.map((s) => {
+            const learned = s.id === 'q' && !!ch1?.skillName;
+            const left = learned ? Math.max(0, Math.ceil((skillReadyAt - performance.now()) / 1000)) : 0;
+            const color = ch1?.root ? ROOT_INFO[ch1.root].color : '#ffffff';
+            return (
+              <button
+                key={s.id}
+                title={learned ? `${ch1!.skillName} (${ch1!.root}) — 둘레 몬스터를 밀쳐 낸다` : s.locked}
+                onClick={() => talkApi.current?.skill(s.id)}
+                className={`relative flex h-11 w-11 flex-col items-center justify-center rounded-lg border text-[10px] leading-tight ${s.sub && s.id === 'a' ? 'ml-2' : ''} ${
+                  learned ? 'border-white/60 bg-black/60 text-white' : 'border-white/15 bg-black/40 text-white/35'
+                }`}
+                style={learned ? { boxShadow: `0 0 10px ${color}` } : undefined}
+              >
+                <span className="font-mono text-xs font-black">{s.key}</span>
+                <span className="max-w-full truncate px-0.5">{learned ? ch1!.skillName : '🔒'}</span>
+                {left > 0 && <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/70 text-sm font-black">{left}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* NPC 가까이: 말 걸기 */}
       {hud?.npc && !talk && !story && !paused && (
@@ -656,7 +754,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           className="absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border border-amber-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg hover:bg-black/85"
         >
           💬 {hud.npc.name} <span className="font-normal text-white/60">({hud.npc.title})</span>
-          {!hud.npc.met && <span className="ml-1 text-amber-300">❗</span>} 대화하기{!touch && ' · E'}
+          {!hud.npc.met && <span className="ml-1 text-amber-300">❗</span>} 대화하기{!touch && ' · F'}
         </button>
       )}
       {/* 달빛 여관 문: 걸어 들어가도 되고 눌러도 된다 */}
@@ -675,7 +773,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           className={`absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border bg-black/70 px-5 py-2 text-sm font-bold shadow-lg hover:bg-black/85 ${hud.innSpot.busy ? 'border-white/20 text-white/50' : 'border-amber-200/50 text-amber-100'}`}
         >
           {hud.innSpot.kind === 'bed' ? '🛏️' : '🚿'} {hud.innSpot.busy ? (hud.innSpot.kind === 'bed' ? '다른 사람이 자는 중' : '누가 씻는 중') : hud.innSpot.label}
-          {!touch && ' · E'}
+          {!touch && ' · F'}
         </button>
       )}
       {/* 자는 중: 화면이 어두워지고, 아무 키 · 화면을 누르면 일어난다 */}
@@ -726,7 +824,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           onClick={() => setGearUi({ shop: true })}
           className="absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border border-amber-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-amber-100 shadow-lg hover:bg-black/85"
         >
-          ⚒️ 무구 노점 둘러보기{!touch && ' · E'}
+          ⚒️ 무구 노점 둘러보기{!touch && ' · F'}
         </button>
       )}
       {gearUi && worldRef.current && <GearPanel key={String(gearUi.shop)} world={worldRef.current} shop={gearUi.shop} onClose={() => setGearUi(null)} />}
@@ -737,7 +835,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
           className="absolute bottom-32 left-1/2 -translate-x-1/2 rounded-full border border-sky-200/50 bg-black/70 px-5 py-2 text-sm font-bold text-sky-100 shadow-lg hover:bg-black/85"
         >
           🔍 {hud.spot.name} 살펴보기{!hud.spot.seen && <span className="ml-1 text-sky-300">❗</span>}
-          {!touch && ' · E'}
+          {!touch && ' · F'}
         </button>
       )}
       {ch1 && !paused && !inventory && <Chapter1Panel ch1={ch1} auto={questAuto} onAuto={() => talkApi.current?.quest()} touch={touch} />}

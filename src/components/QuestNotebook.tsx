@@ -74,7 +74,7 @@ export default function QuestNotebook({
             <div className="rounded bg-emerald-400/15 px-2 py-1 text-emerald-100">다음 이야기: 1장 「기운 수련」 (준비 중)</div>
           ) : (
             <div className="text-[11px] text-white/45">
-              💡 마을 사람에게 말 걸기 · 🔍 표시된 곳 살펴보기 (E){(ch0.notes.body ?? 0) < 2 && ' · 서울에 한 번 다녀와 보기'}
+              💡 마을 사람에게 말 걸기 · 🔍 표시된 곳 살펴보기 (F){(ch0.notes.body ?? 0) < 2 && ' · 서울에 한 번 다녀와 보기'}
             </div>
           )}
         </div>

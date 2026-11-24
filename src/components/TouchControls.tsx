@@ -36,7 +36,8 @@ function dirsFrom(dx: number, dy: number, radius: number): Dirs {
  * 격투 모드 화면 조작: 왼쪽 방향 패드, 오른쪽 1~4 버튼 + 점프.
  * 키보드 입력과 같은 길로 들어가서 커맨드(대시·횡이동 등)도 똑같이 된다.
  */
-export default function TouchControls({ kb, map }: { kb: Keyboard; map: KeyMap }) {
+/** attackOnly: 차원처럼 공격 버튼이 하나뿐 (누를 때마다 팔·다리 중 하나가 무작위로) */
+export default function TouchControls({ kb, map, attackOnly = false }: { kb: Keyboard; map: KeyMap; attackOnly?: boolean }) {
   const padRef = useRef<HTMLDivElement>(null);
   const padPointer = useRef<number | null>(null);
   const [dirs, setDirs] = useState<Dirs>(NONE);
@@ -112,7 +113,13 @@ export default function TouchControls({ kb, map }: { kb: Keyboard; map: KeyMap }
         />
       </div>
 
-      {/* 버튼: 철권 패드 배치 (좌상 1, 우상 2, 좌하 3, 우하 4) + 점프 */}
+      {/* 버튼: 철권 패드 배치 (좌상 1, 우상 2, 좌하 3, 우하 4) + 점프. 차원은 공격 하나 + 점프 */}
+      {attackOnly ? (
+        <div className="pointer-events-auto flex items-center gap-3 [touch-action:none]">
+          {map.jump?.[0] && <PadButton kb={kb} code={map.jump[0]} label="점프" small />}
+          <PadButton kb={kb} code={map.buttons[0]} label="공격" sub="주먹·발" />
+        </div>
+      ) : (
       <div className="pointer-events-auto grid grid-cols-3 grid-rows-2 items-center gap-2 [touch-action:none]">
         <PadButton kb={kb} code={map.buttons[0]} label="1" sub="왼손" />
         <PadButton kb={kb} code={map.buttons[1]} label="2" sub="오른손" />
@@ -120,6 +127,7 @@ export default function TouchControls({ kb, map }: { kb: Keyboard; map: KeyMap }
         <PadButton kb={kb} code={map.buttons[2]} label="3" sub="왼발" />
         <PadButton kb={kb} code={map.buttons[3]} label="4" sub="오른발" />
       </div>
+      )}
     </div>
   );
 }

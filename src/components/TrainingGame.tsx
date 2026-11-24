@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 /**
  * 1장 수련 미니게임 (화면 가운데 원).
- *  guard  : 버티기 — 바깥 고리가 안쪽 원으로 줄어든다. 겹칠 때 Space · E · 클릭 = 막기. 다섯 번, 마지막 한 번은 바위가 일부러 세게 친다(못 막는다).
+ *  guard  : 버티기 — 바깥 고리가 안쪽 원으로 줄어든다. 겹칠 때 Space · F · 클릭 = 막기. 다섯 번, 마지막 한 번은 바위가 일부러 세게 친다(못 막는다).
  *  breath : 숨 고르기 — 원이 커질 때 누르고 있고(들이쉬기), 작아질 때 뗀다(내쉬기). 네 번.
  * 끝나면 onDone(맞춘 수).
  */
@@ -65,7 +65,7 @@ function Guard({ onDone, onHit, touch }: { onDone: (n: number) => void; onHit?: 
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
-      if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') {
+      if (e.code === 'Space' || e.code === 'KeyF' || e.code === 'Enter') {
         e.preventDefault();
         e.stopImmediatePropagation();
         press();
@@ -83,7 +83,7 @@ function Guard({ onDone, onHit, touch }: { onDone: (n: number) => void; onHit?: 
   return (
     <Frame
       title={`버티기 ${Math.min(round + 1, GUARD_ROUNDS)}/${GUARD_ROUNDS}`}
-      hint={touch ? '고리가 원에 닿는 순간 화면을 눌러 막기' : '고리가 원에 닿는 순간 Space · E · 클릭으로 막기'}
+      hint={touch ? '고리가 원에 닿는 순간 화면을 눌러 막기' : '고리가 원에 닿는 순간 Space · F · 클릭으로 막기'}
       onPress={() => (st.current as unknown as { press?: () => void }).press?.()}
     >
       <div className="absolute inset-0 m-auto h-24 w-24 rounded-full border-4 border-amber-200/80 bg-amber-200/10" />
@@ -141,14 +141,14 @@ function Breath({ onDone, touch }: { onDone: (n: number) => void; touch: boolean
     };
     raf = requestAnimationFrame(tick);
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') {
+      if (e.code === 'Space' || e.code === 'KeyF' || e.code === 'Enter') {
         e.preventDefault();
         e.stopImmediatePropagation();
         st.current.holding = true;
       }
     };
     const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') st.current.holding = false;
+      if (e.code === 'Space' || e.code === 'KeyF' || e.code === 'Enter') st.current.holding = false;
     };
     window.addEventListener('keydown', down, true);
     window.addEventListener('keyup', up, true);

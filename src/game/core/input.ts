@@ -76,7 +76,14 @@ export const P2_KEYS: KeyMap = {
 };
 
 /** 게임 키 (브라우저 기본 동작 — 스크롤 등 — 을 막는다). 키 설정이 바뀔 수 있어 매번 확인 */
+/**
+ * 차원(반대편 세계) 기본 공격 키: Ctrl 한 개 (누를 때마다 왼팔·오른팔·왼다리·오른다리 중 하나가 무작위로 나간다).
+ * 차원 키 배치: 방향키 이동 · Ctrl 기본 공격 · Q W E R 주 근 기술 · A S D 부 근 기술 · F 상호작용 (서울은 예전 그대로)
+ */
+export const DIM_ATTACK_KEYS = ['ControlLeft', 'ControlRight'];
+
 const isGameKey = (code: string) =>
+  DIM_ATTACK_KEYS.includes(code) ||
   [P1_KEYS, P2_KEYS].some((m) => m.up === code || m.down === code || m.left === code || m.right === code || m.buttons.includes(code) || !!m.jump?.includes(code));
 
 /** 읽히지 않은 채 뗀 키를 이 시간 뒤엔 반드시 뗀다 (여러 프레임 넉넉히) */

@@ -32,7 +32,8 @@
     "test:chapter0": "tsx scripts/chapter0-sim.ts",
     "test:chapter1": "tsx scripts/chapter1-sim.ts",
     "test:inn": "tsx scripts/inn-sim.ts",
-    "test:master": "tsx scripts/master-sim.ts"
+    "test:master": "tsx scripts/master-sim.ts",
+    "test:dimkeys": "tsx scripts/dimkeys-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

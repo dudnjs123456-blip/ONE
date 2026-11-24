@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { FRAME_MS } from '@/game/core/constants';
 import { makeClock } from '@/game/render/clock';
-import { FieldKeyboardController } from '@/game/core/fieldControllers';
-import { Keyboard, P1_KEYS } from '@/game/core/input';
+import { DimensionKeyboardController } from '@/game/core/fieldControllers';
+import { DIM_ATTACK_KEYS, Keyboard, P1_KEYS, type KeyMap } from '@/game/core/input';
+
+/** 터치: 방향 패드 + 공격 한 버튼(Ctrl) + 점프 */
+const DIM_TOUCH_KEYS: KeyMap = { ...P1_KEYS, buttons: [DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[0], DIM_ATTACK_KEYS[0]] };
 import type { PlayerProfile } from '@/game/core/profile';
 import { CLIFF_Z, PATH, PrologueWorld, type ProloguePhase } from '@/game/story/prologue';
 import { PrologueRenderer } from '@/game/render/prologueScene';
@@ -66,7 +69,8 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
     kb.attach(window);
     const unlock = unlockAudioOnInput();
     startBgm('field');
-    const world = new PrologueWorld(new FieldKeyboardController(kb, P1_KEYS, 0), profile);
+    // 차원 조작 (방향키 · Shift 달리기 · Ctrl 공격, 숙이기 없음)
+    const world = new PrologueWorld(new DimensionKeyboardController(kb, 0), profile);
     const renderer = new PrologueRenderer(canvas, world);
     if (process.env.NODE_ENV === 'development') Object.assign(window as object, { __prologue: world, __prologueR: renderer });
     const resize = () => renderer.resize(canvas.clientWidth, canvas.clientHeight);
@@ -127,7 +131,7 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
         if (e.code === 'Digit2' && t.phase === 'cliff') choose(false);
         return;
       }
-      if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') next();
+      if (e.code === 'KeyF' || e.code === 'Enter' || e.code === 'Space') next();
     };
     window.addEventListener('keydown', onKey);
 
@@ -222,7 +226,7 @@ export default function DimensionPrologue({ profile, playerName, onDone, onExit 
           )}
         </div>
       )}
-      {touch && control && <TouchControls kb={kb} map={P1_KEYS} />}
+      {touch && control && <TouchControls kb={kb} map={DIM_TOUCH_KEYS} attackOnly />}
 
       {cine && <CinematicPlayer key={cine} id={cine} body={profile.body} onEnd={() => api.current?.cineEnd(cine)} />}
 
