@@ -41,8 +41,8 @@ export const CINEMATICS = {
   prologueJump: {
     byBody: {
       smallSilverGirl: [
-        // 벼랑 끝: 까마득한 아래 마을 불빛, 뒤에서 다가오는 그림자 → 돌아보며 마음을 굳히고 한 걸음 물러선다
-        { video: '/cinematics/prologue-jump/edge.mp4' },
+        // 벼랑 끝: 소녀는 왼쪽 숲에서 다가오는 붉은 눈의 그림자를 마주 본 채 겁에 질려 뒷걸음질 → 끝에 각오를 다진다 (웃지 않음, 고개 돌리지 않음)
+        { video: '/cinematics/prologue-jump/edge2.mp4' },
         // 허공으로 몸을 던진다: 슬로모션으로 만들어 얼굴이 번지지 않게 하고, 조금 빠르게 튼다
         { video: '/cinematics/prologue-jump/fall.mp4', rate: 1.25 },
       ],
