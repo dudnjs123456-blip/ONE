@@ -118,15 +118,46 @@ const _axR = new THREE.Vector3();
 const _qRoll = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
 const _fwd = new THREE.Vector3(0, 0, 1);
-const _qA = new THREE.Quaternion();
-const _qB = new THREE.Quaternion();
 const _qC = new THREE.Quaternion();
 const _eA = new THREE.Euler();
 const _vA = new THREE.Vector3();
 const _vB = new THREE.Vector3();
 const _vS = new THREE.Vector3();
-/** 침대에 눕다가 옆으로 기울어 팔꿈치를 짚는 각도 (라디안, 약 60°) */
-const LEAN_ANGLE = 1.05;
+
+/**
+ * 머리카락 점 표시 (모양마다 한 번만 계산). 머리카락이 몸 모양에 합쳐진 모델도 있어서, 각 점이 가장 많이 따르는 뼈 이름으로 가린다.
+ * 베개·매트리스에 머리카락이 눌리는 건 자연스러워서 침대 윗면 맞춤에서 뺀다
+ */
+const _hairMasks = new WeakMap<THREE.BufferGeometry, Uint8Array | null>();
+function hairMask(m: THREE.Mesh): Uint8Array | null {
+  const g = m.geometry;
+  if (_hairMasks.has(g)) return _hairMasks.get(g)!;
+  let mask: Uint8Array | null = null;
+  const n = g.attributes.position.count;
+  if (/hair/i.test(m.name)) mask = new Uint8Array(n).fill(1);
+  else if ((m as THREE.SkinnedMesh).isSkinnedMesh && g.attributes.skinIndex && g.attributes.skinWeight) {
+    const isHair = (m as THREE.SkinnedMesh).skeleton.bones.map((b) => /hair/i.test(b.name));
+    if (isHair.some(Boolean)) {
+      mask = new Uint8Array(n);
+      const si = g.attributes.skinIndex;
+      const sw = g.attributes.skinWeight;
+      for (let i = 0; i < n; i++) {
+        let bw = -1;
+        let bi = 0;
+        for (let c = 0; c < 4; c++) {
+          const w = sw.getComponent(i, c);
+          if (w > bw) {
+            bw = w;
+            bi = si.getComponent(i, c);
+          }
+        }
+        mask[i] = isHair[bi] ? 1 : 0;
+      }
+    }
+  }
+  _hairMasks.set(g, mask);
+  return mask;
+}
 
 /** 절차적 포즈가 직접 움직이지 않는 뼈. 매 프레임 기본 자세로 돌려서 클립이 끝난 뒤 자세가 남지 않게 */
 const UNDRIVEN: VRMHumanBoneName[] = ['upperChest', 'neck', 'leftShoulder', 'rightShoulder', 'leftHand', 'rightHand', 'leftToes', 'rightToes'];
@@ -623,6 +654,7 @@ export class VrmCharacter implements CharacterView {
     }
     vrm.update(Math.min(c.dt, 1 / 20));
     for (const g of this.garments) g.update(Math.min(c.dt, 1 / 20));
+    this.liftOffBed(vrm);
     // 다음 프레임 계산은 다시 1.0 기준 값에서 이어간다
     if (this.v0) this.flipV0(vrm);
     if (moved > 1) {
@@ -704,15 +736,23 @@ export class VrmCharacter implements CharacterView {
     const lerpAng = (a: number, b: number, u: number) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * u;
     const hips = bone('hips')!;
     const standY = hips.position.y;
-    const SEAT = r.seatY ?? 0.66; // 걸터앉은 골반 높이 (매트리스 위)
+    // 걸터앉은 골반 높이: 침대면 앉는 자리 윗면(매트리스·깔린 이불)보다 엉덩이 두께만큼 위 (남는 차이는 윗면 맞춤이 받쳐 준다)
+    const seatTop = r.bed?.reduce((m, b) => (r.sit.x >= b.x0 && r.sit.x <= b.x1 && r.sit.z >= b.z0 && r.sit.z <= b.z1 ? Math.max(m, b.top) : m), -Infinity) ?? -Infinity;
+    const SEAT = r.seatY ?? (Number.isFinite(seatTop) ? seatTop + 0.15 : 0.66);
     const SIT_LEG = r.sitLeg ?? 1.1; // 걸터앉을 때 허벅지를 앞으로 든 각도 (종아리는 수직)
     const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
     let px: number, pz: number, ry: number, sit: number, hy: number;
-    /** 옆으로 기울어 팔꿈치를 짚은 정도 (0~1) · 다리를 올리며 바로 눕는 정도 (0~1) */
-    let lean = 0;
-    let roll = 0;
+    /** 허벅지가 수평에서 들린 각도 · 무릎 굽힘 · 몸을 뒤로 젖힌 각도 (모두 라디안) */
+    let thigh = SIT_LEG - Math.PI / 2;
+    let knee = SIT_LEG;
+    let recline = 0;
+    /** 발등 펴기 · 두 손을 무릎에 올린 정도 · 두 손을 뒤로 짚은 정도 · 다 누운 정도 */
+    let toe = 0;
+    let lap = 0;
+    let prop = 0;
+    let flat = 0;
     if (r.t < 0.35) {
-      // 먼저 침대를 등지게 돌아서고 → 뒤로 반 걸음 → 천천히 엉덩이를 내린다
+      // 먼저 침대를 등지게 돌아서고 → 뒤로 반 걸음 → 천천히 엉덩이를 내린다 (앉으며 두 손은 무릎 위로)
       const u = r.t / 0.35;
       const turn = ease(clamp01(u * 1.8));
       const back = ease(clamp01((u - 0.2) / 0.8));
@@ -722,30 +762,43 @@ export class VrmCharacter implements CharacterView {
       ry = lerpAng(yaw, r.sit.yaw, turn);
       sit = down;
       hy = lerp(standY, SEAT, down);
+      thigh = SIT_LEG * sit - Math.PI / 2;
+      knee = SIT_LEG * sit;
+      lap = down;
       vrm.scene.position.set(px, lerp(lp.y, 0, back), pz);
       vrm.scene.rotation.set(0, ry, 0, 'YXZ');
     } else {
-      // 걸터앉은 채 베개 쪽으로 옆으로 기울어 팔꿈치를 짚고 → 다리를 침대 위로 올리며 바로 돌아눕는다.
-      // 골반을 축으로 돌린다 (발밑을 축으로 몸 전체를 젖히면 골반이 공중에 뜨거나 침대에 묻힌다)
-      lean = ease(clamp01((r.t - 0.37) / 0.28));
-      roll = ease(clamp01((r.t - 0.56) / 0.32));
-      sit = 1 - roll;
-      hy = lerp(SEAT, this.rig.hipsY, roll);
-      const qSit = _qA.setFromEuler(_eA.set(0, r.sit.yaw, 0, 'YXZ'));
-      const qSide = _qB.copy(qSit).multiply(_qRoll.setFromAxisAngle(_fwd, LEAN_ANGLE));
+      // 사람이 침대에 눕는 순서: 걸터앉아 → 두 손을 뒤로 짚고 몸을 살짝 젖힌 채 → 무릎을 들어 엉덩이를 축으로
+      // 다리를 침대 위로 돌려 올리고 → 등을 천천히 뒤로 눕히며 다리를 편다.
+      // 발이 매트리스 옆면을 지나기 전에 먼저 들리고, 골반은 다리가 올라온 뒤에야 침대 안쪽으로 들어간다
+      const back = ease(clamp01((r.t - 0.37) / 0.12)); // 손 뒤로 짚기
+      const lift = ease(clamp01((r.t - 0.45) / 0.11)); // 무릎 들기
+      const swing = ease(clamp01((r.t - 0.49) / 0.19)); // 다리를 침대 위로 돌리기
+      const down = ease(clamp01((r.t - 0.66) / 0.22)); // 등 대고 눕기
+      sit = 1 - down;
+      flat = down;
+      recline = lerp(0.42 * back, Math.PI / 2, down);
+      // 허벅지: 앉은 각도 그대로 → 무릎을 가슴 쪽으로 들고 → 누우면 수평. 종아리는 그 아래로
+      thigh = lerp(lerp(SIT_LEG - Math.PI / 2, 0.75, lift), 0, down);
+      // 무릎은 허벅지가 내려가는 만큼 같이 펴서, 굽힌 종아리 끝(발)이 매트리스로 내려가지 않게
+      knee = lerp(lerp(SIT_LEG, 1.2, lift), 0, down);
+      toe = 0.8 * down;
+      lap = 1 - back;
+      prop = back * (1 - ease(clamp01((r.t - 0.68) / 0.14)));
+      hy = lerp(SEAT, this.rig.hipsY, down);
       const qLie = _qC.setFromEuler(_eA.set(-Math.PI / 2, r.lie.yaw, 0, 'YXZ'));
-      const qq = vrm.scene.quaternion.copy(qSit).slerp(qSide, lean).slerp(qLie, roll);
-      // 골반 자리: 앉은 자리 → (기울며 조금) → 누운 자리. 다리를 올릴 때 살짝 들린다
       const hLie = _vA.set(0, this.rig.hipsY, 0).applyQuaternion(qLie).add(_vB.set(r.lie.x, r.lie.y, r.lie.z));
-      const k = 0.25 * lean + 0.75 * roll;
+      // 골반: 돌아앉는 동안 엉덩이로 조금씩 밀고 들어가고, 누우면서 나머지 (높이는 침대 윗면 맞춤이 따로 받쳐 준다)
+      const k = 0.6 * swing + 0.4 * down;
       const hx = lerp(r.sit.x, hLie.x, k);
-      const hyW = lerp(SEAT, hLie.y, k) + 0.06 * Math.sin(Math.PI * roll);
+      const hyW = lerp(SEAT, hLie.y, down);
       const hz = lerp(r.sit.z, hLie.z, k);
+      ry = lerpAng(r.sit.yaw, r.lie.yaw, swing);
+      const qq = vrm.scene.quaternion.setFromEuler(_eA.set(-recline, ry, 0, 'YXZ'));
       const off = _vA.set(0, hy, 0).applyQuaternion(qq);
       vrm.scene.position.set(hx - off.x, hyW - off.y, hz - off.z);
       px = hx;
       pz = hz;
-      ry = r.sit.yaw;
     }
 
     // 골반·다리: 걷던 자세에서 앉은/누운 자세로 (처음 몇 프레임에 걸쳐 섞음)
@@ -755,27 +808,29 @@ export class VrmCharacter implements CharacterView {
     const e = _e;
     const q = _q;
     const set = (n: VRMHumanBoneName, x: number, z = 0) => bone(n)?.quaternion.slerp(q.setFromEuler(e.set(x, 0, z)), w);
-    set('leftUpperLeg', -SIT_LEG * sit, 0.04);
-    set('rightUpperLeg', -SIT_LEG * sit, -0.04);
-    set('leftLowerLeg', SIT_LEG * sit);
-    set('rightLowerLeg', SIT_LEG * sit);
-    set('leftFoot', 0.8 * (1 - sit));
-    set('rightFoot', 0.8 * (1 - sit));
-    set('spine', 0.08 * sit);
-    // 옆으로 기운 동안: 다리는 침대 밖으로 늘어뜨린 채 (몸이 기운 만큼 허벅지를 되돌린다),
-    // 베개 쪽 팔은 매트리스를 짚고, 고개는 덜 기울어 세상을 바로 본다. 다리를 올리면서 풀린다
-    const tilt = LEAN_ANGLE * lean * (1 - roll);
-    if (tilt > 0.001) {
-      const hang = (n: VRMHumanBoneName, ab: number) => bone(n)?.quaternion.copy(q.setFromEuler(_eA.set(-SIT_LEG * sit, 0, ab - tilt, 'ZYX')));
-      hang('leftUpperLeg', 0.04);
-      hang('rightUpperLeg', -0.04);
-      const k = lean * (1 - roll);
-      const prop = ARM_HANG - 0.75;
-      bone('rightUpperArm')?.quaternion.slerp(q.setFromEuler(_eA.set(-0.35, 0, prop, 'XYZ')), k);
-      bone('rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(_axR.set(Math.cos(prop), -Math.sin(prop), 0), -0.9), k);
-      bone('leftUpperArm')?.quaternion.slerp(q.setFromEuler(_eA.set(-0.25, 0, -(ARM_HANG - 0.1), 'XYZ')), k);
-      bone('spine')?.quaternion.slerp(q.setFromEuler(_eA.set(0.12, 0, -0.12, 'XYZ')), k);
-      bone('head')?.quaternion.slerp(q.setFromEuler(_eA.set(0.05, 0, -0.45, 'XYZ')), k);
+    // 허벅지 굽힘 = 수평에서 든 각도 + 몸을 젖히지 않았을 때의 수직 (몸을 젖힌 만큼 덜 굽힌다)
+    const hipFlex = thigh + Math.PI / 2 - recline;
+    set('leftUpperLeg', -hipFlex, 0.04);
+    set('rightUpperLeg', -hipFlex, -0.04);
+    set('leftLowerLeg', knee);
+    set('rightLowerLeg', knee);
+    set('leftFoot', toe);
+    set('rightFoot', toe);
+    // 등은 앉으면 살짝 굽히고, 젖혀 손을 짚으면 조금 더 둥글게 · 고개는 젖힌 만큼 앞으로 숙여 앞을 본다
+    set('spine', 0.08 * sit + 0.1 * prop);
+    if (recline > 0.001 && flat < 1) bone('head')?.quaternion.slerp(q.setFromEuler(e.set(0.6 * recline * (1 - flat), 0, 0)), 1 - flat);
+
+    // 팔: 앉으면 두 손을 무릎 위에, 몸을 젖히면 엉덩이 조금 뒤 매트리스를 짚는다
+    const armTo = (s: 'left' | 'right', sh: number, el: number, ar: number, k: number) => {
+      if (k <= 0.001) return;
+      const hang = ARM_HANG - ar;
+      bone(s === 'left' ? 'leftUpperArm' : 'rightUpperArm')?.quaternion.slerp(q.setFromEuler(e.set(sh, 0, s === 'left' ? -hang : hang, 'XYZ')), k);
+      const ax = s === 'left' ? _axL.set(Math.cos(hang), Math.sin(hang), 0) : _axR.set(Math.cos(hang), -Math.sin(hang), 0);
+      bone(s === 'left' ? 'leftLowerArm' : 'rightLowerArm')?.quaternion.slerp(q.setFromAxisAngle(ax, el), k);
+    };
+    for (const s of ['left', 'right'] as const) {
+      armTo(s, -0.42, -0.75, -0.06, lap * w);
+      armTo(s, 0.42, -0.5, 0.22, prop);
     }
     const lying = Math.max(0, (r.t - 0.85) / 0.15);
     this.applySleep(vrm, r, ease(lying), w);
@@ -809,6 +864,50 @@ export class VrmCharacter implements CharacterView {
       bone('head')?.quaternion.slerp(q.setFromEuler(e.set(0.05, this.lookYaw * 0.75, 0)), this.lookW);
       bone('chest')?.quaternion.slerp(q.setFromEuler(e.set(0, this.lookYaw * 0.25, 0)), this.lookW);
     }
+  }
+
+  /** 침대 윗면 아래로 들어간 만큼 몸을 들어 올린 높이 (올릴 땐 바로, 내릴 땐 천천히) */
+  private bedLift = 0;
+  private bedLiftFrame = 0;
+
+  /**
+   * 침대에 앉고 눕는 동안 실제로 그려지는 몸(옷 포함, 머리카락은 빼고)이 매트리스·깔린 이불 윗면 아래로
+   * 들어가면 그만큼 몸 전체를 들어 올린다. 모델마다 키·엉덩이 두께가 달라도 침대를 뚫지 않는다.
+   * 다 누워 잠든 뒤엔 몇 프레임에 한 번만 잰다 (뒤척임은 천천히 바뀐다)
+   */
+  private liftOffBed(vrm: VRM) {
+    const r = this.rest;
+    const tops = r && !r.sofa && r.t > 0.2 ? r.bed : undefined;
+    if (!tops?.length) {
+      this.bedLift = 0;
+      return;
+    }
+    if (r!.t < 0.999 || ++this.bedLiftFrame % 4 === 0) {
+      vrm.scene.updateMatrixWorld(true);
+      let need = 0;
+      vrm.scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.visible) return;
+        const pos = m.geometry.attributes.position as THREE.BufferAttribute | undefined;
+        if (!pos) return;
+        const sk = (m as THREE.SkinnedMesh).isSkinnedMesh ? (m as THREE.SkinnedMesh) : null;
+        const hair = hairMask(m);
+        for (let i = 0; i < pos.count; i += 4) {
+          if (hair && hair[i]) continue;
+          _vS.fromBufferAttribute(pos, i);
+          if (sk) sk.applyBoneTransform(i, _vS);
+          m.localToWorld(_vS);
+          for (const b of tops) {
+            if (_vS.x < b.x0 || _vS.x > b.x1 || _vS.z < b.z0 || _vS.z > b.z1) continue;
+            const d = b.top - _vS.y;
+            // 한참 아래(침대 옆으로 늘어뜨린 다리 등)는 윗면을 뚫은 게 아니라 침대 밖이다
+            if (d > need && d < 0.45) need = d;
+          }
+        }
+      });
+      this.bedLift = Math.max(need, this.bedLift * 0.9);
+    }
+    if (this.bedLift > 0.0005) vrm.scene.position.y += this.bedLift;
   }
 
   /** 옆으로 돌아누운 정도 0~1 (이불을 그만큼 들어 올린다) */

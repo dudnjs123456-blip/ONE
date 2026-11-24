@@ -945,6 +945,17 @@ export interface RestPose {
   stand?: { x: number; z: number; yaw: number };
   /** 침대에서 잘 때 뒤척이는 순서를 정하는 그 사람의 아이디 (내 화면·친구 화면이 같게) */
   sleepSeed?: string;
+  /** 침대 윗면 (매트리스·깔린 이불 상자들). 있으면 몸이 이 면 아래로 들어가지 않게 들어 올린다 */
+  bed?: BedTop[];
+}
+
+/** 침대 윗면 한 칸: 바닥 x0~x1 · z0~z1 범위에서 윗면 높이 top */
+export interface BedTop {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  top: number;
 }
 
 export interface CharacterView {

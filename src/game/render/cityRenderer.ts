@@ -956,7 +956,7 @@ export class CityRenderer {
     const seat = world.seatAmount;
     this.player.rest =
       sv && sv.rest > 0
-        ? { t: sv.rest, sit: HOME.bed.sit, lie: HOME.bed.lie, sleepSeed: world.netId ?? 'me' }
+        ? { t: sv.rest, sit: HOME.bed.sit, lie: HOME.bed.lie, bed: HOME.bed.top, sleepSeed: world.netId ?? 'me' }
         : seat > 0 && world.seat?.spot === 'sofa' && world.boothSpots(world.seatBooth)
           ? { t: seat, ...world.boothSpots(world.seatBooth)!, lie: HOME.sofa.lie, seatY: 0.47, sofa: world.sofaView }
         : seat > 0 && world.seat?.spot === 'sofa'
@@ -1341,7 +1341,7 @@ export class CityRenderer {
       // 친구가 경비 데스크에 앉아 있거나 소파에 누워 있으면 그 자세로
       const sv = world.remoteSeatView(r);
       v.view.rest = r.sleep
-        ? { t: r.sleep.rest, sit: HOME.bed.sit, lie: HOME.bed.lie, sleepSeed: r.id }
+        ? { t: r.sleep.rest, sit: HOME.bed.sit, lie: HOME.bed.lie, bed: HOME.bed.top, sleepSeed: r.id }
         : !sv
         ? null
         : sv.spot === 'sofa' && world.store?.kind === 'karaoke' && world.boothSpots(r.booth)
