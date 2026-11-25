@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { saveProfile, type PlayerProfile } from '@/game/core/profile';
 import { clearDimensionPlace } from '@/game/core/lastScreen';
 import { STORY_ENTRIES, hasStoryBackup, isMaster, jumpToStory, restoreStory } from '@/game/story/master';
+import { toggleTestCompanion } from '@/game/data/companions';
 
 /** 접속 버튼을 누른 뒤 창이 하얗게 번지며 사라지는 시간 (ms) */
 const FADE_MS = 900;
@@ -245,7 +246,21 @@ export default function HomePcPanel({ profile, playerName, userId = null, onConn
                         </div>
                       </div>
                     ))}
-                    <div className="text-xs text-white/40">2장 — 준비 중 (대본: docs/story/chapter2-opening.md)</div>
+                    <div className="text-xs text-white/40">2장 — 준비 중 (줄거리: docs/story/chapter2-outline.md)</div>
+                    <div>
+                      <div className="mb-1 text-xs font-bold text-white/80">태그 전투 확인</div>
+                      <button
+                        disabled={going}
+                        onClick={() => {
+                          const on = toggleTestCompanion(profile);
+                          saveProfile(profile);
+                          setMasterMsg(on ? '시험 동료를 파티에 넣었어요 — 차원에서 Tab 으로 교대, 쓰러지면 저절로 교대' : '시험 동료를 파티에서 뺐어요');
+                        }}
+                        className="w-full rounded bg-white/10 px-2 py-1.5 text-left text-xs hover:bg-sky-400/30 disabled:opacity-40"
+                      >
+                        {(profile.dimension?.party ?? []).includes('tester') ? '시험 동료 빼기' : '시험 동료 넣기 (Tab 교대 시험)'}
+                      </button>
+                    </div>
                     {hasStoryBackup(profile) && (
                       <button onClick={restore} className="w-full rounded bg-white/15 py-1.5 text-xs font-bold hover:bg-white/25">
                         ↩ 원래 이야기 진행으로 되돌리기

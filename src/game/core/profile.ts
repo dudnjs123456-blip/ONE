@@ -58,6 +58,8 @@ export interface PlayerProfile {
     replayRescue?: boolean;
     /** 차원 장비 (무구 노점 · 몬스터 드롭). 서울로는 못 들고 나온다 */
     gear?: import('../data/equipment').GearState;
+    /** 태그 동료 (Tab 으로 바꿔 싸운다, data/companions). 주인공은 늘 들어 있어서 적지 않는다 */
+    party?: string[];
     /** 달빛 여관 첫 숙박(공짜)을 썼다 */
     innFree?: boolean;
     /** 여관 침대에서 자는 중: 침대 번호와 잠든 실제 시각 (ms). 창을 닫아도 계속 잔다 */

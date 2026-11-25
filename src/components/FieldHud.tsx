@@ -34,7 +34,7 @@ export default function FieldHud({
       <div className={`absolute left-4 top-4 rounded-lg border border-white/15 bg-black/50 p-3 backdrop-blur-sm ${touch ? 'w-64' : 'w-72'}`}>
         <div className="flex items-baseline justify-between">
           <span className="text-lg font-black">
-            <span className="text-amber-300">Lv.{hud.level}</span> 나
+            <span className="text-amber-300">Lv.{hud.level}</span> {hud.party.find((m) => m.active)?.name ?? '나'}
           </span>
           <span className="text-sm text-slate-100" title="차원 돈 (서울 돈 G 와 따로, 차원 안에서만 써요)"><CoinIcon /> {hud.coin.toLocaleString()} 은화</span>
         </div>
@@ -45,6 +45,20 @@ export default function FieldHud({
             {hud.hp}/{hud.maxHp}
           </span>
         </div>
+        {/* 태그 파티: 쉬고 있는 동료 체력 (Tab 으로 교대) */}
+        {hud.party.length > 1 && (
+          <div className="mt-1 space-y-0.5">
+            {hud.party
+              .filter((m) => !m.active)
+              .map((m) => (
+                <div key={m.id} className={`flex items-center gap-2 text-[11px] ${m.hp > 0 ? 'text-white/75' : 'text-white/35'}`}>
+                  <span className="w-14 truncate">{m.hp > 0 ? '⇄' : '✖'} {m.name}</span>
+                  <Bar value={m.hp} max={m.maxHp} color="bg-sky-400/80" height="h-1.5" />
+                  <span className="w-16 text-right tabular-nums">{m.hp > 0 ? `${m.hp}/${m.maxHp}` : '쓰러짐'}</span>
+                </div>
+              ))}
+          </div>
+        )}
         <div className="mt-1 flex items-center gap-2 text-xs">
           <span className="w-7 font-bold text-lime-300">EXP</span>
           <Bar value={hud.exp} max={hud.expNext} color="bg-lime-400" height="h-2" />
@@ -116,10 +130,13 @@ export default function FieldHud({
         <div className="absolute bottom-6 right-4 rounded bg-black/50 px-3 py-2 text-xs leading-5 text-white/80">
           <div>방향키 걷기 · {bindLabel('run')}+방향키 달리기 · {bindLabel('jump')} 점프 · 방향키 두 번 톡 = 대시</div>
           <div>Ctrl 공격 (주먹·발차기 중 하나) · Q W E R 주 근 기술 · A S D 부 근 기술 · F 말 걸기</div>
-          <div>Z 자동사냥 · G 퀘스트 자동진행 · I 가방 · T 장비 · Ctrl+휠 줌</div>
+          <div>Z 자동사냥 · G 퀘스트 자동진행 · I 가방 · T 장비 · Ctrl+휠 줌{hud.party.length > 1 && ' · Tab 교대'}</div>
         </div>
       )}
 
+      {hud.tagging && (
+        <div className="absolute inset-x-0 top-1/3 text-center text-2xl font-black text-sky-200 drop-shadow">쓰러졌다 — 다음 캐릭터로 교대</div>
+      )}
       {hud.dead && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50">
           <div className="text-5xl font-black text-red-400">사망했습니다</div>

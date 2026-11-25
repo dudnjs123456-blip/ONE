@@ -282,6 +282,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     // Ctrl+W(탭 닫기)는 브라우저가 막지 못하게 해 두어서, 차원 안에선 나가기 전에 한 번 묻는다
     const onCtrlCombo = (e: KeyboardEvent) => {
       if (e.ctrlKey && ((SKILL_CODES as readonly string[]).includes(e.code) || e.code === INTERACT_CODE)) e.preventDefault();
+      // Tab = 태그 교대 (브라우저가 버튼 사이로 포커스를 옮기지 않게)
+      if (e.code === 'Tab') e.preventDefault();
     };
     window.addEventListener('keydown', onCtrlCombo, true);
     const askBeforeLeave = (e: BeforeUnloadEvent) => {
@@ -326,6 +328,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
         return;
       }
       if (e.code === 'KeyG' && !e.repeat) toggleQuestAuto();
+      // 태그: Tab 으로 싸우는 캐릭터를 바꾼다 (동료가 있을 때)
+      if (e.code === 'Tab' && !e.repeat) world.tag();
       // 차원 키: F = 말 걸기 · 살펴보기, Q W E R = 주 근 기술, A S D = 부 근 기술 (캐릭터 전용 무술 기술은 서울에서만)
       if (interact && !e.repeat) startTalk();
       const slot = SKILL_CODES.indexOf(e.code as (typeof SKILL_CODES)[number]);
@@ -426,6 +430,8 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       const c1 = profile.dimension?.ch1;
       if (!c1) return;
       if (npc) world.holdNpc(npc);
+      // 이야기 장면은 주인공 몫 (동료가 나와 있으면 주인공으로)
+      world.forceMe();
       const sc = ch1Scene(id, c1, profile);
       if (id === 'quake') {
         // 땅이 울리고 포탈 빛이 꺼진다: 장면이 끝날 때까지 로그아웃이 안 된다
@@ -546,6 +552,7 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
     }
     function playScene(sc: Scene, npc?: string) {
       if (npc) world.holdNpc(npc);
+      world.forceMe();
       setStory({ lines: sc.lines, idx: 0, scene: sc.id, npc, choices: sc.choices });
     }
     function nextStory() {
@@ -637,6 +644,11 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
      */
     function castSkill(slot: SkillSlot) {
       if (talkRef.current || storyRef.current || world.player.hp <= 0) return;
+      // 태그 동료의 근 기술은 마을을 추가할 때 정한다 (지금은 주인공 기술만)
+      if (!world.activeMember.isMe) {
+        world.addLog(`${world.activeMember.name}: 아직 쓸 수 있는 근 기술이 없어요`);
+        return;
+      }
       const c1 = profile.dimension?.ch1;
       const learned = slot === 'q' && !!c1?.skillName;
       if (!learned) {
@@ -764,8 +776,18 @@ function DimensionField({ profile, account = null, onExit, intro = false }: { pr
       {/* 근 기술 칸: Q W E R (주 근) · A S D (부 근). 배운 칸만 밝다. 누르면 쓴다 (터치도) */}
       {hud && !hud.dead && !paused && !inventory && !talk && !story && !gearUi && !hud.sleep && (
         <div className={`pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-end gap-1 ${touch ? 'top-14' : 'bottom-3'}`}>
+          {hud.party.length > 1 && (
+            <button
+              title="싸우는 캐릭터 바꾸기 (Tab) — 쓰러지면 다음 캐릭터가 저절로 나와요"
+              onClick={() => worldRef.current?.tag()}
+              className="mr-2 flex h-11 flex-col items-center justify-center rounded-lg border border-sky-300/60 bg-black/60 px-2 text-[10px] leading-tight text-sky-100"
+            >
+              <span className="font-mono text-xs font-black">{touch ? '⇄' : 'Tab'}</span>
+              <span>교대</span>
+            </button>
+          )}
           {SKILL_SLOTS.map((s) => {
-            const learned = s.id === 'q' && !!ch1?.skillName;
+            const learned = s.id === 'q' && !!ch1?.skillName && !!hud.party.find((m) => m.active)?.isMe;
             const left = learned ? Math.max(0, Math.ceil((skillReadyAt - performance.now()) / 1000)) : 0;
             const color = ch1?.root ? ROOT_INFO[ch1.root].color : '#ffffff';
             return (

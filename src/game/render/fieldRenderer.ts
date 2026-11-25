@@ -29,6 +29,8 @@ interface Actor {
   height: number;
   /** 지금 입힌 옷 (잠옷으로 갈아입을 때 비교) */
   outfitKey?: string;
+  /** 내 캐릭터: 지금 보여 주는 파티원 id (태그로 바뀌면 모델을 새로 만든다) */
+  memberId?: string;
 }
 
 /** 다른 차원(필드) 렌더러: 쿼터뷰 추적 카메라, 보랏빛 들판/수정/귀환 포탈, 머리 위 HP, 데미지 숫자 */
@@ -213,8 +215,19 @@ export class FieldRenderer {
     };
 
     const p = world.player;
-    const worn = wornList(world.profile.wardrobe);
-    const pa = ensure(p, playerLook(worn, world.profile.body), 1, false);
+    // 태그: 지금 싸우는 파티원의 모습 (주인공이면 내 옷, 동료면 동료 옷)
+    const member = world.activeMember;
+    const worn = member.isMe ? wornList(world.profile.wardrobe) : [...(member.outfit ?? [])];
+    const old = this.actors.get(p);
+    if (old && old.memberId !== member.id) {
+      this.scene.remove(old.mannequin.root, old.plate.sprite);
+      old.plate.dispose();
+      old.mannequin.dispose?.();
+      disposeObject(old.mannequin.root);
+      this.actors.delete(p);
+    }
+    const pa = ensure(p, playerLook(worn, member.isMe ? world.profile.body : member.body), 1, false);
+    pa.memberId = member.id;
     // 경계 마을 · 여관 안에선 서울처럼 편한 자세 (전투 자세는 사냥터에서만)
     pa.mannequin.casual = inSafe(p.x, p.z);
     const myRest = world.sleep ? world.restAmount : 0;
@@ -223,7 +236,7 @@ export class FieldRenderer {
     // 씻는 동안은 커튼 뒤 (모습을 감춘다)
     pa.mannequin.root.visible = !world.shower;
     pa.plate.sprite.visible = !world.shower && myRest < 0.3;
-    pa.plate.draw(`Lv.${world.level} 나`, p.hp, p.maxHp);
+    pa.plate.draw(`Lv.${world.level} ${member.name}`, p.hp, p.maxHp);
     const pp = p.lerped(clock.alpha);
     pa.plate.sprite.position.set(pp.x, pp.y + pa.height, pp.z);
 

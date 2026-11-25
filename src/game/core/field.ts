@@ -10,6 +10,7 @@ import { FIELD_SPAWNS, MONSTERS, MONSTER_RESPAWN_FRAMES, type MonsterType } from
 import { DIR_OF_KEY, MOVES, totalFrames } from '../data/moves';
 import { expToNext } from '../data/progression';
 import { EQUIPS, dimensionStats, ensureGear, rollDrop } from '../data/equipment';
+import { buildParty, type PartyMember } from '../data/companions';
 import { ARMS_STALL, SPOT_RANGE, TALK_RANGE, VILLAGE, VILLAGE_HOUSES, VILLAGE_NPCS, VILLAGE_SPAWN, VILLAGE_SPOTS, type VillageNpcDef } from '../data/village';
 import { gateLocked } from '../story/chapter0';
 import { DIRT_PER_FRAME, DIRTY, dirtRate } from '../city/chores';
@@ -142,6 +143,10 @@ const FIELD_HITSTOP_MAX = 6;
 const CORPSE_FRAMES = 90;
 const PLAYER_RESPAWN_FRAMES = 180;
 const REGEN_DELAY = 300;
+/** 태그(Tab) 교대 뒤 다시 바꿀 수 있을 때까지 (1초) */
+export const TAG_COOLDOWN_FRAMES = 60;
+/** 싸우던 캐릭터가 쓰러진 뒤 다음 캐릭터가 저절로 나오기까지 (쓰러지는 모습을 잠깐 보여 준다) */
+export const AUTO_TAG_FRAMES = 40;
 /** 걷기·달리기 속도 (서울과 같다: 방향키 걷기, Shift 달리기) */
 const WALK_SPEED = 0.045;
 const DASH_RUN_SPEED = 0.1;
@@ -316,6 +321,10 @@ export interface FieldHudState {
   spot: { id: 'board' | 'well' | 'book'; name: string; seen: boolean } | null;
   /** 무구 노점 앞 (장비를 은화로 산다) */
   shop: boolean;
+  /** 태그 파티 (동료가 없으면 주인공 한 명). active = 지금 싸우는 캐릭터 */
+  party: { id: string; name: string; isMe: boolean; hp: number; maxHp: number; active: boolean }[];
+  /** 싸우던 캐릭터가 쓰러져 다음 캐릭터로 저절로 바뀌는 중 */
+  tagging: boolean;
 }
 
 const idle = (): FieldCommand => ({ move: null, input: NEUTRAL_INPUT });
@@ -409,6 +418,15 @@ export class FieldWorld {
   private session = { kills: 0, exp: 0, coin: 0, deaths: 0 };
   hitstop = 0;
   readonly player: Fighter;
+  /**
+   * 태그 파티 (0 = 주인공). 필드 위엔 지금 싸우는 한 명(active)만 나오고, Tab 으로 바꾼다.
+   * 싸우던 캐릭터가 쓰러지면 살아 있는 다음 캐릭터가 저절로 나오고, 모두 쓰러져야 포탈 앞으로 돌아간다.
+   */
+  party: PartyMember[];
+  active = 0;
+  /** 교대할 때마다 늘어난다 (화면이 모델을 바꾸고 연출을 띄운다) */
+  tagSerial = 0;
+  private tagReadyFrame = 0;
   auto = false;
   monsters: Monster[] = [];
   target: Monster | null = null;
@@ -476,6 +494,7 @@ export class FieldWorld {
     this.player = new Fighter(0, 'PLAYER', { ...dimensionStats(profile), tempo: PLAYER_TEMPO, body: bodySpecFor(profile.body), autoDodge: true, manual: true });
     // 접속하면 경계 마을 포탈 앞에서 시작한다 (자동사냥은 꺼 둔 채로, 켜면 북문을 나가 사냥)
     this.player.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
+    this.party = buildParty(profile);
     // 1장에 처음 나오는 인물은 0장을 마친 사람에게만 보인다
     const ch0Done = !!profile.dimension?.ch0?.done;
     this.npcs = VILLAGE_NPCS.filter((def) => def.after !== 'ch0' || ch0Done).map((def, i) => {
@@ -584,11 +603,82 @@ export class FieldWorld {
   /** 장비를 바꿨다: 체력·공격력을 다시 계산한다 (몸 + 차원 장비) */
   refreshStats() {
     const st = dimensionStats(this.profile);
-    const p = this.player;
-    p.maxHp = st.maxHp;
-    p.power = st.power;
-    p.hp = Math.min(p.hp, p.maxHp);
+    const me = this.party[0];
+    me.maxHp = st.maxHp;
+    me.power = st.power;
+    me.hp = Math.min(me.hp, me.maxHp);
+    if (this.active === 0) {
+      const p = this.player;
+      p.maxHp = st.maxHp;
+      p.power = st.power;
+      p.hp = Math.min(p.hp, p.maxHp);
+    }
     saveProfile(this.profile);
+  }
+
+  // ───────────────────────── 태그 (Tab) ─────────────────────────
+
+  /** 지금 싸우는 캐릭터 */
+  get activeMember(): PartyMember {
+    return this.party[this.active];
+  }
+
+  /** active 다음으로 살아 있는 캐릭터 (없으면 -1) */
+  private nextAlive(): number {
+    const n = this.party.length;
+    for (let k = 1; k < n; k++) {
+      const i = (this.active + k) % n;
+      if (this.party[i].hp > 0) return i;
+    }
+    return -1;
+  }
+
+  /** 필드 위 캐릭터를 i 번 파티원으로 바꾼다 (자리 · 방향은 그대로, 하던 동작은 끊긴다) */
+  private swapTo(i: number) {
+    const p = this.player;
+    const cur = this.party[this.active];
+    cur.hp = Math.max(0, Math.round(p.hp));
+    const next = this.party[i];
+    this.active = i;
+    p.maxHp = next.maxHp;
+    p.power = next.power;
+    p.body = bodySpecFor(next.body);
+    p.reset(p.x, p.z, p.fx, p.fz);
+    p.hp = next.hp;
+    this.playerDeadFrames = 0;
+    this.tagSerial++;
+    this.tagReadyFrame = this.frame + TAG_COOLDOWN_FRAMES;
+    this.texts.push({ x: p.x, y: 2.6, z: p.z, text: `교대 · ${next.name}`, kind: 'exp' });
+  }
+
+  /**
+   * Tab: 살아 있는 다음 캐릭터로 바꾼다. 동료가 없거나, 쓰러졌거나, 자는 중 · 씻는 중 · 대화 중이거나, 막 바꿨으면 안 된다.
+   * @returns 바꿨으면 true
+   */
+  tag(): boolean {
+    if (this.party.length < 2) {
+      this.addLog('아직 함께 싸울 동료가 없어요');
+      return false;
+    }
+    const p = this.player;
+    if (p.hp <= 0 || this.sleep || this.shower || this.talking) return false;
+    if (this.frame < this.tagReadyFrame) return false;
+    const i = this.nextAlive();
+    if (i < 0) {
+      this.addLog('교대할 수 있는 동료가 없어요 (모두 쓰러짐)');
+      return false;
+    }
+    this.swapTo(i);
+    this.addLog(`${this.party[i].name}(으)로 교대`);
+    return true;
+  }
+
+  /** 이야기 장면은 주인공 몫: 동료가 나와 있으면 주인공으로 돌린다 (쓰러져 있었으면 조금 회복시켜서) */
+  forceMe() {
+    if (this.active === 0) return;
+    const me = this.party[0];
+    if (me.hp <= 0) me.hp = Math.ceil(me.maxHp * 0.3);
+    this.swapTo(0);
   }
 
   /** 이야기 보수로 은화를 받는다 */
@@ -1124,7 +1214,10 @@ export class FieldWorld {
       hp: p.hp,
       maxHp: p.maxHp,
       auto: this.auto,
-      dead: p.hp <= 0,
+      // 다음 캐릭터가 남아 있으면 "사망"이 아니라 교대 중
+      dead: p.hp <= 0 && this.nextAlive() < 0,
+      tagging: p.hp <= 0 && this.nextAlive() >= 0,
+      party: this.party.map((m, i) => ({ id: m.id, name: m.name, isMe: m.isMe, hp: i === this.active ? Math.max(0, Math.round(p.hp)) : m.hp, maxHp: i === this.active ? p.maxHp : m.maxHp, active: i === this.active })),
       respawnIn: Math.ceil((PLAYER_RESPAWN_FRAMES - this.playerDeadFrames) / FPS),
       target: t && { name: t.type.name, level: t.type.level, hp: t.fighter.hp, maxHp: t.fighter.maxHp },
       log: this.log.slice(-6),
@@ -1520,9 +1613,22 @@ export class FieldWorld {
       this.playerDeadFrames = 0;
     }
     if (p.hp <= 0 && p.state === 'ko') {
-      if (++this.playerDeadFrames >= PLAYER_RESPAWN_FRAMES) {
+      this.playerDeadFrames++;
+      const next = this.nextAlive();
+      if (next >= 0) {
+        // 태그: Tab 을 누르지 않아도 살아 있는 다음 캐릭터가 저절로 나온다
+        if (this.playerDeadFrames >= AUTO_TAG_FRAMES) {
+          const down = this.activeMember.name;
+          this.swapTo(next);
+          this.addLog(`${down} 쓰러짐 — ${this.party[next].name}(으)로 교대`);
+        }
+      } else if (this.playerDeadFrames >= PLAYER_RESPAWN_FRAMES) {
+        // 모두 쓰러졌다: 주인공으로 포탈 앞에서 깨어나고, 동료도 모두 일어난다
         this.playerDeadFrames = 0;
         this.session.deaths++;
+        // 먼저 주인공으로 돌린 뒤 모두 일으킨다 (바꾸면서 쓰러진 체력을 다시 적지 않게)
+        if (this.active !== 0) this.swapTo(0);
+        for (const m of this.party) m.hp = m.maxHp;
         p.reset(VILLAGE_SPAWN.x, VILLAGE_SPAWN.z, 0, -1);
         this.target = null;
         this.addLog(`${VILLAGE.name} 포탈 앞에서 다시 깨어났습니다`);
@@ -1637,7 +1743,15 @@ export class FieldWorld {
   /** 한동안 맞지 않으면 HP 자연 회복 */
   private regen() {
     const p = this.player;
-    if (p.hp <= 0 || this.frame - this.lastHurtFrame < REGEN_DELAY || this.frame % 30 !== 0) return;
+    if (this.frame % 30 !== 0) return;
+    // 쉬고 있는 동료: 살아 있으면 천천히 회복, 쓰러진 동료는 마을(안전한 곳)에 돌아오면 일어난다
+    const safe = inSafe(p.x, p.z);
+    for (let i = 0; i < this.party.length; i++) {
+      const m = this.party[i];
+      if (i === this.active || m.hp >= m.maxHp) continue;
+      if (m.hp > 0 || safe) m.hp = Math.min(m.maxHp, m.hp + Math.ceil(m.maxHp * 0.03));
+    }
+    if (p.hp <= 0 || this.frame - this.lastHurtFrame < REGEN_DELAY) return;
     p.hp = Math.min(p.maxHp, p.hp + Math.ceil(p.maxHp * 0.03));
   }
 }
