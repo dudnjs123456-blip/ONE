@@ -1,0 +1,32 @@
+{
+  "id": "shadow-sovereign",
+  "kind": "concept",
+  "source": "original.png",
+  "tool": "Adobe Firefly · Gemini Flash (Google)",
+  "added": "2026-11-26",
+  "refs": [],
+  "caption": "turnaround sheet of a regal smoke shadow creature with crown of smoke and red eyes",
+  "usedIn": [
+    "public/prologue/beast/"
+  ],
+  "metrics": {
+    "width": 2752,
+    "height": 1536,
+    "aspect": 1.792,
+    "meanL": 0.426,
+    "p05": 0.092,
+    "p95": 0.631,
+    "brightPx": 0.0002,
+    "hueMed": 354,
+    "satMed": 0,
+    "rowsL": [
+      0.549,
+      0.369,
+      0.341,
+      0.444
+    ]
+  },
+  "bible": {
+    "pass": null
+  }
+}

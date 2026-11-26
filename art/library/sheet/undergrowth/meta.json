@@ -1,0 +1,34 @@
+{
+  "id": "undergrowth",
+  "kind": "sheet",
+  "source": "original.png",
+  "tool": "Adobe Firefly · Gemini Flash (Google)",
+  "added": "2026-11-26",
+  "refs": [
+    "forest-pano"
+  ],
+  "caption": "sprite sheet of painted forest undergrowth: bushes, ferns, grass, boulders, log, glowing mushrooms on chroma green",
+  "usedIn": [
+    "public/prologue/props/"
+  ],
+  "metrics": {
+    "width": 2752,
+    "height": 1536,
+    "aspect": 1.792,
+    "meanL": 0.602,
+    "p05": 0.161,
+    "p95": 0.941,
+    "brightPx": 0.3473,
+    "hueMed": 120,
+    "satMed": 0.934,
+    "rowsL": [
+      0.628,
+      0.733,
+      0.597,
+      0.45
+    ]
+  },
+  "bible": {
+    "pass": null
+  }
+}

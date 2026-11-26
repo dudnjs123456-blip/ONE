@@ -1,0 +1,34 @@
+{
+  "id": "cliff-vista",
+  "kind": "bg",
+  "source": "original.png",
+  "tool": "Adobe Firefly · Gemini Flash (Google)",
+  "added": "2026-11-24",
+  "refs": [],
+  "caption": "view from a high cliff over a sea of blue-grey fog and clouds, small walled medieval village with warm orange lights far below, layered mountains, large pale moon on the left, starry navy sky",
+  "usedIn": [
+    "public/prologue/cliff-vista.webp"
+  ],
+  "metrics": {
+    "width": 3168,
+    "height": 1344,
+    "aspect": 2.357,
+    "meanL": 0.276,
+    "p05": 0.143,
+    "p95": 0.484,
+    "brightPx": 0.0029,
+    "hueMed": 213,
+    "satMed": 0.384,
+    "rowsL": [
+      0.192,
+      0.332,
+      0.338,
+      0.243
+    ]
+  },
+  "bible": {
+    "pass": true,
+    "passed": 6,
+    "total": 6
+  }
+}

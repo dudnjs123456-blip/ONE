@@ -45,3 +45,6 @@ next-env.d.ts
 .env*
 /.next-*/
 /assets-src/
+
+# 그림 학습 묶음 (scripts/art.mjs dataset 으로 다시 만든다)
+art/dataset/

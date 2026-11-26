@@ -1,0 +1,34 @@
+{
+  "id": "pine-trees",
+  "kind": "sheet",
+  "source": "original.png",
+  "tool": "Adobe Firefly · Gemini Flash (Google)",
+  "added": "2026-11-26",
+  "refs": [
+    "forest-pano"
+  ],
+  "caption": "sprite sheet of five painted conifer trees on chroma green",
+  "usedIn": [
+    "public/prologue/trees/"
+  ],
+  "metrics": {
+    "width": 2752,
+    "height": 1536,
+    "aspect": 1.792,
+    "meanL": 0.418,
+    "p05": 0.165,
+    "p95": 0.504,
+    "brightPx": 0,
+    "hueMed": 120,
+    "satMed": 0.984,
+    "rowsL": [
+      0.465,
+      0.414,
+      0.365,
+      0.426
+    ]
+  },
+  "bible": {
+    "pass": null
+  }
+}
