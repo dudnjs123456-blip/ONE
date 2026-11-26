@@ -44,6 +44,7 @@ import { FishingSession, type FishPhase, type FishResult, type FishScene } from 
 import { BAITS, BAIT_BY_ID, BASKET_MAX, FISHING_SHOP_NAME, FISH_BY_ID, ROD_BY_ID, TIER_INFO, TIME_LABEL, anglerOf, currentSetup, ensureFishing, fmtKg, sellPrice, type Angler, type BaitId, type FishSetup, type FishingState } from '../data/fishing';
 import { weatherAt, type WeatherState } from './weather';
 import { CLOCK_EPOCH, MS_PER_GAME_MINUTE, gameTimeAt, sharedNow } from './worldClock';
+import { noteLife, tickLife } from '../core/lifeLog';
 import { PARK, RIDES, RIDE_IDS, RIDE_NODE, WHEEL, WHEEL_RIDE_MS, parkPathTo, parkPois, parkSolids, rideClock, wheelCabinAtBottom, type RideId } from './themePark';
 import { STAFF_NAMES, queueAhead, queueSpot, staffSpot, visitorSeats } from './parkPeople';
 
@@ -1019,6 +1020,16 @@ export class CityWorld {
   step() {
     this.stepInner();
     this.stepActionVoice();
+    this.stepLifeLog();
+  }
+
+  /** 생활 기록: 1분마다 지금 있는 곳 · 시간대 (core/lifeLog) */
+  private lifeTickAt = 0;
+  private stepLifeLog() {
+    if (this.frame - this.lifeTickAt < 3600) return;
+    this.lifeTickAt = this.frame;
+    const place = this.sleep ? 'sleep' : this.fishing ? 'fishing' : this.location === 'store' ? `store:${this.store?.sign ?? ''}` : this.location;
+    tickLife(this.profile, this.day, this.minutes, place);
   }
 
   /**
@@ -3374,6 +3385,8 @@ export class CityWorld {
 
   say(text: string, seconds = 2.5) {
     this.toast = { text, until: this.frame + seconds * 60 };
+    // 알림 문구 = 내가 한 일 (안내·실패 문구는 lifeLog 가 걸러 낸다)
+    noteLife(this.profile, this.day, this.minutes, text);
   }
 
   private interact(poi: Poi) {

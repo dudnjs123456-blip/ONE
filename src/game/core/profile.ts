@@ -73,6 +73,8 @@ export interface PlayerProfile {
   fishing?: import('../data/fishing').FishingState;
   /** 집안일: 싱크대 그릇 · 빨래 바구니 · 세탁기 · 건조대 */
   chores?: import('../city/chores').ChoreState;
+  /** 생활 기록: 서울에서 한 일을 날짜별로 · AI 가 정리한 일기와 근 기울기 (core/lifeLog) */
+  lifeLog?: import('./lifeLog').LifeLog;
 }
 
 export interface FridgeFood {

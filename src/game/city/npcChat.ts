@@ -4,6 +4,7 @@ import type { CityWorld } from './cityWorld';
 import { FLOWER_GIFTS } from '../data/items';
 import { MALE_BODIES } from '../data/fashion';
 import { getSupabase } from '../net/supabase';
+import { recentLife } from '../core/lifeLog';
 
 /** 기억은 최근 것만 남긴다 */
 const MAX_MEMORIES = 15;
@@ -80,6 +81,7 @@ export function buildContext(world: CityWorld, npcId: string): NpcContext {
     affinity: bond.affinity,
     canGift: bond.lastGiftDay !== world.day,
     memories: bond.memories.map((m) => `${m.day}일째: ${m.text}`),
+    life: recentLife(pr, world.day),
   };
 }
 

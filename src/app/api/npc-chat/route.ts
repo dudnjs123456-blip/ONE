@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NPC_EMOTIONS, PLAYER_MOODS, TALK_NPCS, type NpcContext, type NpcReply } from '@/game/data/npcs';
 import { DATA_NOTE, cleanContext, clientIp, overLimit, whoIs } from './guard';
+import { askOllama } from './local';
 
 /**
  * NPC 대화 (서버). API 키는 서버에만 두고 브라우저엔 대사만 돌려준다.
@@ -40,8 +41,14 @@ interface Body {
 
 let client: Anthropic | null = null;
 
+/**
+ * 로컬 LLM (Ollama) 모드 — NPC_PROVIDER=ollama 일 때만 켜진다 (지금은 내 PC `npm run dev` 테스트용).
+ * 운영(Vercel)엔 이 값이 없어서 계속 Claude 를 쓴다.
+ */
+// Vercel(운영)에서는 .env.local 이 같이 올라가도 로컬 LLM 을 켜지 않는다 (그 서버엔 Ollama 가 없다)
+const PROVIDER = process.env.NPC_PROVIDER === 'ollama' && !process.env.VERCEL ? 'ollama' : 'claude';
 export async function POST(req: Request) {
-  if (!process.env.ANTHROPIC_API_KEY) return Response.json({ error: 'no_key' }, { status: 503 });
+  if (PROVIDER === 'claude' && !process.env.ANTHROPIC_API_KEY) return Response.json({ error: 'no_key' }, { status: 503 });
 
   // 로그인한 사람만 (서버에 Supabase 가 없는 오프라인 개발 환경은 IP 로만 센다)
   const user = await whoIs(req);
@@ -70,6 +77,14 @@ export async function POST(req: Request) {
   while (history.length && history[0].role !== 'user') history.shift();
   if (!history.length || history[history.length - 1].role !== 'user') return Response.json({ error: 'bad_request' }, { status: 400 });
 
+  const situation = npc.id === 'mom' ? describeMom(body.context) : describe(body.context);
+  if (PROVIDER === 'ollama') {
+    const local = await askOllama(npc.id, npc.persona, history, situation, SCHEMA);
+    if (local) return Response.json(sanitize(local, body.context));
+    // 로컬이 안 되면 키가 있을 때만 Claude 로, 없으면 미리 써 둔 대사로
+    if (!process.env.ANTHROPIC_API_KEY) return Response.json(soft(npc.soft.error));
+  }
+
   client ??= new Anthropic();
   // Haiku 는 서버 쪽 대체 모델(fallbacks)을 지원하지 않는다
   const fallback = MODEL.startsWith('claude-haiku') ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const };
@@ -80,7 +95,7 @@ export async function POST(req: Request) {
       max_tokens: MAX_TOKENS,
       ...fallback,
       system: [{ type: 'text', text: npc.persona, cache_control: { type: 'ephemeral' } }],
-      messages: [...history, { role: 'system', content: npc.id === 'mom' ? describeMom(body.context) : describe(body.context) }],
+      messages: [...history, { role: 'system', content: situation }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     });
     if (res.stop_reason === 'refusal') return Response.json(soft(npc.soft.refusal));
@@ -113,9 +128,16 @@ function describeMom(c: NpcContext): string {
     '',
     '[기억]',
     ...(c.memories.length ? c.memories.map((m) => `- ${m}`) : ['- (아직 특별한 기억 없음)']),
+    ...lifeLines(c),
     '',
     `위 상황에 맞게 엄마로서 ${child}의 마지막 말에 답하라.`,
   ].join('\n');
+}
+
+/** 요즘 생활 (생활 기록 정리). 직접 본 게 아니라 "요즘 이렇게 지내는 것 같다" 정도로만 */
+function lifeLines(c: NpcContext): string[] {
+  if (!c.life?.length) return [];
+  return ['', '[요즘 생활 (상대가 요즘 이렇게 지냈다. 네가 직접 본 것처럼 꼬치꼬치 말하지 말고, 자연스럽게 알아챈 듯 가끔만 꺼낸다)]', ...c.life.map((m) => `- ${m}`)];
 }
 
 /** 게임 상황 → AI 가 읽을 글 (박 반장) */
@@ -135,6 +157,7 @@ function describe(c: NpcContext): string {
     '',
     '[기억]',
     ...(c.memories.length ? c.memories.map((m) => `- ${m}`) : ['- (아직 특별한 기억 없음)']),
+    ...lifeLines(c),
     '',
     '위 상황에 맞게 박 반장으로서 후배의 마지막 말에 답하라. playerMood 에는 후배의 마지막 말에서 느껴지는 후배의 기분을 고른다.',
   ];

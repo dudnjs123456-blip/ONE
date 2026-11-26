@@ -180,6 +180,8 @@ export interface NpcContext {
   child?: '딸' | '아들';
   /** 오늘 냉장고에 든 음식 수 */
   fridge?: number;
+  /** 요즘 생활 (생활 기록 정리: 최근 3일 일기) */
+  life?: string[];
 }
 
 export interface NpcReply {

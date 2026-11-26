@@ -134,6 +134,7 @@ export function cleanContext(raw: unknown): NpcContext {
     ...(c.doing ? { doing: str(c.doing, 60) } : {}),
     ...(c.child === '아들' || c.child === '딸' ? { child: c.child } : {}),
     ...(c.fridge !== undefined ? { fridge: int(c.fridge, 0, 999) } : {}),
+    ...(Array.isArray(c.life) ? { life: c.life.slice(-3).map((m) => str(m, 100)).filter(Boolean) } : {}),
   };
 }
 

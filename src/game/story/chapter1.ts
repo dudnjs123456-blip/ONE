@@ -1,5 +1,6 @@
 import type { ScriptLine } from '../data/prologueScript';
 import type { PlayerProfile } from '../core/profile';
+import { leanTotal } from '../core/lifeLog';
 
 /**
  * 1장 「기운 수련」: 게임처럼 편하게 즐기던 주인공이, 수련 사이사이 터지는 사건들로 그 편한 마음을 하나씩 잃고
@@ -177,12 +178,15 @@ export function readRoot(p: PlayerProfile): RootReading {
   const friends = Object.values(p.npcs ?? {}).filter((b) => (b as { affinity?: number })?.affinity && (b as { affinity: number }).affinity > 0).length;
   const wins = Object.values(p.cpu?.record ?? {}).reduce((a, r) => a + (r?.w ?? 0), 0);
   const fights = (p.kills ?? 0) + wins * 3;
+  // 숫자(누적 기록) + 생활 기록 정리(하루하루 AI 가 매긴 근 기울기 합). 오래 그렇게 살아온 쪽이 이긴다
+  const lean = leanTotal(p);
+  const LEAN_W = 6;
   const score: [RootId, number][] = [
-    ['력', fights],
-    ['공', fish * 3],
-    ['형', shifts * 4],
-    ['생', pets * 25],
-    ['심', friends * 10],
+    ['력', fights + lean.력 * LEAN_W],
+    ['공', fish * 3 + lean.공 * LEAN_W],
+    ['형', shifts * 4 + lean.형 * LEAN_W],
+    ['생', pets * 25 + lean.생 * LEAN_W],
+    ['심', friends * 10 + lean.심 * LEAN_W],
   ];
   score.sort((a, b) => b[1] - a[1]);
   const root = score[0][1] > 0 ? score[0][0] : '력';

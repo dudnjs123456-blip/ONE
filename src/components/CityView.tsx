@@ -45,6 +45,7 @@ import { WEATHER_LABEL, type WeatherKind } from '@/game/city/weather';
 import { sharedNow, syncWorldClock } from '@/game/city/worldClock';
 import ShopDialog from './ShopDialog';
 import NpcChatPanel from './NpcChatPanel';
+import { digestPending } from '@/game/city/lifeDigest';
 import MoodLinePop from './MoodLinePop';
 import SkillCutIn, { type CutInLive } from './SkillCutIn';
 import { MOOD_LINES, moodLineKey } from '@/game/data/moodLines';
@@ -343,6 +344,9 @@ export default function CityView({
     world.attachSharedClock(sharedNow);
     void syncWorldClock();
     const clockTimer = window.setInterval(() => void syncWorldClock(2), 60_000);
+    // 생활 기록: 지난 날을 AI 로 정리 (켤 때 한 번 + 5분마다 확인 — 날이 바뀌면 그때 정리된다)
+    const digestTimer = window.setInterval(() => void digestPending(world.profile, world.day), 5 * 60_000);
+    window.setTimeout(() => void digestPending(world.profile, world.day), 15_000);
     // 새로고침해도 마지막에 있던 곳에서 이어서 (이 브라우저에 계정별로 기억)
     const placeKey = `ironfist:place:${account?.userId ?? 'guest'}`;
     try {
@@ -728,6 +732,7 @@ export default function CityView({
       savePlace();
       window.clearInterval(placeTimer);
       window.clearInterval(clockTimer);
+      window.clearInterval(digestTimer);
       window.removeEventListener('pagehide', savePlace);
       worldRef.current = null;
     };

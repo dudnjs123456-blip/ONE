@@ -34,7 +34,8 @@
     "test:inn": "tsx scripts/inn-sim.ts",
     "test:master": "tsx scripts/master-sim.ts",
     "test:dimkeys": "tsx scripts/dimkeys-sim.ts",
-    "test:tag": "tsx scripts/tag-sim.ts"
+    "test:tag": "tsx scripts/tag-sim.ts",
+    "test:life": "tsx scripts/life-sim.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
