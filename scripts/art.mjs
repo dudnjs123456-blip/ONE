@@ -215,6 +215,23 @@ async function main() {
         n++;
       }
       console.log(`학습 묶음 ${n}장 → art/dataset/bg/ (그림 + 설명 .txt)`);
+      // 캐릭터: meta.json 의 captions(게임 그림 경로 → 표정·구도 설명). 투명 배경은 회색으로 깔아 학습한다
+      const cd = path.join(LIB, 'character');
+      for (const id of fs.existsSync(cd) ? fs.readdirSync(cd) : []) {
+        const mf = path.join(cd, id, 'meta.json');
+        if (!fs.existsSync(mf)) continue;
+        const cm = JSON.parse(fs.readFileSync(mf, 'utf8'));
+        const co = path.join(ROOT, 'art', 'dataset', 'character', id);
+        fs.mkdirSync(co, { recursive: true });
+        let k = 0;
+        for (const [img, cap] of Object.entries(cm.captions ?? {})) {
+          const name = path.basename(img).replace(/\.(png|webp)$/i, '');
+          await sharp(path.join(ROOT, img)).flatten({ background: '#808080' }).png().toFile(path.join(co, `${name}.png`));
+          fs.writeFileSync(path.join(co, `${name}.txt`), `${cm.trigger}, ${cm.base}, ${cap}\n`);
+          k++;
+        }
+        console.log(`캐릭터 ${cm.name ?? id} ${k}장 → art/dataset/character/${id}/`);
+      }
       break;
     }
     default:
