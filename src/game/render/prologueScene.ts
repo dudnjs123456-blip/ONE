@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { pixelRatioFor } from './graphics';
 import { mulberry32 } from '../core/controllers';
 import { smooth, type FrameClock } from './clock';
@@ -85,10 +84,15 @@ export class PrologueRenderer {
     const n = 160;
     const pos = new Float32Array(n * 3);
     const rng = mulberry32(5);
-    for (let i = 0; i < n; i++) pos.set([(rng() - 0.5) * 2.0, rng() * 3.4, (rng() - 0.5) * 1.8], i * 3);
+    // 몸 윤곽(갑주·왕관)이 읽히게 몸 바깥쪽 둘레로만, 옅게 솟는다
+    for (let i = 0; i < n; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = 0.9 + rng() * 0.8;
+      pos.set([Math.sin(a) * r, rng() * 3.4, Math.cos(a) * r * 0.8], i * 3);
+    }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.aura = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x030106, size: 1.15, map: softDot(), transparent: true, opacity: 0.42, depthWrite: false }));
+    this.aura = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x030106, size: 0.8, map: softDot(), transparent: true, opacity: 0.24, depthWrite: false }));
     this.aura.visible = false;
     this.scene.add(this.player.root, this.beast.root, this.beastPlate.sprite, this.aura);
 
@@ -363,7 +367,6 @@ export class PrologueRenderer {
     const q = new THREE.Quaternion();
     const v = new THREE.Vector3();
     const sc = new THREE.Vector3();
-    const e = new THREE.Euler();
     /** 길 한가운데 선까지 거리 */
     const pathDist = (x: number, z: number) => {
       let best = Infinity;
@@ -413,230 +416,136 @@ export class PrologueRenderer {
     ground.receiveShadow = true;
     s.add(ground);
 
-    // 길가 자갈
-    const pebbleGeo = new THREE.DodecahedronGeometry(0.09, 0);
-    const pebbles: THREE.Matrix4[] = [];
-    while (pebbles.length < 420) {
-      const x = (rng() - 0.5) * 20;
-      const z = 6 - rng() * (6 - CLIFF_Z - 1);
-      const pd = pathDist(x, z);
-      if (pd > PATH_HALF + 0.9 || pd < PATH_HALF - 0.9) continue;
-      e.set(rng() * 3, rng() * 3, rng() * 3);
-      const r = 0.6 + rng() * 1.6;
-      pebbles.push(new THREE.Matrix4().compose(v.set(x, 0.03, z), q.setFromEuler(e), sc.set(r, r * 0.6, r)));
-    }
-    s.add(instanced(pebbleGeo, new THREE.MeshStandardMaterial({ color: 0x4a4c55, roughness: 0.95 }), pebbles, false, true));
-
-    // 침엽수: 층층이 쌓인 뾰족한 잎 덩어리 (컷신의 안개 속 전나무). 두 가지 모양을 섞는다
-    const pine = (tiers: number, wide: number) => {
-      const parts: THREE.BufferGeometry[] = [];
-      for (let i = 0; i < tiers; i++) {
-        const u = i / tiers;
-        const r = wide * (1 - u * 0.72);
-        const g = new THREE.ConeGeometry(r, 1.5 - u * 0.4, 8, 1);
-        const pa = g.attributes.position as THREE.BufferAttribute;
-        // 아래 가장자리를 들쭉날쭉하게 (가지 끝처럼)
-        for (let j = 0; j < pa.count; j++) {
-          if (pa.getY(j) < 0) {
-            const w = 1 + (rng() - 0.5) * 0.35;
-            pa.setX(j, pa.getX(j) * w);
-            pa.setZ(j, pa.getZ(j) * w);
-            pa.setY(j, pa.getY(j) - rng() * 0.15);
-          }
-        }
-        g.translate(0, 1.6 + i * 0.95, 0);
-        parts.push(g.toNonIndexed());
-      }
-      const m = mergeGeometries(parts)!;
-      m.computeVertexNormals();
-      for (const p of parts) p.dispose();
-      return m;
+    // 나무: Firefly 로 그린 전나무·소나무·마른 나무 그림을 세운 판 (늘 카메라 쪽으로 돌아선다).
+    // 도형을 이어 붙인 나무 대신, 배경 그림과 같은 붓질의 나무가 안개 속에 겹겹이 선다.
+    const TREES = [
+      { url: "/prologue/trees/tree-1.webp", aspect: 441 / 1024, h: [8, 12], w: 3 },
+      { url: "/prologue/trees/tree-2.webp", aspect: 382 / 1024, h: [8, 12], w: 3 },
+      { url: "/prologue/trees/tree-3.webp", aspect: 266 / 1024, h: [9, 13], w: 1.2 },
+      { url: "/prologue/trees/tree-4.webp", aspect: 440 / 1024, h: [7, 11], w: 3 },
+      { url: "/prologue/trees/tree-5.webp", aspect: 342 / 1024, h: [5, 7], w: 0 },
+    ];
+    const totalW = TREES.reduce((a, t) => a + t.w, 0);
+    const pickTree = () => {
+      let r = rng() * totalW;
+      for (let i = 0; i < TREES.length; i++) if ((r -= TREES[i].w) <= 0) return i;
+      return 0;
     };
-    const pineA = pine(5, 1.25);
-    const pineB = pine(4, 1.0);
-    const trunkGeo = new THREE.CylinderGeometry(0.1, 0.24, 2.6, 7);
-    trunkGeo.translate(0, 1.3, 0);
-    const needleMat = new THREE.MeshStandardMaterial({ color: 0x1a3135, roughness: 0.95, flatShading: true });
-    const needleFar = new THREE.MeshStandardMaterial({ color: 0x172631, roughness: 1, flatShading: true });
-    const barkMat = new THREE.MeshStandardMaterial({ color: 0x1c1618, roughness: 1 });
-    const near: { a: THREE.Matrix4[]; b: THREE.Matrix4[]; t: THREE.Matrix4[] } = { a: [], b: [], t: [] };
-    const far: { a: THREE.Matrix4[]; t: THREE.Matrix4[] } = { a: [], t: [] };
+    const lists: { near: THREE.Matrix4[]; far: THREE.Matrix4[] }[] = TREES.map(() => ({ near: [], far: [] }));
+    const placeTree = (i: number, x: number, z: number, h: number, far: boolean) => {
+      const w = h * TREES[i].aspect * (rng() < 0.5 ? -1 : 1); // 좌우를 뒤집어 같은 그림이 덜 겹쳐 보이게
+      (far ? lists[i].far : lists[i].near).push(new THREE.Matrix4().compose(v.set(x, bump(x, z) - h * 0.015, z), q.identity(), sc.set(w, h, 1)));
+    };
     let tries = 0;
-    while (near.a.length + near.b.length < 230 && tries++ < 5000) {
+    let nearCount = 0;
+    while (nearCount < 210 && tries++ < 5000) {
       const x = (rng() - 0.5) * 44;
       const z = 12 - rng() * (12 - CLIFF_Z - 2);
-      if (nearPath(x, z, 3.4) || z < CLIFF_Z + 2) continue;
-      const k = 0.8 + rng() * 0.9;
-      const h = k * (0.9 + rng() * 0.5);
-      const y = bump(x, z) - 0.05;
-      const m = new THREE.Matrix4().compose(v.set(x, y, z), q.setFromEuler(e.set((rng() - 0.5) * 0.06, rng() * 6, (rng() - 0.5) * 0.06)), sc.set(k, h, k));
-      (rng() < 0.55 ? near.a : near.b).push(m);
-      near.t.push(m.clone());
+      if (nearPath(x, z, 3.0) || z < CLIFF_Z + 2) continue;
+      const i = pickTree();
+      const [h0, h1] = TREES[i].h;
+      placeTree(i, x, z, h0 + rng() * (h1 - h0), false);
+      nearCount++;
     }
-    // 멀리 겹겹이 선 숲 (길에서 먼 양옆과 등 뒤): 크고 짙어 안개 속 실루엣이 된다
-    while (far.a.length < 160) {
+    // 멀리 겹겹이 선 숲 (길에서 먼 양옆과 등 뒤): 안개에 묻혀 실루엣이 된다
+    for (let n = 0; n < 200; n++) {
+      const back = n >= 160;
       const side = rng() < 0.5 ? -1 : 1;
-      const x = side * (22 + rng() * 22);
-      const z = 16 - rng() * (16 - CLIFF_Z - 3);
-      const k = 1.5 + rng() * 1.2;
-      const m = new THREE.Matrix4().compose(v.set(x, bump(x, z), z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k * (1.1 + rng() * 0.5), k));
-      far.a.push(m);
-      far.t.push(m.clone());
+      const x = back ? (rng() - 0.5) * 50 : side * (22 + rng() * 22);
+      const z = back ? 13 + rng() * 10 : 16 - rng() * (16 - CLIFF_Z - 3);
+      const i = pickTree();
+      const [h0, h1] = TREES[i].h;
+      placeTree(i, x, z, (h0 + rng() * (h1 - h0)) * 1.25, true);
     }
-    for (let i = 0; i < 40; i++) {
-      const x = (rng() - 0.5) * 50;
-      const z = 13 + rng() * 10;
-      const k = 1.4 + rng();
-      const m = new THREE.Matrix4().compose(v.set(x, 0, z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k * 1.3, k));
-      far.a.push(m);
-      far.t.push(m.clone());
-    }
-    s.add(
-      instanced(pineA, needleMat, near.a, true, false),
-      instanced(pineB, needleMat, near.b, true, false),
-      instanced(trunkGeo, barkMat, near.t, true, false),
-      instanced(pineA, needleFar, far.a, false, false),
-      instanced(trunkGeo, barkMat, far.t, false, false),
-    );
+    // 마른 나무: 길가 몇 그루와 벼랑 끝 한 그루 (이 숲이 어딘가 이상하다는 느낌)
+    for (const [x, z, h] of [[-4.2, -3, 5.5], [5, -12, 6.5], [-6, -20, 6], [6.5, -29, 7], [-5.5, -36, 5.5], [-4, CLIFF_Z + 1.3, 6.5]] as const) placeTree(4, x, z, h, false);
+    TREES.forEach((t, i) => {
+      const tex = new THREE.TextureLoader().load(t.url);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 4;
+      const near = billboardMaterial(tex, 0xd8e2ec);
+      const far = billboardMaterial(tex, 0x8fa0b4);
+      for (const [list, mat] of [[lists[i].near, near], [lists[i].far, far]] as const) {
+        if (!list.length) continue;
+        const g = new THREE.PlaneGeometry(1, 1);
+        g.translate(0, 0.5, 0);
+        const m = new THREE.InstancedMesh(g, mat, list.length);
+        list.forEach((mx, k) => m.setMatrixAt(k, mx));
+        m.frustumCulled = false;
+        s.add(m);
+      }
+    });
 
-    // 마른 나무: 잎 없이 뒤틀린 가지 (길가 몇 그루 · 벼랑 끝 한 그루). 이 숲이 어딘가 이상하다는 느낌
-    const deadMat = new THREE.MeshStandardMaterial({ color: 0x241d22, roughness: 1 });
-    const deadTree = (x: number, z: number, k: number, seed: number) => {
-      const r2 = mulberry32(seed);
-      const parts: THREE.BufferGeometry[] = [];
-      const grow = (m: THREE.Matrix4, l: number, r: number, d: number) => {
-        const g = new THREE.CylinderGeometry(r * 0.65, r, l, 6);
-        g.translate(0, l / 2, 0);
-        g.applyMatrix4(m);
-        parts.push(g);
-        if (d <= 0) return;
-        const top = new THREE.Matrix4().multiplyMatrices(m, new THREE.Matrix4().makeTranslation(0, l, 0));
-        const n = d > 2 ? 2 : 2 + Math.floor(r2() * 2);
-        for (let i = 0; i < n; i++) {
-          const rot = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((r2() - 0.5) * 1.4, r2() * 6, (r2() - 0.5) * 1.4));
-          grow(new THREE.Matrix4().multiplyMatrices(top, rot), l * (0.55 + r2() * 0.2), r * 0.6, d - 1);
-        }
-      };
-      grow(new THREE.Matrix4().makeRotationZ((r2() - 0.5) * 0.2), 2.2, 0.2, 4);
-      const g = mergeGeometries(parts.map((p) => p.toNonIndexed()))!;
-      for (const p of parts) p.dispose();
-      const t = new THREE.Mesh(g, deadMat);
-      t.position.set(x, bump(x, z), z);
-      t.scale.setScalar(k);
-      t.castShadow = true;
-      s.add(t);
+    // 숲 바닥: 덤불 · 고사리 · 풀포기 · 이끼 바위 · 쓰러진 통나무 · 빛나는 버섯.
+    // 나무처럼 Firefly 로 그린 그림을 세운 판이라 배경과 붓질이 이어진다 (길 한가운데는 비운다)
+    const PROPS = {
+      bush: [["bush-1", 512 / 384], ["bush-2", 512 / 376], ["bush-3", 512 / 414], ["bush-4", 512 / 440]],
+      fern: [["fern-1", 512 / 389], ["fern-2", 512 / 396]],
+      grass: [["grass-1", 512 / 394], ["grass-2", 508 / 448]],
+      rock: [["rock-1", 490 / 454], ["rock-2", 504 / 425]],
+      log: [["log", 512 / 270]],
+      mush: [["mush", 328 / 225]],
+    } as const;
+    const cardLists = new Map<string, { aspect: number; list: THREE.Matrix4[]; tint: number; fog: boolean }>();
+    const card = (name: string, aspect: number, x: number, z: number, h: number, tint = 0xd0dae6, fog = true) => {
+      let e2 = cardLists.get(name);
+      if (!e2) cardLists.set(name, (e2 = { aspect, list: [], tint, fog }));
+      const w = h * aspect * (rng() < 0.5 ? -1 : 1);
+      e2.list.push(new THREE.Matrix4().compose(v.set(x, bump(x, z) - h * 0.04, z), q.identity(), sc.set(w, h, 1)));
     };
-    for (const [x, z, k, seed] of [[-4.2, -3, 1, 3], [5, -12, 1.2, 5], [-6, -20, 1.1, 8], [6.5, -29, 1.3, 11], [-5.5, -36, 1, 14], [-4, CLIFF_Z + 1.3, 1.25, 21]] as const) deadTree(x, z, k, seed);
-
-    // 덤불 · 고사리 · 풀포기: 숲 바닥을 채운다 (길 한가운데는 비운다)
-    const bushGeo = new THREE.IcosahedronGeometry(0.6, 1);
-    const fernGeo = (() => {
-      const parts: THREE.BufferGeometry[] = [];
-      for (let i = 0; i < 6; i++) {
-        const leafG = new THREE.ConeGeometry(0.12, 0.8, 4, 1);
-        leafG.translate(0, 0.4, 0);
-        leafG.scale(1, 1, 0.25);
-        leafG.rotateX(1.05);
-        leafG.rotateY((i / 6) * Math.PI * 2);
-        parts.push(leafG.toNonIndexed());
-      }
-      return mergeGeometries(parts)!;
-    })();
-    const grassGeo = (() => {
-      const parts: THREE.BufferGeometry[] = [];
-      for (let i = 0; i < 5; i++) {
-        const b = new THREE.ConeGeometry(0.025, 0.38 + (i % 3) * 0.1, 3, 1);
-        b.translate((i - 2) * 0.04, 0.19, ((i * 7) % 5 - 2) * 0.03);
-        b.rotateZ((i - 2) * 0.18);
-        parts.push(b.toNonIndexed());
-      }
-      return mergeGeometries(parts)!;
-    })();
-    const scatter = (count: number, pad: number, spread: number, make: (x: number, z: number) => THREE.Matrix4) => {
-      const out: THREE.Matrix4[] = [];
+    const scatter = (count: number, pad: number, spread: number, put: (x: number, z: number) => void) => {
+      let made = 0;
       let n = 0;
-      while (out.length < count && n++ < count * 20) {
+      while (made < count && n++ < count * 20) {
         const x = (rng() - 0.5) * spread;
         const z = 10 - rng() * (10 - CLIFF_Z - 0.6);
         if (nearPath(x, z, pad) || z < CLIFF_Z + 0.6) continue;
-        out.push(make(x, z));
+        put(x, z);
+        made++;
       }
-      return out;
     };
-    const bushes = scatter(170, 0.6, 40, (x, z) => {
-      const k = 0.6 + rng() * 0.9;
-      return new THREE.Matrix4().compose(v.set(x, bump(x, z) + 0.15 * k, z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k * 1.3, k * 0.8, k * 1.2));
-    });
-    const ferns = scatter(320, 0.15, 34, (x, z) => {
-      const k = 0.7 + rng() * 0.8;
-      return new THREE.Matrix4().compose(v.set(x, bump(x, z), z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k * (0.8 + rng() * 0.5), k));
-    });
-    const grass = scatter(1600, -0.4, 30, (x, z) => {
-      const k = 0.7 + rng() * 0.9;
-      return new THREE.Matrix4().compose(v.set(x, bump(x, z), z), q.setFromEuler(e.set(0, rng() * 6, 0)), sc.set(k, k, k));
-    });
-    s.add(
-      instanced(bushGeo, new THREE.MeshStandardMaterial({ color: 0x1b2b2a, roughness: 1, flatShading: true }), bushes, true, true),
-      instanced(fernGeo, new THREE.MeshStandardMaterial({ color: 0x24403a, roughness: 1, side: THREE.DoubleSide }), ferns, false, true),
-      instanced(grassGeo, new THREE.MeshStandardMaterial({ color: 0x2d4638, roughness: 1 }), grass, false, true),
-    );
-
-    // 이끼 낀 바위와 쓰러진 통나무
-    const stoneGeo = new THREE.DodecahedronGeometry(0.5, 1);
-    const stones = scatter(70, 0.4, 36, (x, z) => {
-      const k = 0.5 + rng() * 1.3;
-      return new THREE.Matrix4().compose(v.set(x, bump(x, z) + 0.1 * k, z), q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3)), sc.set(k, k * (0.5 + rng() * 0.4), k * (0.8 + rng() * 0.4)));
-    });
-    s.add(instanced(stoneGeo, new THREE.MeshStandardMaterial({ color: 0x353c42, roughness: 1, flatShading: true }), stones, true, true));
-    const logGeo = new THREE.CylinderGeometry(0.28, 0.32, 4, 9);
-    logGeo.rotateZ(Math.PI / 2);
-    const logs = scatter(9, 1.5, 26, (x, z) => new THREE.Matrix4().compose(v.set(x, bump(x, z) + 0.26, z), q.setFromEuler(e.set(0, rng() * 6, (rng() - 0.5) * 0.1)), sc.set(0.7 + rng() * 0.6, 1, 1)));
-    s.add(instanced(logGeo, barkMat, logs, true, true));
-
-    // 희미하게 빛나는 버섯 무리 (불을 켜지 않고 스스로 빛나 보이게): 길가 군데군데
-    const capGeo = new THREE.SphereGeometry(0.07, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2);
-    const stemGeo = new THREE.CylinderGeometry(0.015, 0.02, 0.1, 5);
-    stemGeo.translate(0, -0.05, 0);
-    const caps: THREE.Matrix4[] = [];
+    const pick = <T,>(a: readonly T[]) => a[Math.floor(rng() * a.length)];
+    scatter(170, 0.7, 40, (x, z) => { const [n, a] = pick(PROPS.bush); card(n, a, x, z, 0.9 + rng() * 0.8); });
+    scatter(220, 0.3, 34, (x, z) => { const [n, a] = pick(PROPS.fern); card(n, a, x, z, 0.7 + rng() * 0.6); });
+    scatter(700, -0.3, 30, (x, z) => { const [n, a] = pick(PROPS.grass); card(n, a, x, z, 0.4 + rng() * 0.45); });
+    scatter(60, 0.5, 36, (x, z) => { const [n, a] = pick(PROPS.rock); card(n, a, x, z, 0.5 + rng() * 0.9, 0xc4ccd6); });
+    // 길가 자갈: 길 가장자리를 따라 작은 바위 그림
+    for (let n = 0, made = 0; made < 150 && n < 4000; n++) {
+      const x = (rng() - 0.5) * 20;
+      const z = 6 - rng() * (6 - CLIFF_Z - 1);
+      const pd = pathDist(x, z);
+      if (pd > PATH_HALF + 0.9 || pd < PATH_HALF - 0.5) continue;
+      const [nm, ar] = pick(PROPS.rock);
+      card(nm, ar, x, z, 0.12 + rng() * 0.2, 0xa8b0bc);
+      made++;
+    }
+    scatter(9, 1.5, 26, (x, z) => { const [n, a] = PROPS.log[0]; card(n, a, x, z, 0.55 + rng() * 0.25); });
+    // 희미하게 빛나는 버섯 무리: 길가 군데군데 (안개를 받지 않아 스스로 빛나 보인다)
     for (let i = 0; i < 22; i++) {
-      let x = 0;
-      let z = 0;
       for (let n = 0; n < 40; n++) {
-        x = (rng() - 0.5) * 14;
-        z = 4 - rng() * (4 - CLIFF_Z - 3);
+        const x = (rng() - 0.5) * 14;
+        const z = 4 - rng() * (4 - CLIFF_Z - 3);
         const pd = pathDist(x, z);
-        if (pd > PATH_HALF + 0.6 && pd < PATH_HALF + 3) break;
-      }
-      for (let j = 0; j < 3 + Math.floor(rng() * 4); j++) {
-        const k = 0.6 + rng() * 1.2;
-        const xx = x + (rng() - 0.5) * 0.5;
-        const zz = z + (rng() - 0.5) * 0.5;
-        caps.push(new THREE.Matrix4().compose(v.set(xx, bump(xx, zz) + 0.1 * k, zz), q.setFromEuler(e.set((rng() - 0.5) * 0.3, 0, (rng() - 0.5) * 0.3)), sc.set(k, k, k)));
+        if (pd > PATH_HALF + 0.6 && pd < PATH_HALF + 3) {
+          const [nm, a] = PROPS.mush[0];
+          card(nm, a, x, z, 0.3 + rng() * 0.25, 0xffffff, false);
+          break;
+        }
       }
     }
-    const capMat = new THREE.MeshStandardMaterial({ color: 0x5fe0e8, emissive: 0x2ad0e0, emissiveIntensity: 1.2, roughness: 0.5 });
-    s.add(instanced(capGeo, capMat, caps, false, false), instanced(stemGeo, new THREE.MeshStandardMaterial({ color: 0x9fd8d8, emissive: 0x206068, roughness: 0.8 }), caps.map((m) => m.clone()), false, false));
-    this.ambient.push((t) => {
-      capMat.emissiveIntensity = 1.0 + Math.sin(t * 1.3) * 0.3;
-    });
-
-    // 숲속에 떠 있는 희미한 수정 (이 세계가 이상하다는 표시)
-    const crystal = new THREE.MeshStandardMaterial({ color: 0x9b7cff, emissive: 0x5a2cff, emissiveIntensity: 1.1, roughness: 0.3 });
-    const crystals: THREE.Mesh[] = [];
-    for (const [x, z] of [[-5, -6], [5.5, -16], [-5.5, -25], [6, -33], [-5, -41]] as const) {
-      const cm = new THREE.Mesh(new THREE.OctahedronGeometry(0.35, 0), crystal);
-      cm.scale.y = 2;
-      cm.position.set(x, 1.4, z);
-      s.add(cm);
-      crystals.push(cm);
-      const l = new THREE.PointLight(0x8a5cff, 3, 7, 2);
-      l.position.set(x, 1.6, z);
-      s.add(l);
+    for (const [name, c2] of cardLists) {
+      const tex = new THREE.TextureLoader().load(`/prologue/props/${name}.webp`);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 4;
+      const mat = billboardMaterial(tex, c2.tint);
+      mat.fog = c2.fog;
+      const g = new THREE.PlaneGeometry(1, 1);
+      g.translate(0, 0.5, 0);
+      const m = new THREE.InstancedMesh(g, mat, c2.list.length);
+      c2.list.forEach((mx, k) => m.setMatrixAt(k, mx));
+      m.frustumCulled = false;
+      s.add(m);
     }
-    this.ambient.push((t) => crystals.forEach((cm, i) => {
-      cm.position.y = 1.4 + Math.sin(t * 0.9 + i) * 0.12;
-      cm.rotation.y = t * 0.4 + i;
-    }));
 
     // 달빛 줄기: 나무 사이로 비스듬히 내리는 희미한 빛
     const rayTex = rayTexture();
@@ -847,6 +756,31 @@ function instanced(geo: THREE.BufferGeometry, mat: THREE.Material, list: THREE.M
 }
 
 /** 하늘: 위는 짙은 남색, 지평선 쪽은 안개 색으로 (안개에 묻힌 먼 숲과 이어지게) */
+/**
+ * 세운 그림판 재질: 판 아래 가운데를 축으로 늘 카메라 쪽으로 돌아선다 (위아래는 세운 채).
+ * 인스턴스 행렬에서 위치와 가로·세로 크기만 쓴다. 투명한 가장자리는 잘라 내 깊이 정렬 문제가 없게.
+ */
+function billboardMaterial(tex: THREE.Texture, tint: number) {
+  const m = new THREE.MeshBasicMaterial({ map: tex, color: tint, alphaTest: 0.45, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace(
+      "#include <project_vertex>",
+      `vec4 bbBase = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+      float bbW = instanceMatrix[0].x;
+      float bbH = length(instanceMatrix[1].xyz);
+      vec3 bbTo = cameraPosition - bbBase.xyz;
+      bbTo.y = 0.0;
+      bbTo = normalize(bbTo + vec3(1e-5, 0.0, 0.0));
+      vec3 bbRight = vec3(bbTo.z, 0.0, -bbTo.x);
+      vec3 bbWorld = bbBase.xyz + bbRight * transformed.x * bbW + vec3(0.0, transformed.y * bbH, 0.0);
+      vec4 mvPosition = viewMatrix * vec4(bbWorld, 1.0);
+      gl_Position = projectionMatrix * mvPosition;`,
+    );
+  };
+  m.customProgramCacheKey = () => "billboard";
+  return m;
+}
+
 function skyTexture(): THREE.Texture {
   const cv = document.createElement('canvas');
   cv.width = 4;
