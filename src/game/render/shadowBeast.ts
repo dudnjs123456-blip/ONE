@@ -30,12 +30,9 @@ export class ShadowBeast implements CharacterView {
   private card = new THREE.Group();
   private planes: THREE.Mesh[] = [];
   private planeMats: THREE.MeshStandardMaterial[] = [];
-  private tex: Record<View, { map: THREE.Texture; height: THREE.Texture; normal: THREE.Texture }>;
+  private tex: Record<View, { map: THREE.Texture; height: THREE.Texture; normal: THREE.Texture; glow: THREE.Texture }>;
   private depthMats: THREE.MeshDepthMaterial[] = [];
   private head: THREE.Bone;
-  private eyeGlow: THREE.Sprite[] = [];
-  private heartGlow: THREE.Sprite;
-  private eyeLight: THREE.PointLight;
   private heartLight: THREE.PointLight;
   private mats: THREE.Material[] = [];
   private geos: THREE.BufferGeometry[] = [];
@@ -49,6 +46,7 @@ export class ShadowBeast implements CharacterView {
   private flick = 1;
   private beat = 0;
   private skirt: { s: THREE.Sprite; a: number; r: number; y: number; sc: number; ph: number }[] = [];
+  private veil: { s: THREE.Sprite; a: number; r: number; y: number; sc: number; sp: number; ph: number }[] = [];
   private wisps: { s: THREE.Sprite; mat: THREE.SpriteMaterial; life: number; dur: number; drift: number; ox: number; oy: number }[] = [];
 
   constructor() {
@@ -65,7 +63,7 @@ export class ShadowBeast implements CharacterView {
     };
     const set = (v: View) => {
       const base = VIEWS[v].url.replace('.webp', '');
-      return { map: load(VIEWS[v].url, true), height: load(base + '-height.webp', false), normal: load(base + '-normal.webp', false) };
+      return { map: load(VIEWS[v].url, true), height: load(base + '-height.webp', false), normal: load(base + '-normal.webp', false), glow: load(base + '-glow.webp', true) };
     };
     this.tex = { front: set('front'), side: set('side'), back: set('back') };
 
@@ -90,11 +88,12 @@ export class ShadowBeast implements CharacterView {
         displacementScale: THICK,
         normalMap: t.normal,
         normalScale: new THREE.Vector2(1.1, 1.1),
-        // 그림에 이미 칠해진 명암은 살리고(자체 발광), 그 위에 숲의 빛이 더해진다
-        emissiveMap: t.map,
+        // 스스로 빛나는 건 그림에 칠해진 붉은 눈 · 눈가 줄기 · 이마 보석 · 심장뿐 (발광 지도).
+        // 몸은 숲의 달빛 · 하늘빛만 받아서 주변 나무와 같은 밝기 · 안개 속에 녹아든다
+        emissiveMap: t.glow,
         emissive: 0xffffff,
-        emissiveIntensity: 0.42,
-        color: 0xb8b6c4,
+        emissiveIntensity: 1.6,
+        color: 0xc4c2d0,
         roughness: 0.78,
         metalness: 0.05,
         transparent: true,
@@ -138,24 +137,21 @@ export class ShadowBeast implements CharacterView {
     this.head.position.set(0, HEIGHT * (1 - 0.19), 0);
     this.body.add(this.head);
 
-    const glowTex = glowTexture();
-    const glow = (s: number, color: number, op: number) => {
-      const g = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-      this.mats.push(g.material);
-      g.scale.setScalar(s);
-      g.renderOrder = 5;
-      this.card.add(g);
-      return g;
-    };
-    for (let i = 0; i < 2; i++) this.eyeGlow.push(glow(0.16, 0xff2a3a, 0.8));
-    this.heartGlow = glow(0.3, 0xff2236, 0.5);
-
-    this.eyeLight = new THREE.PointLight(0xff2a3a, 1.0, 5, 2);
-    this.eyeLight.position.set(0, HEIGHT * 0.82, 2.6);
-    this.body.add(this.eyeLight);
-    this.heartLight = new THREE.PointLight(0xff2a3a, 0.3, 3, 2);
-    this.heartLight.position.set(0, HEIGHT * 0.68, 2.2);
+    // 심장 빛이 둘레 땅 · 연기를 아주 희미하게 붉게 물들인다 (얼굴 앞에 따로 빛 덩어리를 띄우지 않는다)
+    this.heartLight = new THREE.PointLight(0xff2a3a, 0.3, 3.5, 2);
+    this.heartLight.position.set(0, HEIGHT * 0.62, 0.9);
     this.body.add(this.heartLight);
+
+    // 몸을 감싸고 도는 연기 장막: 몸 앞뒤 · 여러 높이에 떠서, 돌아보면 몸 앞을 지나갔다 뒤로 숨는다.
+    // 그림 한 장이 아니라 연기 덩어리 속에 서 있는 것처럼 보이게 (숲 안개 색과 같은 어두운 남빛)
+    const veilTex = smokeTexture();
+    for (let i = 0; i < 16; i++) {
+      const mat = new THREE.SpriteMaterial({ map: veilTex, color: 0x0b0e15, transparent: true, opacity: 0.16 + rng() * 0.14, depthWrite: false });
+      this.mats.push(mat);
+      const s = new THREE.Sprite(mat);
+      this.body.add(s);
+      this.veil.push({ s, a: (i / 16) * Math.PI * 2 + rng() * 0.4, r: 0.45 + rng() * 0.4, y: 0.4 + rng() * HEIGHT * 0.62, sc: 0.8 + rng() * 0.7, sp: (rng() < 0.5 ? -1 : 1) * (0.15 + rng() * 0.2), ph: rng() * 6.28 });
+    }
 
     // 바닥을 맴도는 연기 (그림 끝자락을 땅에 녹인다)
     const smokeTex = smokeTexture();
@@ -238,7 +234,7 @@ export class ShadowBeast implements CharacterView {
       const tx = this.tex[v];
       if (m.map !== tx.map) {
         m.map = tx.map;
-        m.emissiveMap = tx.map;
+        m.emissiveMap = tx.glow;
         m.displacementMap = tx.height;
         m.normalMap = tx.normal;
         const dm = this.depthMats[i];
@@ -257,28 +253,6 @@ export class ShadowBeast implements CharacterView {
     // 크로스페이드: 아래 그림은 다 보이다가 위 그림이 다 덮은 뒤에야 빠진다 (중간에 비쳐 보이지 않게)
     show(0, main, t < 0.5 ? 1 : 1 - (t - 0.5) * 2);
     show(1, next, t < 0.5 ? t * 2 : 1);
-    // 빛: 더 많이 보이는 그림의 눈 · 심장 자리에
-    const v = t < 0.5 ? main : next;
-    const info = VIEWS[v];
-    const sx = v === 'side' ? flip : 1;
-    const w = HEIGHT * info.aspect;
-    const pa = angOf(v);
-    const at = (u: number, vv: number, o: THREE.Object3D) => {
-      const x = (u - 0.5) * w * sx;
-      const z = THICK * 0.8 + 0.05;
-      o.position.set(x * Math.cos(pa) + z * Math.sin(pa), HEIGHT * (1 - vv), -x * Math.sin(pa) + z * Math.cos(pa));
-    };
-    this.eyeGlow.forEach((g, i) => {
-      const e = info.eyes[i];
-      if (e) at(e[0], e[1], g);
-      g.material.opacity = e ? 0.85 * this.flick : 0;
-    });
-    this.heartGlow.material.opacity = 0;
-    if (info.heart) {
-      at(info.heart[0], info.heart[1], this.heartGlow);
-      this.heartGlow.material.opacity = 0.3 + this.beat * 0.35;
-      this.heartGlow.scale.setScalar(0.26 + this.beat * 0.1);
-    }
   }
 
   update(f: Fighter, c: FrameClock) {
@@ -313,7 +287,14 @@ export class ShadowBeast implements CharacterView {
 
     this.flick = 0.85 + Math.sin(t * 7.3) * 0.08 + Math.sin(t * 13.1) * 0.05;
     this.beat = Math.pow(Math.max(0, Math.sin(t * 2.6)), 6);
-    this.eyeLight.intensity = 1.0 * this.flick;
+    // 눈 · 심장 발광: 눈은 깜빡이듯 일렁이고 심장은 맥박에 맞춰 (한 발광 지도라 둘을 섞어 세기를 준다)
+    for (const m of this.planeMats) m.emissiveIntensity = 1.3 + (this.flick - 0.85) * 2 + this.beat * 0.7;
+    for (const vl of this.veil) {
+      const a = vl.a + t * vl.sp;
+      vl.s.position.set(Math.sin(a) * vl.r, vl.y + Math.sin(t * 0.6 + vl.ph) * 0.12, Math.cos(a) * vl.r * 0.7);
+      vl.s.scale.setScalar(vl.sc * (1 + Math.sin(t * 0.8 + vl.ph) * 0.12));
+      vl.s.material.rotation = vl.ph + t * 0.15;
+    }
     this.heartLight.intensity = 0.12 + this.beat * 0.18;
 
     for (const sm of this.skirt) {
@@ -348,22 +329,6 @@ export class ShadowBeast implements CharacterView {
       t.normal.dispose();
     }
   }
-}
-
-let glowTex: THREE.Texture | null = null;
-function glowTexture(): THREE.Texture {
-  if (glowTex) return glowTex;
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 64;
-  const g = cv.getContext('2d')!;
-  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gr.addColorStop(0, 'rgba(255,255,255,1)');
-  gr.addColorStop(0.25, 'rgba(255,255,255,0.5)');
-  gr.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = gr;
-  g.fillRect(0, 0, 64, 64);
-  glowTex = new THREE.CanvasTexture(cv);
-  return glowTex;
 }
 
 /** 연기 뭉치: 가운데가 짙고 가장자리가 구름처럼 울퉁불퉁하게 흐려지는 점 */
