@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { pixelRatioFor } from './graphics';
 import { mulberry32 } from '../core/controllers';
 import { smooth, type FrameClock } from './clock';
@@ -35,6 +39,8 @@ export class PrologueRenderer {
   private _pivot = new THREE.Vector3();
   private _rot = new THREE.Vector3();
   private aura: THREE.Points;
+  private composer: EffectComposer;
+  private bloom: UnrealBloomPass;
   private mist: THREE.Points;
   private sparks: SparkSystem;
   private texts: FloatingTexts;
@@ -52,6 +58,12 @@ export class PrologueRenderer {
     this.renderer.setPixelRatio(pixelRatioFor(this.renderer.getContext()));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // 빛 번짐: 붉은 눈·심장, 빛나는 버섯, 포자처럼 밝은 곳만 은은하게 번진다
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.7, 0.55, 0.78);
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
 
     // 컷신과 같은 색: 푸른 달빛 안개 숲 (먼 곳일수록 안개 색에 묻힌다)
     const fogColor = 0x1b2a3d;
@@ -159,6 +171,8 @@ export class PrologueRenderer {
 
   resize(width: number, height: number) {
     this.renderer.setSize(width, height, false);
+    this.composer.setPixelRatio(this.renderer.getPixelRatio());
+    this.composer.setSize(width, height);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.fov = this.camera.aspect < 1 ? 66 : 48;
     this.camera.updateProjectionMatrix();
@@ -233,7 +247,8 @@ export class PrologueRenderer {
 
     this.updateWind(world, clock);
     this.updateCamera(world, clock);
-    this.renderer.render(this.scene, this.camera);
+    if (world.beastOut) this.beast.aim(this.camera);
+    this.composer.render();
   }
 
   /** 떨어지는 동안: 몸 둘레로 위로 솟구치는 바람 줄기, 바람 소리, 땅에 처박히는 순간 흙먼지 */
@@ -340,8 +355,10 @@ export class PrologueRenderer {
       default:
         // 평소: 어깨 너머 낮은 자리에서 길 앞쪽 숲을 바라보는 추적 카메라 (안개 속 숲과 그린 배경이 보이게). 쫓길 땐 조금 더 멀리
         if (world.phase === 'chase') {
-          wantPos.set(p.x, 4, p.z + 7.6);
-          wantLook.set(p.x, 1.2, p.z - 5);
+          // 쫓길 땐 높이 · 옆으로 비켜서 본다: 뒤따라오는 그림자가 카메라 앞을 막아 내 몸을 가리지 않게
+          // (화면 아래쪽에 다가오는 그림자, 가운데에 달아나는 나, 그 앞에 길)
+          wantPos.set(p.x + 2.4, 6.4, p.z + 8.5);
+          wantLook.set(p.x - 0.3, 0.6, p.z - 4.5);
         } else {
           wantPos.set(p.x, 3.8, p.z + 7);
           wantLook.set(p.x, 1.3, p.z - 5);
@@ -713,6 +730,8 @@ export class PrologueRenderer {
   }
 
   dispose() {
+    this.composer.dispose();
+    this.bloom.dispose();
     this.sparks.dispose();
     this.texts.dispose();
     this.beastPlate.dispose();

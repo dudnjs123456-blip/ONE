@@ -5,316 +5,229 @@ import type { FrameClock } from './clock';
 import type { CharacterView } from './mannequin';
 
 /**
- * 프롤로그의 "이름 없는 그림자" 전용 모델.
- * 2D 컷신 속 모습(붉은 눈, 연기로 된 큰 사람 모양, 다리 대신 흩어지는 하반신)을 바탕으로
- * 더 위압적으로 다듬은 콘셉트 시트를 따른다:
- *  - 3m 가까운 키, 가슴을 편 꼿꼿한 자세, 넓은 V자 어깨와 가는 허리
- *  - 굳은 그림자로 된 날카로운 어깨 갑주
- *  - 머리 위로 타오르는 검은 연기 불꽃 왕관, 꼬리를 끄는 붉은 눈, 이마의 붉은 결정
- *  - 가슴 한가운데 금이 간 듯 새어 나오는 붉은 심장빛
- *  - 땅에 닿을 듯 긴 팔과 긴 갈퀴 손톱
- *  - 어깨에서 등 뒤로 흐르는 찢어진 연기 망토
- *  - 허리 아래는 다리 대신 바닥으로 넓게 퍼지며 소용돌이치는 연기 자락 (미끄러지듯 떠다닌다)
+ * 프롤로그의 "이름 없는 그림자" — 그림판 모델.
+ * 콘셉트 시트(Firefly)의 앞 · 옆 · 뒤 그림을 배경 없이 오려, 카메라가 보는 방향에 맞는 그림을 세워 보여 준다
+ * (방향이 바뀌는 사이는 두 그림을 겹쳐 부드럽게 넘긴다). 숲 나무와 같은 붓질이라 화면에서 따로 놀지 않는다.
+ * 그 위에 움직임을 얹는다: 미끄러지듯 떠 오르내림, 연기 하반신 · 왕관 불꽃의 일렁임(정점 셰이더),
+ * 깜빡이는 붉은 눈, 맥박처럼 뛰는 심장빛, 몸에서 피어올라 흩어지는 연기, 바닥을 맴도는 연기.
  * 원점 = 발밑(연기 자락 끝), 앞 = +z (다른 캐릭터와 같다).
  */
+type View = 'front' | 'side' | 'back';
+const VIEWS: Record<View, { url: string; aspect: number; eyes: [number, number][]; heart: [number, number] | null }> = {
+  // eyes · heart = 그림 안 위치 (가로 0~1 왼쪽부터, 세로 0~1 위부터)
+  front: { url: '/prologue/beast/beast-front.webp', aspect: 579 / 1024, eyes: [[0.458, 0.178], [0.545, 0.178]], heart: [0.515, 0.322] },
+  side: { url: '/prologue/beast/beast-side.webp', aspect: 404 / 1024, eyes: [[0.2, 0.172]], heart: [0.245, 0.33] },
+  back: { url: '/prologue/beast/beast-back.webp', aspect: 483 / 1024, eyes: [], heart: null },
+};
+const HEIGHT = 3.15;
+
 export class ShadowBeast implements CharacterView {
   readonly root = new THREE.Group();
   private body = new THREE.Group();
-  private spine = new THREE.Group();
-  private chest = new THREE.Group();
-  private neck: THREE.Bone;
+  /** 카메라를 향해 도는 판 (자식: 그림 두 장 + 빛) */
+  private card = new THREE.Group();
+  private planes: THREE.Mesh[] = [];
+  private planeMats: THREE.MeshBasicMaterial[] = [];
+  private tex: Record<View, THREE.Texture>;
   private head: THREE.Bone;
-  private arm: Record<'L' | 'R', { sh: THREE.Group; el: THREE.Group; hand: THREE.Group; fingers: THREE.Group[] }>;
-  /** 흔들리는 조각들: 망토 자락 · 하반신 연기 자락 · 왕관 불꽃 */
-  private sway: { g: THREE.Object3D; base: THREE.Euler; ph: number; amp: number; kind: 'cloak' | 'trail' | 'flame' }[] = [];
   private eyeGlow: THREE.Sprite[] = [];
   private heartGlow: THREE.Sprite;
-  private heartMat: THREE.MeshBasicMaterial;
-  private crackMat: THREE.MeshBasicMaterial;
   private eyeLight: THREE.PointLight;
   private heartLight: THREE.PointLight;
   private mats: THREE.Material[] = [];
   private geos: THREE.BufferGeometry[] = [];
+  private time = { value: 0 };
+  private hurtU = { value: 0 };
   private yaw = Math.PI;
   private speed = 0;
   private last: { x: number; z: number } | null = null;
   private atk = 0;
   private hurt = 0;
-  /** 바닥 쪽 연기 뭉치 (천천히 맴돈다) */
+  private flick = 1;
+  private beat = 0;
   private skirt: { s: THREE.Sprite; a: number; r: number; y: number; sc: number; ph: number }[] = [];
-  /** 왕관·어깨에서 피어올라 흩어지는 연기 가닥 */
-  private wisps: { s: THREE.Sprite; mat: THREE.SpriteMaterial; from: THREE.Object3D; ox: number; oz: number; life: number; dur: number; drift: number }[] = [];
+  private wisps: { s: THREE.Sprite; mat: THREE.SpriteMaterial; life: number; dur: number; drift: number; ox: number; oy: number }[] = [];
 
   constructor() {
     const rng = mulberry32(13);
-    const skin = this.shadowMat(0x0c0b10, 0x6a5878, 2.2, 1.0, 0.62);
-    const deep = this.shadowMat(0x030305, 0x3a2c48, 2.4, 0.8);
-    const plate = this.shadowMat(0x14121a, 0x9a7088, 1.8, 1.0, 0.35);
-    const strand = this.shadowMat(0x020203, 0x2e2238, 2.0, 0.7);
-    strand.side = THREE.DoubleSide;
-    const claw = new THREE.MeshStandardMaterial({ color: 0x15101a, roughness: 0.35, metalness: 0.3, emissive: 0x140306 });
-    this.mats.push(claw);
-    const red = (c: number, op = 1) => {
-      const m = new THREE.MeshBasicMaterial({ color: c, fog: false, transparent: op < 1, opacity: op, depthWrite: op >= 1 });
-      this.mats.push(m);
-      return m;
-    };
-    const glowTex = glowTexture();
-    const glow = (parent: THREE.Object3D, x: number, y: number, z: number, s: number, color: number, op: number, sx = 1) => {
-      const g = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
-      this.mats.push(g.material);
-      g.scale.set(s * sx, s, 1);
-      g.position.set(x, y, z);
-      parent.add(g);
-      return g;
-    };
-
     this.root.add(this.body);
-    // 허리 높이 (다리가 없어 이 아래는 전부 연기 자락)
-    this.body.position.y = 1.2;
-    this.body.add(this.spine);
+    this.body.add(this.card);
 
-    // ── 하반신: 바닥으로 넓게 퍼지는 연기 자락 ──
-    // 허리에서 아래로 갈수록 벌어지는 속이 빈 깔때기 (자락들의 이음매를 감춘다)
-    const skirtProfile: THREE.Vector2[] = [];
-    for (let i = 0; i <= 12; i++) {
-      const k = i / 12; // 0 = 허리, 1 = 바닥
-      skirtProfile.push(new THREE.Vector2(0.26 + Math.pow(k, 1.8) * 0.62 + Math.sin(k * 9) * 0.03, -k * 1.2));
-    }
-    this.part(this.body, new THREE.LatheGeometry(skirtProfile, 20), this.shadowMat(0x010102, 0x18121f, 2.6, 0.5), [0, 0, 0], [1, 1, 0.85]);
-    // 찢어진 연기 자락: 허리 둘레에서 늘어져 바닥에 끌리며 흔들린다
-    for (let i = 0; i < 22; i++) {
-      const a = (i / 22) * Math.PI * 2 + rng() * 0.2;
-      // 바깥을 보게 돌린 뒤(y), 바깥쪽으로 벌어지며 늘어진다(x)
-      const turn = new THREE.Group();
-      turn.rotation.y = a;
-      this.body.add(turn);
-      const g = new THREE.Group();
-      g.position.set(0, 0.05, 0.22);
-      g.rotation.set(-0.5 - rng() * 0.15, 0, 0);
-      turn.add(g);
-      const len = 1.15 + rng() * 0.5;
-      this.part(g, ribbonGeometry(0.3 + rng() * 0.16, len, rng, 0.55), strand, [0, 0, 0], [1, 1, 1]);
-      this.sway.push({ g, base: g.rotation.clone(), ph: rng() * Math.PI * 2, amp: 0.14, kind: 'trail' });
-    }
+    const loader = new THREE.TextureLoader();
+    const load = (url: string) => {
+      const t = loader.load(url);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 4;
+      return t;
+    };
+    this.tex = { front: load(VIEWS.front.url), side: load(VIEWS.side.url), back: load(VIEWS.back.url) };
 
-    // ── 몸통: 넓은 가슴에서 가는 허리로 좁아지는 V자 ──
-    this.part(this.spine, new THREE.SphereGeometry(0.3, 16, 12), skin, [0, 0.15, 0], [1, 1.25, 0.8]);
-    this.part(this.spine, new THREE.CylinderGeometry(0.62, 0.3, 1.0, 14), skin, [0, 0.72, 0], [1, 1, 0.58]);
-    this.spine.add(this.chest);
-    this.chest.position.y = 1.2;
-    this.part(this.chest, new THREE.SphereGeometry(0.5, 18, 14), skin, [0, 0, 0.02], [1.38, 0.72, 0.66]);
-    // 가슴 근육 두 덩이 + 복근 결
-    for (const sx of [-1, 1]) this.part(this.chest, new THREE.SphereGeometry(0.26, 14, 10), skin, [sx * 0.22, -0.08, 0.2], [1.1, 0.75, 0.55]);
-    for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) this.part(this.spine, new THREE.SphereGeometry(0.09, 10, 8), deep, [sx * 0.09, 0.38 + i * 0.17, 0.2 - i * 0.01], [1.2, 0.8, 0.5]);
-    // 굳은 그림자 갑주: 가슴 위쪽으로 칼날 같은 판이 겹쳐 솟는다
-    for (const sx of [-1, 1]) {
-      for (let i = 0; i < 3; i++) {
-        const sh = this.part(this.chest, shardGeometry(0.09, 0.42 - i * 0.08), plate, [sx * (0.18 + i * 0.13), 0.16 + i * 0.02, 0.26 - i * 0.05], [1, 1, 0.5]);
-        sh.rotation.set(0.25, 0, sx * (0.5 + i * 0.25));
-      }
+    // 그림 두 장 (지금 방향 + 넘어가는 방향). 세로로 잘게 나눠 아래쪽 연기가 물결치게 한다
+    for (let i = 0; i < 2; i++) {
+      const g = new THREE.PlaneGeometry(1, 1, 6, 40);
+      g.translate(0, 0.5, 0);
+      this.geos.push(g);
+      const m = new THREE.MeshBasicMaterial({ map: this.tex.front, color: 0xa4a2b0, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+      m.onBeforeCompile = (sh) => {
+        sh.uniforms.uTime = this.time;
+        sh.uniforms.uHurt = this.hurtU;
+        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          // 하반신 연기: 아래로 갈수록 크게 물결친다 / 머리 위 불꽃: 끝이 살랑인다
+          float low = pow(max(0.0, 1.0 - uv.y / 0.5), 1.6);
+          transformed.x += (sin(uTime * 1.6 + uv.y * 11.0) * 0.035 + sin(uTime * 2.7 + uv.y * 23.0 + uv.x * 4.0) * 0.015) * low;
+          float top = smoothstep(0.86, 1.0, uv.y);
+          transformed.x += sin(uTime * 4.3 + uv.x * 9.0) * 0.012 * top;
+          transformed.y += sin(uTime * 3.1 + uv.x * 7.0) * 0.006 * top;`,
+        );
+        sh.fragmentShader = 'uniform float uHurt;\n' + sh.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          // 맞으면 잠깐 하얗게 번쩍
+          'gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), uHurt * 0.55 * gl_FragColor.a);\n#include <dithering_fragment>',
+        );
+      };
+      m.customProgramCacheKey = () => 'shadow-card';
+      this.mats.push(m);
+      this.planeMats.push(m);
+      const p = new THREE.Mesh(g, m);
+      p.renderOrder = 2 + i;
+      this.card.add(p);
+      this.planes.push(p);
     }
+    // 카메라마다(대사창 초상화 포함) 그 카메라를 향해 돌고, 보는 각도에 맞는 그림을 고른다
+    this.planes[0].onBeforeRender = (_r, _s, cam) => this.face(cam);
 
-    // 금이 간 가슴 한가운데서 새어 나오는 붉은 심장빛
-    this.heartMat = red(0xff2238);
-    this.part(this.chest, new THREE.OctahedronGeometry(0.05, 0), this.heartMat, [0, -0.05, 0.36], [1, 1.6, 0.6]);
-    this.crackMat = red(0xff3046, 0.7);
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + 0.3 + rng() * 0.6;
-      const len = 0.07 + rng() * 0.1;
-      const c = this.part(this.chest, new THREE.BoxGeometry(0.007, len, 0.008), this.crackMat, [Math.sin(a) * len * 0.55, -0.05 + Math.cos(a) * len * 0.55, 0.355], [1, 1, 1]);
-      c.rotation.z = -a;
-    }
-    this.heartGlow = glow(this.chest, 0, -0.05, 0.42, 0.4, 0xff2236, 0.8);
-    this.heartLight = new THREE.PointLight(0xff2a3a, 0.3, 3, 2);
-    this.heartLight.position.set(0, -0.05, 1.4);
-    this.chest.add(this.heartLight);
-
-    // 등 뒤로 비죽 솟은 척추 칼날
-    for (let i = 0; i < 4; i++) {
-      const s = this.part(this.spine, shardGeometry(0.07, 0.32 - i * 0.04), plate, [0, 1.25 - i * 0.22, -0.26 + i * 0.02], [0.6, 1, 1]);
-      s.rotation.x = -1.0;
-    }
-
-    // ── 목 · 머리 (뼈 이름을 head 로 둬서 대사창 초상화가 얼굴을 찾는다) ──
-    this.neck = new THREE.Bone();
-    this.neck.name = 'neck';
-    this.neck.position.set(0, 1.42, 0.02);
-    this.spine.add(this.neck);
-    this.part(this.neck, new THREE.CylinderGeometry(0.13, 0.22, 0.32, 10), skin, [0, 0.1, 0], [1, 1, 0.9]);
-    // 목덜미를 감싼 높은 깃 (갑주가 목 뒤로 솟는다)
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 4 - 0.5) * 2.2;
-      const s = this.part(this.neck, shardGeometry(0.08, 0.34 + (1 - Math.abs(a) / 1.1) * 0.1), plate, [Math.sin(a) * 0.24, 0.02, -Math.cos(a) * 0.16], [1, 1, 0.45]);
-      s.rotation.set(-0.35, a * 0.5, Math.sin(a) * -0.4);
-    }
+    // 뼈 이름 head: 대사창 초상화가 얼굴을 찾는다
     this.head = new THREE.Bone();
     this.head.name = 'head';
-    this.head.position.set(0, 0.36, 0.03);
-    this.neck.add(this.head);
-    // 갸름하고 각진 두개골 + 뾰족한 턱
-    this.part(this.head, new THREE.SphereGeometry(0.19, 16, 12), skin, [0, 0.05, 0], [0.92, 1.12, 1.0]);
-    const jaw = this.part(this.head, new THREE.ConeGeometry(0.13, 0.2, 8), skin, [0, -0.14, 0.04], [1, 1, 0.85]);
-    jaw.rotation.x = Math.PI;
-    // 눈두덩: 눈 위로 날카롭게 내리누르는 이마
-    for (const sx of [-1, 1]) {
-      const b = this.part(this.head, new THREE.BoxGeometry(0.15, 0.035, 0.06), deep, [sx * 0.07, 0.085, 0.165], [1, 1, 1]);
-      b.rotation.z = sx * 0.32;
-    }
-    // 이마의 붉은 결정
-    this.part(this.head, new THREE.OctahedronGeometry(0.03, 0), red(0xff2a3c), [0, 0.15, 0.18], [0.8, 1.6, 0.6]);
-    // 위로 째진 붉은 눈 + 옆으로 꼬리를 끄는 빛
-    const eyeMat = red(0xff3446);
-    for (const sx of [-1, 1]) {
-      const e = this.part(this.head, new THREE.SphereGeometry(0.03, 10, 8), eyeMat, [sx * 0.075, 0.045, 0.172], [1.9, 0.6, 0.6]);
-      e.rotation.z = sx * 0.3;
-      this.eyeGlow.push(glow(this.head, sx * 0.08, 0.045, 0.2, 0.26, 0xff2a3a, 0.9));
-      const trail = glow(this.head, sx * 0.2, 0.08, 0.15, 0.06, 0xff2236, 0.7, 5.5);
-      trail.material.rotation = sx * 0.28;
-      this.eyeGlow.push(trail);
-    }
-    // 눈빛이 둘레(내 얼굴, 나무)를 붉게 물들인다
+    this.head.position.set(0, HEIGHT * (1 - 0.19), 0);
+    this.body.add(this.head);
+
+    const glowTex = glowTexture();
+    const glow = (s: number, color: number, op: number) => {
+      const g = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      this.mats.push(g.material);
+      g.scale.setScalar(s);
+      g.renderOrder = 5;
+      this.card.add(g);
+      return g;
+    };
+    for (let i = 0; i < 2; i++) this.eyeGlow.push(glow(0.16, 0xff2a3a, 0.8));
+    this.heartGlow = glow(0.3, 0xff2236, 0.5);
+
     this.eyeLight = new THREE.PointLight(0xff2a3a, 1.0, 5, 2);
-    this.eyeLight.position.set(0, 0.1, 2.2);
-    this.head.add(this.eyeLight);
+    this.eyeLight.position.set(0, HEIGHT * 0.82, 1.6);
+    this.body.add(this.eyeLight);
+    this.heartLight = new THREE.PointLight(0xff2a3a, 0.3, 3, 2);
+    this.heartLight.position.set(0, HEIGHT * 0.68, 1.2);
+    this.body.add(this.heartLight);
 
-    // 검은 연기 불꽃 왕관: 머리 위로 높게 타오르며 일렁인다
-    for (let i = 0; i < 9; i++) {
-      const a = (i / 8 - 0.5) * 3.2;
-      const center = 1 - Math.abs(a) / 1.7;
-      const g = new THREE.Group();
-      g.position.set(Math.sin(a) * 0.15, 0.17, Math.cos(a) * 0.05 - 0.04);
-      g.rotation.set(-0.2 - rng() * 0.15, 0, -Math.sin(a) * 0.6);
-      this.head.add(g);
-      const h = 0.32 + center * 0.55 + rng() * 0.15;
-      this.part(g, flameGeometry(0.07 + center * 0.05, h, rng), strand, [0, 0, 0], [1, 1, 0.7]);
-      this.sway.push({ g, base: g.rotation.clone(), ph: rng() * Math.PI * 2, amp: 0.18, kind: 'flame' });
-    }
-
-    // ── 팔: 넓은 어깨에서 늘어져 손끝이 무릎(연기 자락) 아래까지 ──
-    const mkArm = (sx: number) => {
-      const sh = new THREE.Group();
-      sh.position.set(sx * 0.74, 1.28, 0);
-      this.spine.add(sh);
-      this.part(sh, new THREE.SphereGeometry(0.22, 14, 10), skin, [0, 0, 0], [1, 1, 0.95]);
-      // 어깨 갑주: 바깥·위로 뻗는 칼날 여러 겹
-      for (let i = 0; i < 5; i++) {
-        const s = this.part(sh, shardGeometry(0.08 + (i === 2 ? 0.02 : 0), 0.32 + (i === 2 ? 0.2 : (2 - Math.abs(i - 2)) * 0.06)), plate, [sx * 0.08, 0.12, (i - 2) * 0.09], [1, 1, 0.55]);
-        s.rotation.set((i - 2) * 0.28, 0, -sx * (0.55 + (2 - Math.abs(i - 2)) * 0.12));
-      }
-      this.part(sh, new THREE.CylinderGeometry(0.19, 0.12, 0.9, 10), skin, [0, -0.47, 0], [1, 1, 0.9]);
-      const el = new THREE.Group();
-      el.position.y = -0.92;
-      sh.add(el);
-      // 팔꿈치 뒤로 솟은 가시
-      this.part(el, shardGeometry(0.04, 0.2), plate, [0, 0.02, -0.1], [1, 1, 1]).rotation.x = -2.2;
-      this.part(el, new THREE.CylinderGeometry(0.13, 0.065, 0.92, 9), skin, [0, -0.46, 0], [1, 1, 0.9]);
-      const hand = new THREE.Group();
-      hand.position.y = -0.94;
-      el.add(hand);
-      this.part(hand, new THREE.SphereGeometry(0.095, 10, 8), skin, [0, -0.04, 0.01], [1.15, 0.9, 0.75]);
-      // 길게 뻗은 손가락 다섯: 끝이 갈퀴처럼 휜다
-      const fingers: THREE.Group[] = [];
-      for (let i = 0; i < 5; i++) {
-        const fg = new THREE.Group();
-        const thumb = i === 0;
-        fg.position.set(thumb ? -sx * 0.0 + 0.0 : (i - 2.5) * 0.04 * sx, -0.1, thumb ? 0.07 : 0.02);
-        fg.rotation.set(0.25, 0, thumb ? sx * 0.6 : (i - 2.5) * 0.08 * sx);
-        hand.add(fg);
-        this.part(fg, new THREE.CylinderGeometry(0.018, 0.022, 0.16, 6), skin, [0, -0.08, 0], [1, 1, 1]);
-        const tip = new THREE.Group();
-        tip.position.y = -0.16;
-        tip.rotation.x = 0.45;
-        fg.add(tip);
-        this.part(tip, new THREE.ConeGeometry(0.018, thumb ? 0.16 : 0.26, 5), claw, [0, -(thumb ? 0.08 : 0.13), 0], [1, 1, 1]).rotation.x = Math.PI;
-        fingers.push(fg);
-      }
-      return { sh, el, hand, fingers };
-    };
-    this.arm = { L: mkArm(1), R: mkArm(-1) };
-
-    // ── 찢어진 연기 망토: 어깨 뒤에서 바닥까지 흐른다 ──
-    for (let i = 0; i < 11; i++) {
-      const k = i / 10 - 0.5;
-      const g = new THREE.Group();
-      g.position.set(k * 1.0, 1.38, -0.3 - (0.5 - Math.abs(k)) * 0.06);
-      g.rotation.set(0.3 + Math.abs(k) * 0.1, k * 0.35, k * 0.12);
-      this.spine.add(g);
-      const len = 2.3 + (0.5 - Math.abs(k)) * 0.5 + rng() * 0.35;
-      this.part(g, ribbonGeometry(0.24 + rng() * 0.06, len, rng, 0.75), strand, [0, 0, 0], [1, 1, 1]);
-      this.sway.push({ g, base: g.rotation.clone(), ph: rng() * Math.PI * 2, amp: 0.1, kind: 'cloak' });
-    }
-
-    // 바닥에서 맴도는 연기 뭉치 (자락 끝을 흐려 땅에 녹아든 것처럼)
+    // 바닥을 맴도는 연기 (그림 끝자락을 땅에 녹인다)
     const smokeTex = smokeTexture();
-    for (let i = 0; i < 20; i++) {
-      const mat = new THREE.SpriteMaterial({ map: smokeTex, color: 0x000000, transparent: true, opacity: 0.75 + rng() * 0.25, depthWrite: false });
+    for (let i = 0; i < 12; i++) {
+      const mat = new THREE.SpriteMaterial({ map: smokeTex, color: 0x000000, transparent: true, opacity: 0.4 + rng() * 0.2, depthWrite: false });
       this.mats.push(mat);
       const s = new THREE.Sprite(mat);
-      const sc = 1.0 + rng() * 0.8;
-      const it = { s, a: (i / 20) * Math.PI * 2 + rng(), r: 0.25 + rng() * 0.55, y: 0.1 + rng() * 0.85, sc, ph: rng() * Math.PI * 2 };
       this.root.add(s);
-      this.skirt.push(it);
+      // 땅에 묻혀 잘리지 않게 연기 뭉치 아래끝이 바닥 위에 오도록 띄운다
+      const sc = 0.7 + rng() * 0.5;
+      this.skirt.push({ s, a: (i / 12) * Math.PI * 2 + rng(), r: 0.3 + rng() * 0.45, y: sc * 0.45 + rng() * 0.1, sc, ph: rng() * Math.PI * 2 });
     }
-    // 왕관·어깨에서 피어오르는 연기 가닥 (계속 새로 피어 흩어진다)
+    // 왕관 · 어깨에서 피어올라 흩어지는 연기 가닥
     const wispTex = wispTexture();
-    const spots: [THREE.Object3D, number, number][] = [
-      [this.head, 0, 0], [this.head, 0.1, 0], [this.head, -0.1, 0], [this.head, 0, -0.05],
-      [this.arm.L.sh, 0.1, 0], [this.arm.R.sh, -0.1, 0], [this.arm.L.sh, 0.05, -0.1], [this.arm.R.sh, -0.05, -0.1],
-    ];
-    for (let i = 0; i < 16; i++) {
-      const [from, ox, oz] = spots[i % spots.length];
-      const mat = new THREE.SpriteMaterial({ map: wispTex, color: 0x050407, transparent: true, opacity: 0, depthWrite: false });
+    for (let i = 0; i < 18; i++) {
+      const mat = new THREE.SpriteMaterial({ map: wispTex, color: 0x060508, transparent: true, opacity: 0, depthWrite: false });
       this.mats.push(mat);
       const s = new THREE.Sprite(mat);
       this.root.add(s);
-      this.wisps.push({ s, mat, from, ox, oz, life: 1 + rng() * 0.99, dur: 1.6 + rng() * 1.2, drift: (rng() - 0.5) * 0.5 });
+      const crown = i % 3 !== 0;
+      this.wisps.push({ s, mat, life: rng(), dur: 1.6 + rng() * 1.3, drift: (rng() - 0.5) * 0.5, ox: crown ? (rng() - 0.5) * 0.35 : (rng() < 0.5 ? -1 : 1) * (0.45 + rng() * 0.2), oy: crown ? HEIGHT * 0.9 : HEIGHT * 0.7 });
     }
-
-    // 그림자는 단단한 몸(살·갑주·손톱)만 드리운다 (연기 자락·불꽃·빛은 빼서 그림자가 지저분하지 않게)
-    const solid = new Set<THREE.Material>([skin, plate, claw]);
-    this.root.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) m.castShadow = solid.has(m.material as THREE.Material);
-    });
   }
 
-  /** 빛을 먹는 검은 재질: 가장자리(옆으로 비스듬한 면)만 은은하게 번져 실루엣이 읽힌다 */
-  private shadowMat(color: number, rim: number, pow: number, k: number, roughness = 1) {
-    const m = new THREE.MeshStandardMaterial({ color, roughness, metalness: roughness < 1 ? 0.25 : 0, emissive: 0x000000 });
-    const rc = new THREE.Color(rim);
-    m.onBeforeCompile = (sh) => {
-      sh.uniforms.uRim = { value: rc };
-      sh.fragmentShader = 'uniform vec3 uRim;\n' + sh.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `float rimK = 1.0 - abs(dot(normalize(normal), normalize(vViewPosition)));\ngl_FragColor.rgb += uRim * pow(rimK, ${pow.toFixed(2)}) * ${k.toFixed(2)};\n#include <dithering_fragment>`,
-      );
+  /** 카메라를 향해 판을 돌리고, 보는 각도(앞 · 옆 · 뒤)에 맞는 그림 두 장을 섞는다 */
+  /** 이 카메라를 향하게 미리 맞춘다 (그리기 전에 부르면 같은 프레임에 바로 들어간다) */
+  aim(cam: THREE.Camera) {
+    this.root.updateMatrixWorld(true);
+    this.faceCam(cam);
+    this.card.updateMatrixWorld(true);
+  }
+
+  private face(cam: THREE.Camera) {
+    this.faceCam(cam);
+    // 이 판의 행렬은 그리기 직전에 다시 계산되므로, 바뀐 방향이 같은 프레임에 바로 들어간다
+    this.card.updateMatrixWorld(true);
+  }
+
+  private faceCam(cam: THREE.Camera) {
+    const wp = new THREE.Vector3();
+    this.root.getWorldPosition(wp);
+    const ang = Math.atan2(cam.position.x - wp.x, cam.position.z - wp.z);
+    this.card.rotation.y = ang - this.yaw;
+    let rel = ang - this.yaw;
+    while (rel > Math.PI) rel -= Math.PI * 2;
+    while (rel < -Math.PI) rel += Math.PI * 2;
+    const a = Math.abs(rel);
+    const band = 0.3;
+    const sm = (e0: number, e1: number, x: number) => {
+      const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
     };
-    m.customProgramCacheKey = () => `shadow-rim-${rim.toString(16)}-${pow}-${k}`;
-    this.mats.push(m);
-    return m;
-  }
-
-  private part(parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, [x, y, z]: number[], [sx, sy, sz]: number[]) {
-    this.geos.push(geo);
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    m.scale.set(sx, sy, sz);
-    parent.add(m);
-    return m;
+    let main: View;
+    let next: View;
+    let t: number;
+    if (a < Math.PI / 2) {
+      main = 'front';
+      next = 'side';
+      t = sm(Math.PI / 4 - band, Math.PI / 4 + band, a);
+    } else {
+      main = 'side';
+      next = 'back';
+      t = sm((3 * Math.PI) / 4 - band, (3 * Math.PI) / 4 + band, a);
+    }
+    // 옆 그림은 왼쪽을 본다: 몸의 앞이 화면 오른쪽이면 뒤집는다
+    const flip = Math.sin(rel) > 0 ? 1 : -1;
+    const show = (i: number, v: View, op: number) => {
+      const p = this.planes[i];
+      const m = this.planeMats[i];
+      if (m.map !== this.tex[v]) m.map = this.tex[v];
+      const sx = v === 'side' ? flip : 1;
+      p.scale.set(HEIGHT * VIEWS[v].aspect * sx, HEIGHT, 1);
+      m.opacity = op;
+      // 숨기지 않고 투명도로만 (보임 여부는 그리기 목록을 만들 때 이미 정해져서, 바꾸면 한 프레임 늦는다)
+      p.visible = true;
+    };
+    // 크로스페이드: 아래 그림은 다 보이다가 위 그림이 다 덮은 뒤에야 빠진다 (중간에 비쳐 보이지 않게)
+    show(0, main, t < 0.5 ? 1 : 1 - (t - 0.5) * 2);
+    show(1, next, t < 0.5 ? t * 2 : 1);
+    // 빛: 더 많이 보이는 그림의 눈 · 심장 자리에
+    const v = t < 0.5 ? main : next;
+    const info = VIEWS[v];
+    const sx = v === 'side' ? flip : 1;
+    const w = HEIGHT * info.aspect;
+    const at = (u: number, vv: number, o: THREE.Object3D) => o.position.set((u - 0.5) * w * sx, HEIGHT * (1 - vv), 0.05);
+    this.eyeGlow.forEach((g, i) => {
+      const e = info.eyes[i];
+      if (e) at(e[0], e[1], g);
+      g.material.opacity = e ? 0.85 * this.flick : 0;
+    });
+    this.heartGlow.material.opacity = 0;
+    if (info.heart) {
+      at(info.heart[0], info.heart[1], this.heartGlow);
+      this.heartGlow.material.opacity = 0.3 + this.beat * 0.35;
+      this.heartGlow.scale.setScalar(0.26 + this.beat * 0.1);
+    }
   }
 
   update(f: Fighter, c: FrameClock) {
     const lp = f.lerped(c.alpha);
     const dt = Math.max(1e-4, c.dt);
-    // 실제로 움직인 거리로 빠르기를 잰다
     if (this.last) {
       const v = Math.hypot(lp.x - this.last.x, lp.z - this.last.z) / dt;
       this.speed += (Math.min(v, 8) - this.speed) * Math.min(1, dt * 6);
     }
     this.last = { x: lp.x, z: lp.z };
-
-    // 큰 몸은 천천히 돌아선다
     const want = Math.atan2(lp.fx, lp.fz);
     let d = want - this.yaw;
     while (d > Math.PI) d -= Math.PI * 2;
@@ -324,55 +237,24 @@ export class ShadowBeast implements CharacterView {
     this.root.rotation.y = this.yaw;
 
     const t = c.t / 60;
+    this.time.value = t;
     const move = Math.min(1, this.speed / 3);
-    const breathe = Math.sin(t * 1.4);
-
-    // 공격: 오른팔을 높이 들었다가 내려 할퀸다 / 맞으면 움찔
     this.atk = f.state === 'attack' ? Math.min(1, this.atk + dt * 2.6) : Math.max(0, this.atk - dt * 3);
     this.hurt = f.state === 'hitstun' ? Math.min(1, this.hurt + dt * 8) : Math.max(0, this.hurt - dt * 4);
     const swing = f.state === 'attack' ? (this.atk < 0.45 ? this.atk / 0.45 : 1 - (this.atk - 0.45) / 0.55 * 1.6) : 0;
+    this.hurtU.value = this.hurt;
 
-    // 미끄러지듯 떠서 오르내린다 (걷지 않는다). 움직이면 앞으로 기울어 밀고 들어온다
-    this.body.position.y = 1.2 + Math.sin(t * 1.1) * 0.05 + breathe * 0.012;
-    this.body.rotation.x = move * 0.16;
-    this.body.rotation.z = Math.sin(t * 0.8) * 0.02;
-    // 가슴을 편 꼿꼿한 자세 (맞으면 뒤로 젖혔다가, 할퀼 때 앞으로 숙인다)
-    this.spine.rotation.x = -0.04 + breathe * 0.02 - this.hurt * 0.3 + Math.max(0, swing) * 0.12 - Math.min(0, swing) * 0.25;
-    this.spine.rotation.y = Math.sin(t * 0.6) * 0.04 - swing * 0.2;
-    this.chest.scale.set(1 + breathe * 0.015, 1, 1 + breathe * 0.02);
-    // 고개를 살짝 숙여 내려다보며 노려본다
-    this.neck.rotation.x = 0.1 + Math.sin(t * 0.9) * 0.03;
-    this.head.rotation.set(0.12 - move * 0.1 + this.hurt * 0.25, Math.sin(t * 0.5) * 0.12 * (1 - move), Math.sin(t * 0.4) * 0.04);
+    // 미끄러지듯 떠서 오르내린다. 할퀼 땐 몸을 부풀렸다가 앞으로 덮쳐 오고, 맞으면 움찔 물러선다
+    const rise = Math.max(0, swing);
+    this.body.position.set(Math.sin(t * 23) * 0.04 * this.hurt, 0.08 + Math.sin(t * 1.1) * 0.06, Math.max(0, -swing) * 0.6 - this.hurt * 0.25);
+    this.body.scale.set(1 + rise * 0.06, 1 + rise * 0.08 - Math.max(0, -swing) * 0.04, 1);
+    this.body.rotation.z = Math.sin(t * 0.8) * 0.015 + move * 0.0;
 
-    for (const [k, sx] of [['L', 1], ['R', -1]] as const) {
-      const a = this.arm[k];
-      const ph = Math.sin(t * 1.2 + (k === 'L' ? 0 : 1.6));
-      // 서 있을 땐 손톱을 살짝 벌리고 늘어뜨린다 / 움직이면 뒤로 끌린다
-      a.sh.rotation.set(0.1 + move * 0.35 + ph * 0.04, 0, sx * (0.24 + breathe * 0.015));
-      a.el.rotation.set(-0.3 - (1 - move) * 0.15 + ph * 0.03, 0, -sx * 0.1);
-      a.hand.rotation.x = -0.15 + Math.sin(t * 1.8 + sx) * 0.06;
-      for (let i = 0; i < a.fingers.length; i++) a.fingers[i].rotation.x = 0.25 + Math.sin(t * 2.3 + i + sx) * 0.08;
-      if (k === 'R' && swing !== 0) {
-        a.sh.rotation.x = -0.3 - swing * 2.5;
-        a.sh.rotation.z = -0.4;
-        a.el.rotation.x = -0.25 - Math.max(0, swing) * 0.55;
-      }
-    }
+    this.flick = 0.85 + Math.sin(t * 7.3) * 0.08 + Math.sin(t * 13.1) * 0.05;
+    this.beat = Math.pow(Math.max(0, Math.sin(t * 2.6)), 6);
+    this.eyeLight.intensity = 1.0 * this.flick;
+    this.heartLight.intensity = 0.22 + this.beat * 0.3;
 
-    for (const s of this.sway) {
-      const w = Math.sin(t * (s.kind === 'flame' ? 3.1 : 1.6) + s.ph);
-      const w2 = Math.cos(t * (s.kind === 'flame' ? 4.3 : 1.1) + s.ph * 1.7);
-      if (s.kind === 'flame') {
-        s.g.rotation.set(s.base.x + w * s.amp * 0.5, 0, s.base.z + w2 * s.amp);
-        s.g.scale.y = 1 + Math.sin(t * 5.2 + s.ph) * 0.12;
-      } else {
-        // 움직이면 자락이 뒤로 휘날린다
-        const back = move * (s.kind === 'cloak' ? 0.45 : 0.35);
-        s.g.rotation.set(s.base.x + back + w * s.amp, s.base.y, s.base.z + w2 * s.amp * 0.6);
-      }
-    }
-
-    // 바닥 연기: 몸 둘레를 천천히 맴돌며 부풀었다 준다
     for (const sm of this.skirt) {
       const a = sm.a + t * 0.25;
       const k = 1 + Math.sin(t * 0.9 + sm.ph) * 0.15;
@@ -380,88 +262,27 @@ export class ShadowBeast implements CharacterView {
       sm.s.scale.setScalar(sm.sc * k);
       sm.s.material.rotation = sm.ph + t * 0.2;
     }
-
-    // 피어오르는 연기 가닥: 피어나 위로 흘러가며 흩어진다 (몸이 움직이면 뒤로 끌린다)
-    this.root.updateMatrixWorld();
-    const inv = new THREE.Matrix4().copy(this.root.matrixWorld).invert();
-    const p = new THREE.Vector3();
     for (const w of this.wisps) {
       w.life += dt / w.dur;
       if (w.life >= 1) {
         w.life -= 1;
-        p.set(w.ox, 0.15, w.oz);
-        w.from.localToWorld(p);
-        p.applyMatrix4(inv);
-        w.s.position.copy(p);
+        w.s.position.set(w.ox, w.oy + this.body.position.y, -0.05);
       }
       const l = w.life;
-      w.s.position.y += dt * 0.55;
+      w.s.position.y += dt * 0.5;
       w.s.position.x += dt * w.drift;
-      w.s.position.z -= dt * (0.15 + move * 1.2);
-      w.mat.opacity = Math.sin(l * Math.PI) * 0.55;
-      w.s.scale.set(0.22 + l * 0.35, 0.4 + l * 0.6, 1);
+      w.s.position.z -= dt * (0.1 + move * 1.2);
+      w.mat.opacity = Math.sin(l * Math.PI) * 0.5;
+      w.s.scale.set(0.2 + l * 0.35, 0.4 + l * 0.6, 1);
       w.mat.rotation = w.drift * 2 + l * 0.6;
     }
-
-    // 눈빛·심장빛이 불규칙하게 일렁인다 (심장은 맥박처럼)
-    const flick = 0.85 + Math.sin(t * 7.3) * 0.08 + Math.sin(t * 13.1) * 0.05;
-    for (const g of this.eyeGlow) g.material.opacity = 0.8 * flick;
-    this.eyeLight.intensity = 1.0 * flick;
-    const beat = Math.pow(Math.max(0, Math.sin(t * 2.6)), 6);
-    this.heartGlow.material.opacity = 0.55 + beat * 0.4;
-    this.heartGlow.scale.setScalar(0.5 + beat * 0.18);
-    this.crackMat.opacity = 0.55 + beat * 0.4;
-    this.heartLight.intensity = 0.22 + beat * 0.3;
-    this.heartMat.color.setRGB(1, 0.13 + beat * 0.2, 0.2 + beat * 0.1);
   }
 
   dispose() {
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
+    for (const t of Object.values(this.tex)) t.dispose();
   }
-}
-
-/** 칼날 조각: 바닥이 넓고 끝이 뾰족한 납작한 사면체 (갑주·가시용). 원점 = 밑동, 위로 자란다 */
-function shardGeometry(w: number, h: number): THREE.BufferGeometry {
-  const g = new THREE.ConeGeometry(w, h, 4, 1);
-  g.translate(0, h / 2, 0);
-  return g;
-}
-
-/** 찢어진 천/연기 자락: 위가 넓고 아래로 갈수록 가늘어지며 끝이 들쭉날쭉. 원점 = 윗변 가운데, 아래로 늘어진다 */
-function ribbonGeometry(w: number, len: number, rng: () => number, taper: number): THREE.BufferGeometry {
-  const segY = 8;
-  const g = new THREE.PlaneGeometry(w, len, 2, segY);
-  g.translate(0, -len / 2, 0);
-  const pos = g.attributes.position as THREE.BufferAttribute;
-  const jag = Array.from({ length: 3 }, () => rng() * 0.25 * len);
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const k = -y / len; // 0 = 위, 1 = 끝
-    const col = Math.round((x / w + 0.5) * 2);
-    // 끝자락은 칸마다 다른 길이로 찢어진다
-    const ny = k > 0.99 ? y + jag[col] : y;
-    pos.setXYZ(i, x * (1 - k * taper), ny, Math.sin(k * 3 + col) * 0.03 - k * k * 0.12);
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
-/** 연기 불꽃 한 줄기: 밑이 굵고 위로 비틀리며 가늘게 타오른다. 원점 = 밑동 */
-function flameGeometry(r: number, h: number, rng: () => number): THREE.BufferGeometry {
-  const g = new THREE.ConeGeometry(r, h, 8, 8, true);
-  g.translate(0, h / 2, 0);
-  const pos = g.attributes.position as THREE.BufferAttribute;
-  const bend = (rng() - 0.5) * 0.18;
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const k = y / h;
-    pos.setX(i, pos.getX(i) + Math.sin(k * 4.5) * 0.03 + bend * k * k);
-    pos.setZ(i, pos.getZ(i) - k * k * 0.08);
-  }
-  g.computeVertexNormals();
-  return g;
 }
 
 let glowTex: THREE.Texture | null = null;
