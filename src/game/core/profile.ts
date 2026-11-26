@@ -75,6 +75,8 @@ export interface PlayerProfile {
   chores?: import('../city/chores').ChoreState;
   /** 생활 기록: 서울에서 한 일을 날짜별로 · AI 가 정리한 일기와 근 기울기 (core/lifeLog) */
   lifeLog?: import('./lifeLog').LifeLog;
+  /** 모든 계정 일괄 변경을 어디까지 적용했나 (core/resets) */
+  resetV?: number;
 }
 
 export interface FridgeFood {

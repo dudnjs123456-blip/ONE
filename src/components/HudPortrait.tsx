@@ -1,4 +1,5 @@
 'use client';
+import { DEFAULT_BODY } from '@/game/data/defaultBody';
 
 import { BODY_TYPES } from '@/game/render/looks';
 import { playerPortrait } from '@/game/data/portraits';
@@ -18,7 +19,7 @@ export function hudMood(s: { hp: number; maxHp: number; fatigue: number; hunger:
  * 초상화가 없는 몸은 그 몸의 아이콘을 동그라미 안에 띄운다.
  */
 export default function HudPortrait({ body, name, level, mood }: { body: string | undefined; name: string | null; level: number; mood: PlayerMood }) {
-  const b = BODY_TYPES.find((t) => t.id === (body ?? 'female')) ?? BODY_TYPES[0];
+  const b = BODY_TYPES.find((t) => t.id === (body ?? DEFAULT_BODY)) ?? BODY_TYPES[0];
   const src = playerPortrait(body, mood);
   return (
     <div className="flex items-center gap-3">

@@ -1,4 +1,5 @@
 'use client';
+import { applyResets } from '@/game/core/resets';
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -109,6 +110,8 @@ export default function Game() {
     }
     setProfileAccount(acc.userId);
     const p = await cloudSave.initAccount(acc, loadStoredProfile(), loadLegacyProfile());
+    // 모든 계정 일괄 변경 (한 번씩만: 기본 캐릭터 · 이야기 처음부터 등, core/resets)
+    applyResets(p);
     saveProfile(p);
     // 고른 몸(남자·여자) 모델도 미리 받아 둔다
     preloadModel((l) => l.bodyUrl(p.body));
@@ -144,7 +147,9 @@ export default function Game() {
     };
     if (!cloudSave.enabled) {
       // 서버 설정이 없으면 (개발용) 로그인 없이 이 브라우저 기록으로
-      setProfile(loadProfile());
+      const local = loadProfile();
+      if (applyResets(local)) saveProfile(local);
+      setProfile(local);
       resumeScreen(null);
       setGate('ready');
     } else {

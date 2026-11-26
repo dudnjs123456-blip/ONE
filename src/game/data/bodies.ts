@@ -1,3 +1,4 @@
+import { DEFAULT_BODY } from './defaultBody';
 /**
  * 캐릭터별 몸 치수(미터)와 반응 속도. 타격 판정(팔·다리 끝이 실제로 닿는가)과 자동 회피에 쓴다.
  * 팔·다리 길이는 public/models/*.vrm 의 뼈 위치를 재서 넣은 값이다 (어깨→팔꿈치→손목, 고관절→무릎→발목).
@@ -64,5 +65,5 @@ export type BodySpecId = keyof typeof BODY_SPECS;
 
 /** 외형 id(프로필 body) → 몸 치수. 모르는 값은 기본 외형(여자) */
 export function bodySpecFor(body?: string): BodySpec {
-  return (BODY_SPECS as Record<string, BodySpec>)[body ?? 'female'] ?? BODY_SPECS.female;
+  return (BODY_SPECS as Record<string, BodySpec>)[body ?? DEFAULT_BODY] ?? BODY_SPECS.female;
 }

@@ -1,3 +1,4 @@
+import { DEFAULT_BODY } from './defaultBody';
 import type { PlayerProfile } from '../core/profile';
 
 /**
@@ -315,11 +316,11 @@ export function hasBodyUnderClothes(body: string): boolean {
 
 /** 이 캐릭터가 못 입는 이유 (입을 수 있으면 null). 비키니는 여자 캐릭터만, 옷 속 몸이 있는 모델만 */
 export function wearBlock(p: PlayerProfile, c: CosmeticDef): string | null {
-  if (c.garment && !c.garment[p.body ?? 'female']) return '아직 이 캐릭터에 맞는 옷이 없어요';
+  if (c.garment && !c.garment[p.body ?? DEFAULT_BODY]) return '아직 이 캐릭터에 맞는 옷이 없어요';
   // 원피스·샌들처럼 진짜 옷으로만 있는 코디는 옷 파일이 있는 몸만
-  if (c.cut && GARMENT_KITS[p.body ?? 'female']?.[c.cut] === undefined) return '아직 이 캐릭터에 맞는 옷이 없어요';
+  if (c.cut && GARMENT_KITS[p.body ?? DEFAULT_BODY]?.[c.cut] === undefined) return '아직 이 캐릭터에 맞는 옷이 없어요';
   if (!c.femaleOnly) return null;
-  const body = p.body ?? 'female';
+  const body = p.body ?? DEFAULT_BODY;
   if (MALE_BODIES.includes(body)) return '여자 캐릭터만 입을 수 있어요';
   if (NO_BODY_UNDER_CLOTHES.includes(body)) return '이 캐릭터는 모델에 옷 속 몸이 없어서 입을 수 없어요';
   return null;

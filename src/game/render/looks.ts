@@ -1,4 +1,5 @@
 import { HEROINE, type Appearance } from './mannequin';
+import { DEFAULT_BODY } from '../data/defaultBody';
 
 /**
  * 플레이어 캐릭터 외형 (코디 창에서 남자·여자를 고른다, 프로필 body 에 저장).
@@ -26,10 +27,10 @@ export type BodyType = (typeof BODY_TYPES)[number]['id'];
  */
 export const NPC_BODIES: Record<string, string> = {};
 
-/** 기본은 여자 캐릭터 (모르는 값도 여자로) */
+/** 기본은 작은은발소녀 (모르는 값도) */
 export function bodyUrl(body?: string): string {
   if (body && NPC_BODIES[body]) return NPC_BODIES[body];
-  return (BODY_TYPES.find((b) => b.id === body) ?? BODY_TYPES[0]).url;
+  return (BODY_TYPES.find((b) => b.id === (body ?? DEFAULT_BODY)) ?? BODY_TYPES.find((b) => b.id === DEFAULT_BODY)!).url;
 }
 
 export const PLAYER_LOOK: Appearance = { kind: 'vrm', url: bodyUrl(), fallback: HEROINE.crimson };
