@@ -29,6 +29,12 @@ export class ShadowBeast implements CharacterView {
   /** 카메라를 향해 도는 판 (자식: 그림 두 장 + 빛) */
   private card = new THREE.Group();
   private planes: THREE.Mesh[] = [];
+  /** 판마다 팔 두 개를 붙이는 틀 (판과 같은 방향으로 돌지만 크기는 1:1) */
+  private rigs: THREE.Group[] = [];
+  private arms: { pivot: THREE.Group; mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; side: 1 | -1 }[][] = [[], []];
+  /** 이번 공격에 쓰는 팔 (공격마다 번갈아) */
+  private atkSide: 1 | -1 = 1;
+  private wasAtk = false;
   private planeMats: THREE.MeshStandardMaterial[] = [];
   private tex: Record<View, { map: THREE.Texture; height: THREE.Texture; normal: THREE.Texture; glow: THREE.Texture }>;
   private depthMats: THREE.MeshDepthMaterial[] = [];
@@ -62,8 +68,10 @@ export class ShadowBeast implements CharacterView {
       return t;
     };
     const set = (v: View) => {
-      const base = VIEWS[v].url.replace('.webp', '');
-      return { map: load(VIEWS[v].url, true), height: load(base + '-height.webp', false), normal: load(base + '-normal.webp', false), glow: load(base + '-glow.webp', true) };
+      // 앞모습은 팔을 떼어 낸 몸통 그림 (팔은 따로 움직이는 판)
+      const base = VIEWS[v].url.replace('.webp', '') + (v === 'front' ? '-body' : '');
+      const url = base + '.webp';
+      return { map: load(url, true), height: load(base + '-height.webp', false), normal: load(base + '-normal.webp', false), glow: load(base + '-glow.webp', true) };
     };
     this.tex = { front: set('front'), side: set('side'), back: set('back') };
 
@@ -128,6 +136,7 @@ export class ShadowBeast implements CharacterView {
       this.card.add(p);
       this.planes.push(p);
     }
+    this.buildArms(load);
     // 카메라마다(대사창 초상화 포함) 그 카메라를 향해 돌고, 보는 각도에 맞는 그림을 고른다
     this.planes[0].onBeforeRender = (_r, _s, cam) => this.face(cam);
 
@@ -249,10 +258,125 @@ export class ShadowBeast implements CharacterView {
       p.castShadow = op >= 0.5;
       // 숨기지 않고 투명도로만 (보임 여부는 그리기 목록을 만들 때 이미 정해져서, 바꾸면 한 프레임 늦는다)
       p.visible = true;
+      // 앞모습일 때만 이 판의 팔이 같은 방향 · 같은 투명도로 붙는다
+      const rig = this.rigs[i];
+      rig.rotation.y = angOf(v);
+      for (const a of this.arms[i]) {
+        const vis = v === 'front' ? op : 0;
+        a.mat.opacity = vis;
+        a.mat.depthWrite = vis >= 0.5;
+        a.mesh.castShadow = vis >= 0.5;
+      }
     };
     // 크로스페이드: 아래 그림은 다 보이다가 위 그림이 다 덮은 뒤에야 빠진다 (중간에 비쳐 보이지 않게)
     show(0, main, t < 0.5 ? 1 : 1 - (t - 0.5) * 2);
     show(1, next, t < 0.5 ? t * 2 : 1);
+  }
+
+  /**
+   * 앞모습 팔 두 개: 그림에서 떼어 낸 팔을 어깨를 축으로 따로 돌린다 (2D 컷아웃 리깅).
+   * 팔도 몸통처럼 높이 지도로 부풀려 달빛을 받고 그림자를 드리운다. 판마다 한 벌씩 (크로스페이드 때 같이 흐려진다).
+   */
+  private buildArms(load: (url: string, color: boolean) => THREE.Texture) {
+    const IW = 579;
+    const IH = 1024;
+    const Wd = HEIGHT * VIEWS.front.aspect;
+    // 그림 속 팔 상자(x0, y0, w, h)와 어깨 축(px, py). side: -1 = 화면 왼쪽 팔, 1 = 오른쪽 팔
+    const ARMS = [
+      { key: 'L', side: -1 as const, x0: 104, y0: 323, w: 116, h: 384, px: 184, py: 334 },
+      { key: 'R', side: 1 as const, x0: 371, y0: 323, w: 137, h: 372, px: 400, py: 334 },
+    ];
+    const tex = ARMS.map((a) => {
+      const b = '/prologue/beast/beast-front-arm' + a.key;
+      return { map: load(b + '.webp', true), height: load(b + '-height.webp', false), normal: load(b + '-normal.webp', false) };
+    });
+    for (let i = 0; i < 2; i++) {
+      const rig = new THREE.Group();
+      this.card.add(rig);
+      this.rigs.push(rig);
+      ARMS.forEach((a, k) => {
+        const g = new THREE.PlaneGeometry((a.w / IW) * Wd, (a.h / IH) * HEIGHT, 12, 36);
+        // 어깨 축이 원점에 오게 옮긴다
+        g.translate(((a.x0 + a.w / 2 - a.px) / IW) * Wd, -((a.y0 + a.h / 2 - a.py) / IH) * HEIGHT, 0);
+        this.geos.push(g);
+        const m = new THREE.MeshStandardMaterial({
+          map: tex[k].map,
+          displacementMap: tex[k].height,
+          displacementScale: THICK * 0.7,
+          normalMap: tex[k].normal,
+          normalScale: new THREE.Vector2(1.1, 1.1),
+          color: 0xc4c2d0,
+          roughness: 0.78,
+          metalness: 0.05,
+          transparent: true,
+          opacity: 0,
+          alphaTest: 0.12,
+          side: THREE.DoubleSide,
+        });
+        m.onBeforeCompile = (sh) => {
+          sh.uniforms.uHurt = this.hurtU;
+          sh.fragmentShader = 'uniform float uHurt;\n' + sh.fragmentShader.replace(
+            '#include <dithering_fragment>',
+            'gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), uHurt * 0.55 * gl_FragColor.a);\n#include <dithering_fragment>',
+          );
+        };
+        m.customProgramCacheKey = () => 'shadow-arm-lit';
+        this.mats.push(m);
+        const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex[k].map, alphaTest: 0.5, displacementMap: tex[k].height, displacementScale: THICK * 0.7 });
+        this.mats.push(dm);
+        const mesh = new THREE.Mesh(g, m);
+        mesh.customDepthMaterial = dm;
+        mesh.renderOrder = 4 + i;
+        const pivot = new THREE.Group();
+        // 몸통 표면보다 조금 앞 (팔이 망토 · 몸통 위에 얹힌다)
+        pivot.position.set((a.px / IW - 0.5) * Wd, HEIGHT * (1 - a.py / IH), THICK * 0.45);
+        pivot.add(mesh);
+        rig.add(pivot);
+        this.arms[i].push({ pivot, mesh, mat: m, side: a.side });
+      });
+    }
+  }
+
+  /**
+   * 팔 자세: 평소엔 천천히 흔들리고, 움직이면 뒤로 끌리고, 맞으면 바깥으로 움찔.
+   * 할퀴기: 한 팔을 머리 위 바깥으로 치켜들었다가(준비) 앞으로 내밀며 몸 앞을 가로질러 내려친다. 공격마다 팔을 번갈아.
+   */
+  private poseArms(t: number, attacking: boolean, move: number, dt: number) {
+    if (attacking && !this.wasAtk) this.atkSide = this.atkSide === 1 ? -1 : 1;
+    this.wasAtk = attacking;
+    const ease = (x: number) => {
+      const k = Math.max(0, Math.min(1, x));
+      return k * k * (3 - 2 * k);
+    };
+    let up = 0;
+    let sweep = 0;
+    if (attacking) {
+      const a = this.atk;
+      if (a < 0.45) up = ease(a / 0.45);
+      else if (a < 0.62) {
+        const k = ease((a - 0.45) / 0.17);
+        up = 1 - k;
+        sweep = k;
+      } else sweep = 1 - ease((a - 0.62) / 0.38);
+    }
+    const kk = Math.min(1, dt * 16);
+    for (const list of this.arms) {
+      for (const arm of list) {
+        const s = arm.side;
+        const ph = s > 0 ? 0 : 1.7;
+        // 바깥쪽으로 벌리기 = s * 각도
+        let rz = s * (0.03 + Math.sin(t * 1.3 + ph) * 0.045) + s * 0.35 * this.hurt;
+        let rx = Math.sin(t * 0.9 + ph) * 0.06 + move * 0.2 + this.hurt * 0.15;
+        if (s === this.atkSide) {
+          rz += s * (2.3 * up - 0.75 * sweep);
+          rx += 0.25 * up - 0.45 * sweep;
+        } else {
+          rz += s * 0.3 * (up + sweep * 0.5);
+        }
+        arm.pivot.rotation.z += (rz - arm.pivot.rotation.z) * kk;
+        arm.pivot.rotation.x += (rx - arm.pivot.rotation.x) * kk;
+      }
+    }
   }
 
   update(f: Fighter, c: FrameClock) {
@@ -284,6 +408,7 @@ export class ShadowBeast implements CharacterView {
     this.body.position.set(Math.sin(t * 23) * 0.04 * this.hurt, 0.08 + Math.sin(t * 1.1) * 0.06, Math.max(0, -swing) * 0.6 - this.hurt * 0.25);
     this.body.scale.set(1 + rise * 0.06, 1 + rise * 0.08 - Math.max(0, -swing) * 0.04, 1);
     this.body.rotation.z = Math.sin(t * 0.8) * 0.015 + move * 0.0;
+    this.poseArms(t, f.state === 'attack', move, dt);
 
     this.flick = 0.85 + Math.sin(t * 7.3) * 0.08 + Math.sin(t * 13.1) * 0.05;
     this.beat = Math.pow(Math.max(0, Math.sin(t * 2.6)), 6);

@@ -1026,6 +1026,12 @@ function litCardMaterial(tex: THREE.Texture, tint: number, selfLight: number, cu
     sh.fragmentShader = sh.fragmentShader.replace(
       '#include <normal_fragment_begin>',
       THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''),
+    ).replace(
+      '#include <clipping_planes_fragment>',
+      // 카메라 바로 앞(3m 안)의 가지 · 덤불은 촘촘한 점으로 솎아 비치게 (카메라가 숲을 지나갈 때 화면을 가리지 않게)
+      `#include <clipping_planes_fragment>
+      float camNear = smoothstep(1.0, 3.2, length(vViewPosition));
+      if (camNear < 1.0 && fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453) > camNear) discard;`,
     );
   };
   m.customProgramCacheKey = () => 'forest-lit-card';
