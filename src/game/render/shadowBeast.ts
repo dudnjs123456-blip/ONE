@@ -20,6 +20,8 @@ const VIEWS: Record<View, { url: string; aspect: number; eyes: [number, number][
   back: { url: '/prologue/beast/beast-back.webp', aspect: 483 / 1024, eyes: [], heart: null },
 };
 const HEIGHT = 3.15;
+/** 그림을 앞으로 부풀리는 최대 두께 (몸통 한가운데) */
+const THICK = 0.42;
 
 export class ShadowBeast implements CharacterView {
   readonly root = new THREE.Group();
@@ -27,8 +29,9 @@ export class ShadowBeast implements CharacterView {
   /** 카메라를 향해 도는 판 (자식: 그림 두 장 + 빛) */
   private card = new THREE.Group();
   private planes: THREE.Mesh[] = [];
-  private planeMats: THREE.MeshBasicMaterial[] = [];
-  private tex: Record<View, THREE.Texture>;
+  private planeMats: THREE.MeshStandardMaterial[] = [];
+  private tex: Record<View, { map: THREE.Texture; height: THREE.Texture; normal: THREE.Texture }>;
+  private depthMats: THREE.MeshDepthMaterial[] = [];
   private head: THREE.Bone;
   private eyeGlow: THREE.Sprite[] = [];
   private heartGlow: THREE.Sprite;
@@ -54,43 +57,74 @@ export class ShadowBeast implements CharacterView {
     this.body.add(this.card);
 
     const loader = new THREE.TextureLoader();
-    const load = (url: string) => {
+    const load = (url: string, color: boolean) => {
       const t = loader.load(url);
-      t.colorSpace = THREE.SRGBColorSpace;
+      if (color) t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = 4;
       return t;
     };
-    this.tex = { front: load(VIEWS.front.url), side: load(VIEWS.side.url), back: load(VIEWS.back.url) };
+    const set = (v: View) => {
+      const base = VIEWS[v].url.replace('.webp', '');
+      return { map: load(VIEWS[v].url, true), height: load(base + '-height.webp', false), normal: load(base + '-normal.webp', false) };
+    };
+    this.tex = { front: set('front'), side: set('side'), back: set('back') };
 
-    // 그림 두 장 (지금 방향 + 넘어가는 방향). 세로로 잘게 나눠 아래쪽 연기가 물결치게 한다
-    for (let i = 0; i < 2; i++) {
-      const g = new THREE.PlaneGeometry(1, 1, 6, 40);
-      g.translate(0, 0.5, 0);
-      this.geos.push(g);
-      const m = new THREE.MeshBasicMaterial({ map: this.tex.front, color: 0xa4a2b0, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-      m.onBeforeCompile = (sh) => {
-        sh.uniforms.uTime = this.time;
-        sh.uniforms.uHurt = this.hurtU;
-        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
+    // 그림 두 장 (지금 방향 + 넘어가는 방향).
+    // 윤곽선에서 안쪽으로 갈수록 솟는 높이 지도로 판을 실제로 부풀리고(두께), 표면 방향 지도로 달빛 · 붉은 눈빛을 받는다.
+    // 촘촘히 나눠서 부풀린 모양과 아래쪽 연기 물결이 매끄럽게.
+    const wave = `
           // 하반신 연기: 아래로 갈수록 크게 물결친다 / 머리 위 불꽃: 끝이 살랑인다
           float low = pow(max(0.0, 1.0 - uv.y / 0.5), 1.6);
           transformed.x += (sin(uTime * 1.6 + uv.y * 11.0) * 0.035 + sin(uTime * 2.7 + uv.y * 23.0 + uv.x * 4.0) * 0.015) * low;
           float top = smoothstep(0.86, 1.0, uv.y);
           transformed.x += sin(uTime * 4.3 + uv.x * 9.0) * 0.012 * top;
-          transformed.y += sin(uTime * 3.1 + uv.x * 7.0) * 0.006 * top;`,
-        );
+          transformed.y += sin(uTime * 3.1 + uv.x * 7.0) * 0.006 * top;`;
+    for (let i = 0; i < 2; i++) {
+      const g = new THREE.PlaneGeometry(1, 1, 64, 128);
+      g.translate(0, 0.5, 0);
+      this.geos.push(g);
+      const t = this.tex.front;
+      const m = new THREE.MeshStandardMaterial({
+        map: t.map,
+        displacementMap: t.height,
+        displacementScale: THICK,
+        normalMap: t.normal,
+        normalScale: new THREE.Vector2(1.1, 1.1),
+        // 그림에 이미 칠해진 명암은 살리고(자체 발광), 그 위에 숲의 빛이 더해진다
+        emissiveMap: t.map,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.42,
+        color: 0xb8b6c4,
+        roughness: 0.78,
+        metalness: 0.05,
+        transparent: true,
+        alphaTest: 0.12,
+        side: THREE.DoubleSide,
+      });
+      m.onBeforeCompile = (sh) => {
+        sh.uniforms.uTime = this.time;
+        sh.uniforms.uHurt = this.hurtU;
+        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>' + wave);
         sh.fragmentShader = 'uniform float uHurt;\n' + sh.fragmentShader.replace(
           '#include <dithering_fragment>',
           // 맞으면 잠깐 하얗게 번쩍
           'gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), uHurt * 0.55 * gl_FragColor.a);\n#include <dithering_fragment>',
         );
       };
-      m.customProgramCacheKey = () => 'shadow-card';
+      m.customProgramCacheKey = () => 'shadow-card-lit';
       this.mats.push(m);
       this.planeMats.push(m);
+      // 달빛 그림자: 그림 모양 그대로 (부풀린 모양 · 연기 물결까지 같이)
+      const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: t.map, alphaTest: 0.5, displacementMap: t.height, displacementScale: THICK });
+      dm.onBeforeCompile = (sh) => {
+        sh.uniforms.uTime = this.time;
+        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>' + wave);
+      };
+      dm.customProgramCacheKey = () => 'shadow-card-depth';
+      this.mats.push(dm);
+      this.depthMats.push(dm);
       const p = new THREE.Mesh(g, m);
+      p.customDepthMaterial = dm;
       p.renderOrder = 2 + i;
       this.card.add(p);
       this.planes.push(p);
@@ -117,10 +151,10 @@ export class ShadowBeast implements CharacterView {
     this.heartGlow = glow(0.3, 0xff2236, 0.5);
 
     this.eyeLight = new THREE.PointLight(0xff2a3a, 1.0, 5, 2);
-    this.eyeLight.position.set(0, HEIGHT * 0.82, 1.6);
+    this.eyeLight.position.set(0, HEIGHT * 0.82, 2.6);
     this.body.add(this.eyeLight);
     this.heartLight = new THREE.PointLight(0xff2a3a, 0.3, 3, 2);
-    this.heartLight.position.set(0, HEIGHT * 0.68, 1.2);
+    this.heartLight.position.set(0, HEIGHT * 0.68, 2.2);
     this.body.add(this.heartLight);
 
     // 바닥을 맴도는 연기 (그림 끝자락을 땅에 녹인다)
@@ -164,12 +198,12 @@ export class ShadowBeast implements CharacterView {
     const wp = new THREE.Vector3();
     this.root.getWorldPosition(wp);
     const ang = Math.atan2(cam.position.x - wp.x, cam.position.z - wp.z);
-    this.card.rotation.y = ang - this.yaw;
+    this.card.rotation.y = 0;
     let rel = ang - this.yaw;
     while (rel > Math.PI) rel -= Math.PI * 2;
     while (rel < -Math.PI) rel += Math.PI * 2;
     const a = Math.abs(rel);
-    const band = 0.3;
+    const band = 0.14;
     const sm = (e0: number, e1: number, x: number) => {
       const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
       return t * t * (3 - 2 * t);
@@ -188,13 +222,35 @@ export class ShadowBeast implements CharacterView {
     }
     // 옆 그림은 왼쪽을 본다: 몸의 앞이 화면 오른쪽이면 뒤집는다
     const flip = Math.sin(rel) > 0 ? 1 : -1;
+    // 판은 몸의 방향(앞 0° · 옆 ±90° · 뒤 180°)에 서고 카메라 쪽으로는 30% 만 따라 돈다.
+    // 그래서 비스듬히 보면 부풀린 두께가 옆으로 드러나 입체로 보인다 (늘 정면을 보면 두께가 안 보인다)
+    const wrap = (x: number) => {
+      while (x > Math.PI) x -= Math.PI * 2;
+      while (x < -Math.PI) x += Math.PI * 2;
+      return x;
+    };
+    const baseOf = (v: View) => (v === 'front' ? 0 : v === 'back' ? Math.PI : Math.sign(rel || 1) * Math.PI / 2);
+    const angOf = (v: View) => baseOf(v) + wrap(rel - baseOf(v)) * 0.3;
     const show = (i: number, v: View, op: number) => {
       const p = this.planes[i];
+      p.rotation.y = angOf(v);
       const m = this.planeMats[i];
-      if (m.map !== this.tex[v]) m.map = this.tex[v];
+      const tx = this.tex[v];
+      if (m.map !== tx.map) {
+        m.map = tx.map;
+        m.emissiveMap = tx.map;
+        m.displacementMap = tx.height;
+        m.normalMap = tx.normal;
+        const dm = this.depthMats[i];
+        dm.map = tx.map;
+        dm.displacementMap = tx.height;
+      }
       const sx = v === 'side' ? flip : 1;
       p.scale.set(HEIGHT * VIEWS[v].aspect * sx, HEIGHT, 1);
       m.opacity = op;
+      // 더 많이 보이는 쪽만 깊이를 쓰고 그림자를 드리운다 (겹쳐 넘어가는 동안 서로 가리지 않게)
+      m.depthWrite = op >= 0.5;
+      p.castShadow = op >= 0.5;
       // 숨기지 않고 투명도로만 (보임 여부는 그리기 목록을 만들 때 이미 정해져서, 바꾸면 한 프레임 늦는다)
       p.visible = true;
     };
@@ -206,7 +262,12 @@ export class ShadowBeast implements CharacterView {
     const info = VIEWS[v];
     const sx = v === 'side' ? flip : 1;
     const w = HEIGHT * info.aspect;
-    const at = (u: number, vv: number, o: THREE.Object3D) => o.position.set((u - 0.5) * w * sx, HEIGHT * (1 - vv), 0.05);
+    const pa = angOf(v);
+    const at = (u: number, vv: number, o: THREE.Object3D) => {
+      const x = (u - 0.5) * w * sx;
+      const z = THICK * 0.8 + 0.05;
+      o.position.set(x * Math.cos(pa) + z * Math.sin(pa), HEIGHT * (1 - vv), -x * Math.sin(pa) + z * Math.cos(pa));
+    };
     this.eyeGlow.forEach((g, i) => {
       const e = info.eyes[i];
       if (e) at(e[0], e[1], g);
@@ -253,7 +314,7 @@ export class ShadowBeast implements CharacterView {
     this.flick = 0.85 + Math.sin(t * 7.3) * 0.08 + Math.sin(t * 13.1) * 0.05;
     this.beat = Math.pow(Math.max(0, Math.sin(t * 2.6)), 6);
     this.eyeLight.intensity = 1.0 * this.flick;
-    this.heartLight.intensity = 0.22 + this.beat * 0.3;
+    this.heartLight.intensity = 0.12 + this.beat * 0.18;
 
     for (const sm of this.skirt) {
       const a = sm.a + t * 0.25;
@@ -281,7 +342,11 @@ export class ShadowBeast implements CharacterView {
   dispose() {
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
-    for (const t of Object.values(this.tex)) t.dispose();
+    for (const t of Object.values(this.tex)) {
+      t.map.dispose();
+      t.height.dispose();
+      t.normal.dispose();
+    }
   }
 }
 
