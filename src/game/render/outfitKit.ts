@@ -1140,9 +1140,10 @@ function buildAccessory(c: CosmeticDef, m: Metrics): THREE.Object3D | null {
  * (이 방식은 몸 바깥 둘레에만 선이 생겨서, 진하면 안쪽은 선이 없는데 테두리만 스티커처럼 떠 보인다)
  * (2026-11-07 에 연한 장밋빛·절반 굵기로 바꿨더니 캐릭터가 배경에 묻혀 흐릿해 보였다)
  */
-const SOFT_OUTLINE = 0x5c4652;
+// 2026-11-27: 가까운 카메라(프롤로그)에서 검고 두꺼워 불편하다는 의견 → 조금 밝게, 가까이선 몸 굵기 기준보다 가늘게
+const SOFT_OUTLINE = 0x6a5560;
 /** 외곽선의 화면 속 굵기 (화면 높이 900px 기준 약 1px). 카메라가 멀어도 가까워도 같은 굵기로 보인다 */
-const OUTLINE_PX = (2 * 1.0) / 900;
+const OUTLINE_PX = (1.3 * 1.0) / 900;
 export function keepFieldOutline(root: THREE.Object3D) {
   const mats = new Set<THREE.Material>();
   root.traverse((o) => {
@@ -1158,7 +1159,7 @@ export function keepFieldOutline(root: THREE.Object3D) {
         'transformed += normalize(normal) * outlineWidth;',
         // 화면 속 크기 ∝ 1 / (거리 × tan(시야/2)), projectionMatrix[1][1] = 1 / tan(시야/2)
         `float olView = length((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz) / projectionMatrix[1][1];
-  transformed += normalize(normal) * max(outlineWidth * 0.5, olView * ${OUTLINE_PX.toFixed(5)});`,
+  transformed += normalize(normal) * min(outlineWidth, olView * ${OUTLINE_PX.toFixed(5)});`,
       );
     };
     mat.needsUpdate = true;
