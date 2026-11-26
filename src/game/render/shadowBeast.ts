@@ -3,6 +3,7 @@ import { mulberry32 } from '../core/controllers';
 import type { Fighter } from '../core/fighter';
 import type { FrameClock } from './clock';
 import type { CharacterView } from './mannequin';
+import { loadBeastModel, type BeastRig } from './beastModel';
 
 /**
  * 프롤로그의 "이름 없는 그림자" — 그림판 모델.
@@ -35,6 +36,8 @@ export class ShadowBeast implements CharacterView {
   /** 이번 공격에 쓰는 팔 (공격마다 번갈아) */
   private atkSide: 1 | -1 = 1;
   private wasAtk = false;
+  private model: BeastRig | null = null;
+  private disposed = false;
   private planeMats: THREE.MeshStandardMaterial[] = [];
   private tex: Record<View, { map: THREE.Texture; height: THREE.Texture; normal: THREE.Texture; glow: THREE.Texture }>;
   private depthMats: THREE.MeshDepthMaterial[] = [];
@@ -137,6 +140,18 @@ export class ShadowBeast implements CharacterView {
       this.planes.push(p);
     }
     this.buildArms(load);
+    // 진짜 3D 몸 (뼈대를 심은 모델). 불러오기 전까지는 그림판으로 보이다가, 다 불러오면 바꿔 낀다
+    loadBeastModel(HEIGHT)
+      .then((rig) => {
+        if (this.disposed) {
+          rig.dispose();
+          return;
+        }
+        this.model = rig;
+        this.body.add(rig.mesh);
+        this.card.visible = false;
+      })
+      .catch(() => {});
     // 카메라마다(대사창 초상화 포함) 그 카메라를 향해 돌고, 보는 각도에 맞는 그림을 고른다
     this.planes[0].onBeforeRender = (_r, _s, cam) => this.face(cam);
 
@@ -377,6 +392,34 @@ export class ShadowBeast implements CharacterView {
         arm.pivot.rotation.x += (rx - arm.pivot.rotation.x) * kk;
       }
     }
+    const m = this.model;
+    if (!m) return;
+    // 3D 몸: 같은 팔 각도를 어깨 뼈에, 팔꿈치는 치켜들 때 접었다가 내려칠 때 편다.
+    // 가슴은 내려치는 쪽으로 틀며 앞으로 숙이고, 맞으면 뒤로 젖힌다. 머리는 반쯤 따라간다
+    const B = m.bones;
+    const sm = (o: THREE.Object3D, x: number, y: number, z: number) => {
+      o.rotation.x += (x - o.rotation.x) * kk;
+      o.rotation.y += (y - o.rotation.y) * kk;
+      o.rotation.z += (z - o.rotation.z) * kk;
+    };
+    const card = this.arms[0];
+    for (const arm of card) {
+      const s = arm.side;
+      const sh = s < 0 ? B.shL : B.shR;
+      const el = s < 0 ? B.elL : B.elR;
+      const ha = s < 0 ? B.haL : B.haR;
+      const main = s === this.atkSide;
+      sm(sh, arm.pivot.rotation.x, 0, arm.pivot.rotation.z);
+      sm(el, main ? -1.1 * up - 0.25 * sweep : -0.15 - this.hurt * 0.3, 0, main ? s * 0.4 * up : 0);
+      sm(ha, main ? -0.4 * up + 0.3 * sweep : Math.sin(t * 1.7 + s) * 0.08, 0, 0);
+    }
+    const s = this.atkSide;
+    const breathe = Math.sin(t * 1.4) * 0.03;
+    sm(B.chest, 0.3 * sweep - 0.1 * up + breathe - this.hurt * 0.25, -s * (0.35 * sweep - 0.2 * up), 0);
+    sm(B.spine, 0.12 * sweep - this.hurt * 0.1 + move * 0.1, 0, Math.sin(t * 0.8) * 0.02);
+    sm(B.neck, 0.1 * up - 0.1 * sweep, s * 0.15 * sweep, 0);
+    sm(B.head, Math.sin(t * 0.7) * 0.04 + this.hurt * 0.2, Math.sin(t * 0.5) * 0.08, Math.sin(t * 0.9) * 0.03);
+    sm(B.hips, 0, 0, Math.sin(t * 0.8 + 1) * 0.03);
   }
 
   update(f: Fighter, c: FrameClock) {
@@ -446,6 +489,8 @@ export class ShadowBeast implements CharacterView {
   }
 
   dispose() {
+    this.disposed = true;
+    this.model?.dispose();
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
     for (const t of Object.values(this.tex)) {
